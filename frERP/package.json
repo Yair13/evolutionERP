@@ -1,0 +1,29 @@
+{
+  "name": "frerp",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tint-login-logo": "node scripts/tint-login-logo.mjs"
+  },
+  "dependencies": {
+    "@zxing/browser": "^0.2.0",
+    "jsbarcode": "^3.12.3",
+    "lucide-react": "^0.511.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.6.1"
+  },
+  "devDependencies": {
+    "@types/jsbarcode": "^3.11.4",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "sharp": "^0.34.2",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.12"
+  }
+}

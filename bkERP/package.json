@@ -1,0 +1,43 @@
+{
+  "name": "evolution-erp-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f postgres",
+    "db:migrate": "tsx src/migrate.ts",
+    "db:seed-admin": "tsx src/seed-admin.ts",
+    "images:reprocess": "tsx src/scripts/reprocess-product-images.ts"
+  },
+  "dependencies": {
+    "@types/compression": "^1.8.1",
+    "bcryptjs": "^3.0.2",
+    "compression": "^1.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.1.1",
+    "pg": "^8.15.4",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.1",
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^22.15.21",
+    "@types/pg": "^8.11.14",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}
