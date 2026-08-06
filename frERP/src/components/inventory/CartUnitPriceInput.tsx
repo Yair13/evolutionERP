@@ -84,6 +84,10 @@ export function CartUnitPriceInput({
           onBlur={() => {
             setFocused(false);
             commit(draftDigits);
+            /* Devuelve el foco a la pistola al terminar de editar el precio. */
+            window.setTimeout(() => {
+              document.getElementById("inv-pistol-input")?.focus({ preventScroll: true });
+            }, 0);
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {

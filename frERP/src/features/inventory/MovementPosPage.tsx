@@ -77,6 +77,9 @@ function catalogToCartLine(item: CatalogItem, qty = 1): CartLine {
   };
 }
 
+const PISTOL_DEBOUNCE_MS = 90;
+const MIN_SCAN_LENGTH = 2;
+
 export function MovementPosPage({ mode }: Props) {
   const { token, user } = useAuth();
   const navigate = useNavigate();
@@ -122,6 +125,8 @@ export function MovementPosPage({ mode }: Props) {
   const pistolBusyRef = useRef(false);
   /** Último valor del input (evita Enter con estado React vacío al pegar/pistolear). */
   const pistolValueRef = useRef("");
+  /** Siempre la versión fresca de processPistolScan (listener de pantalla). */
+  const processPistolScanRef = useRef<(raw: string) => void>(() => {});
   const draftHydratedRef = useRef<string | null>(null);
 
   const [entryType, setEntryType] = useState<
@@ -198,9 +203,6 @@ export function MovementPosPage({ mode }: Props) {
       setExitKind("sale");
     }
   }, [isFactory, exitKind]);
-
-  const PISTOL_DEBOUNCE_MS = 90;
-  const MIN_SCAN_LENGTH = 2;
 
   async function handlePreload() {
     if (!token || !warehouseId || !originInvoiceNumber.trim()) return;
@@ -399,10 +401,118 @@ export function MovementPosPage({ mode }: Props) {
     return () => window.clearTimeout(t);
   }, [catalogQuery]);
 
+  /**
+   * Receptor invisible de pistola: el foco vuelve ahí solo (sin campo visible ni teclado).
+   * Se suelta al editar precio, buscar, config, cantidad o un modal.
+   */
   useEffect(() => {
     if (hidePistol) return;
-    pistolInputRef.current?.focus();
-  }, [warehouseId, mode, hidePistol]);
+
+    const overlayOpen = scannerOpen || showConfirm || showExitCheckout;
+
+    const mayLeavePistol = (el: Element | null) => {
+      if (!el) return false;
+      if (el === pistolInputRef.current) return true;
+      if (el.closest(".inv-cart__price-edit")) return true;
+      if (el.closest(".inv-pos__catalog-search")) return true;
+      if (el.closest(".inv-pos-config")) return true;
+      if (el.closest(".inv-pos__notes")) return true;
+      if (el.closest(".inv-cart__qty") && el.tagName === "INPUT") return true;
+      if (el.closest('[role="dialog"], .inv-modal, .inv-modal-backdrop, .inv-photo-lightbox')) {
+        return true;
+      }
+      return false;
+    };
+
+    const focusPistol = () => {
+      if (overlayOpen) return;
+      const active = document.activeElement;
+      if (active instanceof Element && mayLeavePistol(active)) return;
+      pistolInputRef.current?.focus({ preventScroll: true });
+    };
+
+    focusPistol();
+
+    const onFocusIn = () => {
+      window.setTimeout(focusPistol, 0);
+    };
+    const onPointerUp = () => {
+      window.setTimeout(focusPistol, 0);
+    };
+
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("pointerup", onPointerUp);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [hidePistol, scannerOpen, showConfirm, showExitCheckout, warehouseId, mode]);
+
+  /**
+   * Respaldo: si el foco no está en un campo de texto, captura teclas de la pistola
+   * a nivel de pantalla (sin input visible).
+   */
+  useEffect(() => {
+    if (hidePistol) return;
+
+    const bufferRef = { current: "" };
+    let lastKeyAt = 0;
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+
+    const flush = () => {
+      const code = bufferRef.current.trim();
+      bufferRef.current = "";
+      if (code.length >= MIN_SCAN_LENGTH) processPistolScanRef.current(code);
+    };
+
+    const typingInField = (t: EventTarget | null) => {
+      if (!(t instanceof HTMLElement)) return false;
+      if (t === pistolInputRef.current) return false;
+      const tag = t.tagName;
+      if (tag === "TEXTAREA" || tag === "SELECT") return true;
+      if (tag === "INPUT") {
+        const type = (t as HTMLInputElement).type;
+        return !["button", "submit", "checkbox", "radio", "file", "hidden"].includes(type);
+      }
+      return t.isContentEditable;
+    };
+
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (scannerOpen || showConfirm || showExitCheckout) return;
+      if (typingInField(e.target)) return;
+      if (document.activeElement === pistolInputRef.current) return;
+
+      if (e.key === "Enter") {
+        if (bufferRef.current.length >= MIN_SCAN_LENGTH) {
+          e.preventDefault();
+          if (debounce) window.clearTimeout(debounce);
+          debounce = null;
+          flush();
+        }
+        return;
+      }
+
+      if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+
+      const now = Date.now();
+      if (now - lastKeyAt > 100) bufferRef.current = "";
+      lastKeyAt = now;
+      bufferRef.current += e.key;
+      e.preventDefault();
+
+      if (debounce) window.clearTimeout(debounce);
+      debounce = window.setTimeout(() => {
+        debounce = null;
+        flush();
+      }, PISTOL_DEBOUNCE_MS);
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      if (debounce) window.clearTimeout(debounce);
+    };
+  }, [hidePistol, scannerOpen, showConfirm, showExitCheckout]);
 
   useEffect(() => {
     if (!lastAdded) return;
@@ -536,9 +646,12 @@ export function MovementPosPage({ mode }: Props) {
       setError(err instanceof Error ? err.message : "Producto no encontrado");
     } finally {
       pistolBusyRef.current = false;
-      pistolInputRef.current?.focus();
+      pistolInputRef.current?.focus({ preventScroll: true });
     }
   }
+  processPistolScanRef.current = (raw) => {
+    void processPistolScan(raw);
+  };
 
   function onPistolChange(value: string) {
     pistolValueRef.current = value;
@@ -936,39 +1049,39 @@ export function MovementPosPage({ mode }: Props) {
       ) : null}
 
       {!hidePistol ? (
-      <div className="inv-pistol-bar">
-        <label className="inv-pistol-bar__label" htmlFor="inv-pistol-input">
-          <ScanLine size={20} strokeWidth={2} aria-hidden />
-          Pistola
-        </label>
-        <input
-          id="inv-pistol-input"
-          ref={pistolInputRef}
-          type="text"
-          className="inv-pistol-bar__input"
-          value={pistolCode}
-          onChange={(e) => onPistolChange(e.target.value)}
-          onKeyDown={onPistolKeyDown}
-          placeholder={
-            verifyMode
-              ? "Escanea aquí — verifica lo que va llegando"
-              : "Escanea aquí — se agrega solo al carrito"
-          }
-          aria-label="Código de barras con pistola"
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
-        />
-        <button
-          type="button"
-          className="inv-pistol-bar__camera"
-          title="Escanear con cámara"
-          onClick={() => setScannerOpen(true)}
-        >
-          Cámara
-        </button>
-      </div>
+        <div className="inv-pistol-status" role="status">
+          <span className="inv-pistol-status__hint">
+            <ScanLine size={18} strokeWidth={2} aria-hidden />
+            {verifyMode
+              ? "Pistolea para verificar — no hace falta tocar nada"
+              : "Pistolea cuando quieras — el producto entra al carrito solo"}
+          </span>
+          <button
+            type="button"
+            className="inv-pistol-status__camera"
+            title="Escanear con cámara"
+            onClick={() => setScannerOpen(true)}
+          >
+            Cámara
+          </button>
+          {/* Receptor invisible: la pistola escribe aquí sin campo ni teclado táctil. */}
+          <input
+            id="inv-pistol-input"
+            ref={pistolInputRef}
+            type="text"
+            className="inv-pistol-trap"
+            value={pistolCode}
+            tabIndex={-1}
+            onChange={(e) => onPistolChange(e.target.value)}
+            onKeyDown={onPistolKeyDown}
+            aria-label="Receptor de pistola de código de barras"
+            inputMode="none"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+          />
+        </div>
       ) : null}
 
       {lastAdded ? (
