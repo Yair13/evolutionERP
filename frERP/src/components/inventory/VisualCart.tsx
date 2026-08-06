@@ -46,7 +46,7 @@ export function VisualCart({
         <p>
           {locked
             ? "El carrito está vacío. Precarga el código de movimiento para traer los productos."
-            : "Carrito vacío. Pistolea o toca un producto — aquí verá el cliente lo que va llevando."}
+            : "Carrito vacío. Pistolea o toca un producto — el cliente verá aquí lo que lleva."}
         </p>
       </div>
     );

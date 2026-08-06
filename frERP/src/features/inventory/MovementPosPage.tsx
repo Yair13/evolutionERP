@@ -1,6 +1,4 @@
 import {
-  lazy,
-  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -12,7 +10,6 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
-  Boxes,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -23,14 +20,10 @@ import {
   ScanLine,
   Search,
   ShoppingCart,
-  Tag,
   TriangleAlert,
   X,
   ZoomIn,
 } from "lucide-react";
-const BarcodeScannerModal = lazy(() =>
-  import("../../components/inventory/BarcodeScannerModal.js").then((m) => ({ default: m.BarcodeScannerModal }))
-);
 import { useResolveScan } from "../../hooks/useResolveScan.js";
 import { confirmExit, confirmMovement, fetchCatalog, fetchDocumentByInvoice } from "../../api/inventory.js";
 import { DocumentInvoicePrint } from "../../components/inventory/DocumentInvoicePrint.js";
@@ -117,8 +110,10 @@ export function MovementPosPage({ mode }: Props) {
   const [lastAdded, setLastAdded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [scannerOpen, setScannerOpen] = useState(false);
-  const [cartOpen, setCartOpen] = useState(false);
+  /** En vertical/móvil el carrito empieza abierto para que el cliente lo vea. */
+  const [cartOpen, setCartOpen] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(max-width: 900px)").matches : false
+  );
   const [expandedPhoto, setExpandedPhoto] = useState<{ url: string; name: string } | null>(null);
   const pistolInputRef = useRef<HTMLInputElement>(null);
   const pistolDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -192,7 +187,6 @@ export function MovementPosPage({ mode }: Props) {
     () => EXIT_KIND_OPTIONS.filter((opt) => (opt.value === "distribution" ? isFactory : true)),
     [isFactory]
   );
-  const selectedExitKind = allowedExitKinds.find((o) => o.value === exitKind);
   // Salidas internas (van a otro almacén, no a cliente): sin valores de venta
   const isInternalExit =
     !isEntry &&
@@ -408,7 +402,7 @@ export function MovementPosPage({ mode }: Props) {
   useEffect(() => {
     if (hidePistol) return;
 
-    const overlayOpen = scannerOpen || showConfirm || showExitCheckout;
+    const overlayOpen = showConfirm || showExitCheckout;
 
     const mayLeavePistol = (el: Element | null) => {
       if (!el) return false;
@@ -416,6 +410,7 @@ export function MovementPosPage({ mode }: Props) {
       if (el.closest(".inv-cart__price-edit")) return true;
       if (el.closest(".inv-pos__catalog-search")) return true;
       if (el.closest(".inv-pos-config")) return true;
+      if (el.closest(".inv-pos-sellbar")) return true;
       if (el.closest(".inv-pos__notes")) return true;
       if (el.closest(".inv-cart__qty") && el.tagName === "INPUT") return true;
       if (el.closest('[role="dialog"], .inv-modal, .inv-modal-backdrop, .inv-photo-lightbox')) {
@@ -446,7 +441,7 @@ export function MovementPosPage({ mode }: Props) {
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("pointerup", onPointerUp);
     };
-  }, [hidePistol, scannerOpen, showConfirm, showExitCheckout, warehouseId, mode]);
+  }, [hidePistol, showConfirm, showExitCheckout, warehouseId, mode]);
 
   /**
    * Respaldo: si el foco no está en un campo de texto, captura teclas de la pistola
@@ -478,7 +473,7 @@ export function MovementPosPage({ mode }: Props) {
     };
 
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
-      if (scannerOpen || showConfirm || showExitCheckout) return;
+      if (showConfirm || showExitCheckout) return;
       if (typingInField(e.target)) return;
       if (document.activeElement === pistolInputRef.current) return;
 
@@ -512,7 +507,7 @@ export function MovementPosPage({ mode }: Props) {
       document.removeEventListener("keydown", onKeyDown, true);
       if (debounce) window.clearTimeout(debounce);
     };
-  }, [hidePistol, scannerOpen, showConfirm, showExitCheckout]);
+  }, [hidePistol, showConfirm, showExitCheckout]);
 
   useEffect(() => {
     if (!lastAdded) return;
@@ -565,6 +560,7 @@ export function MovementPosPage({ mode }: Props) {
     }
     setScannedByProduct((prev) => ({ ...prev, [item.id]: current + 1 }));
     setError(null);
+    setCartOpen(true);
     setVerifyFlash(
       current + 1 >= line.quantity
         ? `${item.name} completo (${line.quantity}/${line.quantity})`
@@ -619,7 +615,8 @@ export function MovementPosPage({ mode }: Props) {
       return [catalogToCartLine(item), ...prev];
     });
     setLastAdded(item.name);
-    pistolInputRef.current?.focus();
+    setCartOpen(true);
+    pistolInputRef.current?.focus({ preventScroll: true });
     return true;
   }
 
@@ -888,7 +885,7 @@ export function MovementPosPage({ mode }: Props) {
               : isInvoiceLinkedEntry
                 ? `Código corto + verificación con pistola · ${sessionLabel}`
                 : `Elige el tipo de ingreso · ${sessionLabel}`
-            : `Escanea, revisa el carrito y finaliza · ${sessionLabel}`
+            : "Punto de venta · pistolea o toca productos"
         }
         actions={
           <Link to="/app/inventario/historial" className="inv-btn inv-btn--ghost">
@@ -1023,15 +1020,16 @@ export function MovementPosPage({ mode }: Props) {
       ) : null}
 
       {!isEntry ? (
-        <div className="inv-pos-config inv-pos-config--exit">
-          <label className="inv-pos-config__label">
-            <span>Tipo de salida *</span>
+        <div className="inv-pos-sellbar">
+          <label className="inv-pos-sellbar__kind">
+            <span>Tipo</span>
             <select
               value={exitKind}
               onChange={(e) => {
                 setExitKind(e.target.value as ExitKind);
                 setError(null);
               }}
+              aria-label="Tipo de salida"
             >
               {allowedExitKinds.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -1040,31 +1038,40 @@ export function MovementPosPage({ mode }: Props) {
               ))}
             </select>
           </label>
-          {selectedExitKind ? (
-            <p className="inv-pos-config__hint">
-              {selectedExitKind.description}
-            </p>
+          {!hidePistol ? (
+            <div className="inv-pistol-status inv-pistol-status--inline" role="status">
+              <ScanLine size={16} strokeWidth={2} aria-hidden />
+              <span className="inv-pistol-status__hint">Listo para escanear</span>
+              <input
+                id="inv-pistol-input"
+                ref={pistolInputRef}
+                type="text"
+                className="inv-pistol-trap"
+                value={pistolCode}
+                tabIndex={-1}
+                onChange={(e) => onPistolChange(e.target.value)}
+                onKeyDown={onPistolKeyDown}
+                aria-label="Receptor de pistola de código de barras"
+                inputMode="none"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+              />
+            </div>
           ) : null}
+          <span className="inv-pos-sellbar__sede" title={sessionLabel}>
+            {sessionLabel}
+          </span>
         </div>
       ) : null}
 
-      {!hidePistol ? (
+      {isEntry && !hidePistol ? (
         <div className="inv-pistol-status" role="status">
+          <ScanLine size={16} strokeWidth={2} aria-hidden />
           <span className="inv-pistol-status__hint">
-            <ScanLine size={18} strokeWidth={2} aria-hidden />
-            {verifyMode
-              ? "Pistolea para verificar — no hace falta tocar nada"
-              : "Pistolea cuando quieras — el producto entra al carrito solo"}
+            {verifyMode ? "Listo para verificar" : "Listo para escanear"}
           </span>
-          <button
-            type="button"
-            className="inv-pistol-status__camera"
-            title="Escanear con cámara"
-            onClick={() => setScannerOpen(true)}
-          >
-            Cámara
-          </button>
-          {/* Receptor invisible: la pistola escribe aquí sin campo ni teclado táctil. */}
           <input
             id="inv-pistol-input"
             ref={pistolInputRef}
@@ -1339,29 +1346,21 @@ export function MovementPosPage({ mode }: Props) {
                   {isEntry ? (
                     <span className="inv-pos__pick-stock inv-pos__pick-stock--entry">+ agregar</span>
                   ) : (
-                    <div className="inv-pos__pick-meta">
-                      <p
-                        className={`inv-pos__pick-avail inv-pos__pick-avail--${item.quantityOnHand <= 0 ? "out" : item.stockSignal === "low" || item.stockSignal === "critical" ? "low" : "ok"}`}
+                    <div className="inv-pos__pick-meta inv-pos__pick-meta--shop">
+                      <span className="inv-pos__pick-price">{formatMoney(item.baseSalePrice)}</span>
+                      <span
+                        className={`inv-pos__pick-stock-pill inv-pos__pick-stock-pill--${
+                          item.quantityOnHand <= 0
+                            ? "out"
+                            : item.stockSignal === "low" || item.stockSignal === "critical"
+                              ? "low"
+                              : "ok"
+                        }`}
                       >
-                        <span className="inv-pos__pick-avail-icon" aria-hidden>
-                          <Boxes size={16} strokeWidth={2.25} />
-                        </span>
-                        <span className="inv-pos__pick-avail-text">
-                          <span className="inv-pos__pick-avail-label">Disponibles</span>
-                          <span className="inv-pos__pick-avail-value">
-                            {item.quantityOnHand} {item.quantityOnHand === 1 ? "unidad" : "unidades"}
-                          </span>
-                        </span>
-                      </p>
-                      <p className="inv-pos__pick-sale">
-                        <span className="inv-pos__pick-sale-icon-wrap" aria-hidden>
-                          <Tag size={14} strokeWidth={2.25} className="inv-pos__pick-sale-icon" />
-                        </span>
-                        <span className="inv-pos__pick-sale-text">
-                          <span className="inv-pos__pick-sale-label">Sugerido</span>
-                          <span className="inv-pos__pick-sale-value">{formatMoney(item.baseSalePrice)}</span>
-                        </span>
-                      </p>
+                        {item.quantityOnHand <= 0
+                          ? "Agotado"
+                          : `${item.quantityOnHand} disp.`}
+                      </span>
                     </div>
                   )}
                 </button>
@@ -1427,7 +1426,11 @@ export function MovementPosPage({ mode }: Props) {
               ? isInvoiceLinkedEntry && cart.length > 0 && !allVerified
                 ? `Faltan ${expectedTotal - verifiedTotal} por verificar`
                 : "Confirmar entrada"
-              : "Finalizar salida"}
+              : isInternalExit
+                ? "Finalizar salida"
+                : cart.length === 0
+                  ? "Cobrar venta"
+                  : `Cobrar · ${formatMoney(cartTotalValue)}`}
           </button>
         </aside>
       </div>
@@ -1460,16 +1463,6 @@ export function MovementPosPage({ mode }: Props) {
             <p className="inv-photo-lightbox__caption">{expandedPhoto.name}</p>
           </div>
         </div>
-      ) : null}
-
-      {scannerOpen ? (
-        <Suspense fallback={null}>
-          <BarcodeScannerModal
-            open={scannerOpen}
-            onClose={() => setScannerOpen(false)}
-            onDetected={(code) => void processPistolScan(code)}
-          />
-        </Suspense>
       ) : null}
 
       {showConfirm && isEntry ? (
