@@ -3654,7 +3654,7 @@ button.inv-pos__pick-media--expand:focus-visible {
   position: fixed;
   left: -10000px;
   top: 0;
-  width: 58mm;
+  width: 100mm;
   pointer-events: none;
   z-index: -1;
 }
@@ -5046,7 +5046,7 @@ button.inv-pos__pick-media--expand:focus-visible {
   }
 
   @page inv-barcode-label-page {
-    size: 100mm 70mm;
+    size: 100mm 90mm;
     margin: 0;
   }
 
@@ -5070,8 +5070,8 @@ button.inv-pos__pick-media--expand:focus-visible {
   body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet {
     display: block !important;
     width: 100mm !important;
-    height: 70mm !important;
-    padding: 5mm 6mm !important;
+    height: 90mm !important;
+    padding: 4mm 5mm !important;
     margin: 0 !important;
     box-sizing: border-box !important;
     background: #fff !important;

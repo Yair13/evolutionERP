@@ -476,21 +476,13 @@ export function MovementsHistoryPage() {
                     {isOp && !cancelled ? (
                       <button
                         type="button"
-                        className={`inv-history-card__action${labelsPrinted ? "" : " inv-history-card__action--primary"}`}
-                        disabled={labelsPrinted || labelsLoadingId === doc.id}
-                        title={
-                          labelsPrinted
-                            ? "Las etiquetas ya fueron impresas (solo una vez)"
-                            : "Imprimir etiquetas de esta orden"
-                        }
+                        className="inv-history-card__action inv-history-card__action--primary"
+                        disabled={labelsLoadingId === doc.id}
+                        title="Imprimir etiquetas de esta orden"
                         onClick={() => void openLabels(doc)}
                       >
                         <Tag size={15} strokeWidth={2} aria-hidden />
-                        {labelsLoadingId === doc.id
-                          ? "Cargando…"
-                          : labelsPrinted
-                            ? "Etiquetas impresas"
-                            : "Imprimir etiquetas"}
+                        {labelsLoadingId === doc.id ? "Cargando…" : "Imprimir etiquetas"}
                       </button>
                     ) : null}
                     {!cancelled && canManageEditing ? (

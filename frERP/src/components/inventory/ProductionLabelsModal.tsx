@@ -1,6 +1,6 @@
 import JsBarcode from "jsbarcode";
 import { Printer, Tag, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { markLabelsPrinted } from "../../api/inventory.js";
 import type { InventoryDocumentDetail } from "../../features/inventory/inventory.types.js";
@@ -22,21 +22,43 @@ type Props = {
   onPrinted: (updated: InventoryDocumentDetail) => void;
 };
 
-const BARCODE_PRINT = {
-  format: "CODE128" as const,
-  width: 2.4,
-  height: 70,
-  displayValue: false,
-  margin: 2,
-};
+function BarcodeCanvas({ value }: { value: string }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-function renderBarcode(svg: SVGSVGElement | null, value: string) {
-  if (!svg || !value) return;
-  try {
-    JsBarcode(svg, value, BARCODE_PRINT);
-  } catch {
-    /* ignore */
-  }
+  useEffect(() => {
+    if (!canvasRef.current || !value) return;
+    try {
+      JsBarcode(canvasRef.current, value, {
+        format: "CODE128",
+        width: 2,
+        height: 75,
+        displayValue: true,
+        font: "monospace",
+        fontSize: 14,
+        fontOptions: "bold",
+        textMargin: 4,
+        margin: 15,
+        background: "#ffffff",
+        lineColor: "#000000",
+      });
+    } catch (e) {
+      console.error("Barcode render error:", e);
+    }
+  }, [value]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        display: "block",
+        margin: "0 auto",
+        maxWidth: "100%",
+        height: "auto",
+        background: "#ffffff",
+        imageRendering: "pixelated",
+      }}
+    />
+  );
 }
 
 export function ProductionLabelsModal({ document: doc, token, warehouseId, onClose, onPrinted }: Props) {
@@ -71,7 +93,7 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
   const withoutBarcode = doc.lines.filter((l) => !l.barcode).length;
 
   async function handlePrint() {
-    if (alreadyPrinted || printing || labelItems.length === 0) return;
+    if (printing || labelItems.length === 0) return;
     setPrinting(true);
     setError(null);
 
@@ -89,18 +111,14 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
         onPrinted(item);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Error";
-        if (msg === "labels_already_printed") {
-          setError("Las etiquetas de esta orden ya fueron impresas.");
-        } else {
-          setError(msg === "not_a_production_order" ? "Este documento no es una orden de producción." : msg);
-        }
+        setError(msg === "not_a_production_order" ? "Este documento no es una orden de producción." : msg);
       } finally {
         setPrinting(false);
       }
     };
 
     window.addEventListener("afterprint", () => void finish(), { once: true });
-    window.setTimeout(() => window.print(), 80);
+    window.setTimeout(() => window.print(), 250);
   }
 
   const sheets = labelItems.flatMap((item) =>
@@ -160,24 +178,7 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
             </p>
           </div>
           <div className="inv-barcode-sheet__code" style={{ textAlign: "center" }}>
-            <svg
-              ref={(svg) => renderBarcode(svg, sheet.barcode)}
-              role="img"
-              aria-hidden
-              style={{ display: "block", margin: "0 auto", maxWidth: "90%" }}
-            />
-            <p
-              className="inv-barcode-sheet__digits"
-              style={{
-                fontSize: "11px",
-                fontWeight: "bold",
-                letterSpacing: "0.12em",
-                marginTop: "4px",
-                color: "#334155",
-              }}
-            >
-              {sheet.barcode}
-            </p>
+            <BarcodeCanvas value={sheet.barcode} />
           </div>
         </article>
       ))}
@@ -207,16 +208,6 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
             <X size={16} strokeWidth={2} aria-hidden />
           </button>
         </div>
-
-        {alreadyPrinted ? (
-          <p className="form-error" role="status" style={{ marginTop: 14 }}>
-            Las etiquetas de esta orden ya fueron impresas
-            {doc.labelsPrintedAt
-              ? ` el ${new Date(doc.labelsPrintedAt).toLocaleString("es-CO")}`
-              : ""}
-            . Solo se pueden generar una vez.
-          </p>
-        ) : null}
 
         {error ? (
           <p className="form-error" role="alert" style={{ marginTop: 14 }}>
@@ -268,18 +259,12 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
           <button
             type="button"
             className="inv-btn inv-btn--primary"
-            disabled={alreadyPrinted || printing || labelItems.length === 0}
-            title={
-              alreadyPrinted
-                ? "Ya fueron impresas"
-                : labelItems.length === 0
-                  ? "Sin productos con código"
-                  : "Imprimir etiquetas"
-            }
+            disabled={printing || labelItems.length === 0}
+            title={labelItems.length === 0 ? "Sin productos con código" : "Imprimir etiquetas"}
             onClick={() => void handlePrint()}
           >
             <Printer size={16} strokeWidth={2} aria-hidden />
-            {printing ? "Imprimiendo…" : alreadyPrinted ? "Ya impresas" : `Imprimir ${totalLabels}`}
+            {printing ? "Imprimiendo…" : `Imprimir ${totalLabels}`}
           </button>
         </div>
       </div>

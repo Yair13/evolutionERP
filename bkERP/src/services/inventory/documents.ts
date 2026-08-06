@@ -1707,9 +1707,6 @@ export async function markLabelsPrinted(
     if (doc.status === "cancelled") {
       throw Object.assign(new Error("document_already_cancelled"), { code: "document_already_cancelled" });
     }
-    if (meta.labelsPrintedAt) {
-      throw Object.assign(new Error("labels_already_printed"), { code: "labels_already_printed" });
-    }
 
     const printedAt = new Date().toISOString();
     const nextMeta = { ...meta, labelsPrintedAt: printedAt, labelsPrintedBy: auth.userId };
