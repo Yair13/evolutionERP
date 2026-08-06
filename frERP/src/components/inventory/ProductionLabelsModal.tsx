@@ -70,7 +70,6 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
     setPortalReady(true);
   }, []);
 
-  const alreadyPrinted = Boolean(doc.labelsPrintedAt ?? doc.metadata?.labelsPrintedAt);
   const orderCode = doc.productionOrderCode || doc.invoiceNumber || "—";
   const dateLabel = doc.completedAt
     ? doc.completedAt.slice(0, 10)
