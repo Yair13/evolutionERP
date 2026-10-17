@@ -31,13 +31,13 @@ function BarcodeCanvas({ value }: { value: string }) {
       JsBarcode(canvasRef.current, value, {
         format: "CODE128",
         width: 2,
-        height: 75,
+        height: 48,
         displayValue: true,
         font: "monospace",
-        fontSize: 14,
+        fontSize: 13,
         fontOptions: "bold",
-        textMargin: 4,
-        margin: 15,
+        textMargin: 3,
+        margin: 4,
         background: "#ffffff",
         lineColor: "#000000",
       });
@@ -49,10 +49,12 @@ function BarcodeCanvas({ value }: { value: string }) {
   return (
     <canvas
       ref={canvasRef}
+      className="inv-barcode-sheet__canvas"
       style={{
         display: "block",
         margin: "0 auto",
         maxWidth: "100%",
+        maxHeight: "24mm",
         height: "auto",
         background: "#ffffff",
         imageRendering: "pixelated",
@@ -138,41 +140,48 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
               justifyContent: "space-between",
               alignItems: "center",
               width: "100%",
-              borderBottom: "2px solid #0d9488",
-              paddingBottom: "4px",
-              marginBottom: "8px",
+              borderBottom: "1.5px solid #0d9488",
+              paddingBottom: "3px",
+              marginBottom: "4px",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <img src={LOGO_SRC} alt="" className="inv-barcode-sheet__logo" width={40} height={40} />
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <img src={LOGO_SRC} alt="" className="inv-barcode-sheet__logo" width={34} height={34} />
               <div className="inv-barcode-sheet__brand-text">
-                <strong style={{ fontSize: "14px", color: "#0f766e" }}>Evolution</strong>
-                <span style={{ fontSize: "9px", color: "#64748b", textTransform: "uppercase" }}>
+                <strong style={{ fontSize: "13px", color: "#0f766e" }}>Evolution</strong>
+                <span style={{ fontSize: "8px", color: "#64748b", textTransform: "uppercase" }}>
                   Colchones S.A.S
                 </span>
               </div>
             </div>
-            <div style={{ fontSize: "11px", color: "#475569", fontWeight: "bold" }}>Fecha: {dateLabel}</div>
+            <div className="inv-barcode-sheet__date" style={{ fontSize: "10px", color: "#475569", fontWeight: "bold" }}>
+              Fecha: {dateLabel}
+            </div>
           </header>
-          <div className="inv-barcode-sheet__body" style={{ marginBottom: "8px" }}>
+          <div className="inv-barcode-sheet__body" style={{ marginBottom: "4px" }}>
             <p
               className="inv-barcode-sheet__name"
-              style={{ fontSize: "15px", fontWeight: 800, margin: "0 0 4px", color: "#0f172a" }}
+              style={{ fontSize: "13px", fontWeight: 800, margin: "0 0 2px", color: "#0f172a", lineHeight: 1.15 }}
             >
               {sheet.name}
             </p>
             <div
+              className="inv-barcode-sheet__ref"
               style={{
                 display: "flex",
                 justifyContent: "space-between",
-                fontSize: "12px",
+                fontSize: "11px",
                 color: "#475569",
-                margin: "0 0 4px",
+                margin: "0 0 2px",
+                lineHeight: 1.2,
               }}
             >
               <span>Ref: {sheet.referenceCode || "—"}</span>
             </div>
-            <p style={{ margin: "0 0 6px", fontSize: "12px", fontWeight: "bold", color: "#0f172a" }}>
+            <p
+              className="inv-barcode-sheet__op"
+              style={{ margin: 0, fontSize: "11px", fontWeight: "bold", color: "#0f172a", lineHeight: 1.2 }}
+            >
               Orden Prod: {orderCode}
             </p>
           </div>

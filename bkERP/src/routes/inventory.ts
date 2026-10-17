@@ -275,7 +275,12 @@ export function createInventoryRouter(): Router {
       return;
     }
     const auth = req.auth!;
-    const docType = req.query.docType === "entry" || req.query.docType === "exit" ? req.query.docType : undefined;
+    const docType =
+      req.query.docType === "entry" ||
+      req.query.docType === "exit" ||
+      req.query.docType === "adjustment"
+        ? req.query.docType
+        : undefined;
     const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
     const offset = req.query.offset != null ? Number(req.query.offset) : undefined;
     const ymdRe = /^\d{4}-\d{2}-\d{2}$/;
@@ -303,7 +308,7 @@ export function createInventoryRouter(): Router {
         return;
       }
       warehouseId = qWh;
-    } else if (auth.warehouseIds !== null) {
+    } else if (auth.warehouseIds !== null && !auth.hasAdminAccess) {
       if (auth.warehouseIds.length === 1) {
         warehouseId = auth.warehouseIds[0]!;
       } else if (auth.warehouseIds.length === 0) {
@@ -988,6 +993,15 @@ export function createInventoryRouter(): Router {
       return;
     }
     const rawProducts = req.body?.products;
+    const updateExisting =
+      req.body?.updateExisting !== undefined ? Boolean(req.body.updateExisting) : true;
+    const defaultCategoryId =
+      typeof req.body?.categoryId === "string" && isUuid(req.body.categoryId)
+        ? req.body.categoryId
+        : null;
+    const defaultHasBarcode =
+      typeof req.body?.hasBarcode === "boolean" ? req.body.hasBarcode : true;
+
     if (!Array.isArray(rawProducts) || rawProducts.length === 0) {
       res.status(400).json({ error: "products_required" });
       return;
@@ -995,29 +1009,96 @@ export function createInventoryRouter(): Router {
 
     const client = await pool.connect();
     let imported = 0;
+    let updated = 0;
     let duplicates = 0;
 
     try {
       await client.query("BEGIN");
 
-      for (const p of rawProducts) {
-        const name = typeof p.name === "string" ? p.name.trim() : "";
-        const referenceCode = typeof p.referenceCode === "string" ? p.referenceCode.trim() : "";
-        const baseSalePrice = Number(p.baseSalePrice) || 0;
-        const productionCost = p.productionCost != null ? Number(p.productionCost) : 0;
-        
+      for (let idx = 0; idx < rawProducts.length; idx++) {
+        const p = rawProducts[idx];
+        const name = typeof p?.name === "string" ? p.name.trim() : "";
+        const referenceCode =
+          typeof p?.referenceCode === "string" ? p.referenceCode.trim().toUpperCase() : "";
+        const baseSalePrice = Number(p?.baseSalePrice) || 0;
+        const productionCost = p?.productionCost != null ? Number(p.productionCost) || 0 : 0;
+        const categoryId =
+          typeof p?.categoryId === "string" && isUuid(p.categoryId)
+            ? p.categoryId
+            : defaultCategoryId;
+        const hasBarcode =
+          typeof p?.hasBarcode === "boolean" ? p.hasBarcode : defaultHasBarcode;
+
         if (!name || !referenceCode) continue;
 
+        const marginPercent =
+          baseSalePrice > 0
+            ? Math.round(((baseSalePrice - productionCost) / baseSalePrice) * 10000) / 100
+            : null;
+        const barcode = hasBarcode ? generateProductBarcode(referenceCode) : null;
+        const savepoint = `sp_bulk_${idx}`;
+
+        await client.query(`SAVEPOINT ${savepoint}`);
         try {
-          const barcode = generateProductBarcode(referenceCode);
+          if (updateExisting) {
+            const { rows: existing } = await client.query<{ id: string }>(
+              `SELECT id::text FROM products WHERE upper(reference_code) = $1 OR upper(internal_code) = $1 LIMIT 1`,
+              [referenceCode]
+            );
+            if (existing[0]) {
+              await client.query(
+                `UPDATE products
+                 SET name = $1,
+                     reference_code = $2,
+                     internal_code = $2,
+                     base_sale_price = $3,
+                     production_cost = CASE WHEN $4 > 0 THEN $4 ELSE production_cost END,
+                     margin_percent = $5,
+                     category_id = COALESCE($6::uuid, category_id),
+                     barcode = $7,
+                     updated_at = now()
+                 WHERE id = $8::uuid`,
+                [
+                  name,
+                  referenceCode,
+                  baseSalePrice,
+                  productionCost,
+                  marginPercent,
+                  categoryId,
+                  barcode,
+                  existing[0].id,
+                ]
+              );
+              updated++;
+              await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+              continue;
+            }
+          }
+
           await client.query(
-            `INSERT INTO products (name, reference_code, base_sale_price, production_cost, barcode, unit, status)
-             VALUES ($1, $2, $3, $4, $5, 'und', 'active')`,
-            [name, referenceCode, baseSalePrice, productionCost, barcode]
+            `INSERT INTO products (
+               name, reference_code, internal_code, category_id,
+               base_sale_price, production_cost, margin_percent, barcode, unit, status
+             )
+             VALUES ($1, $2, $3, $4::uuid, $5, $6, $7, $8, 'und', 'active')`,
+            [
+              name,
+              referenceCode,
+              referenceCode,
+              categoryId,
+              baseSalePrice,
+              productionCost,
+              marginPercent,
+              barcode,
+            ]
           );
           imported++;
-        } catch (err: any) {
-          if (err.code === "23505") {
+          await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+        } catch (err: unknown) {
+          await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+          await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+          const pgErr = err as { code?: string };
+          if (pgErr.code === "23505") {
             duplicates++;
           } else {
             throw err;
@@ -1026,7 +1107,7 @@ export function createInventoryRouter(): Router {
       }
 
       await client.query("COMMIT");
-      res.status(201).json({ success: true, imported, duplicates });
+      res.status(201).json({ success: true, imported, updated, duplicates });
     } catch (err) {
       await client.query("ROLLBACK");
       next(err);
@@ -1244,6 +1325,10 @@ export function createInventoryRouter(): Router {
         });
         return;
       }
+      if (code === "initial_count_requires_admin") {
+        res.status(403).json({ error: code });
+        return;
+      }
       if (code === "no_active_products" || code === "warehouse_not_found") {
         res.status(400).json({ error: code });
         return;
@@ -1299,9 +1384,16 @@ export function createInventoryRouter(): Router {
         code === "count_not_open" ||
         code === "product_not_found" ||
         code === "invalid_quantity" ||
-        code === "warehouse_forbidden"
+        code === "warehouse_forbidden" ||
+        code === "initial_count_requires_admin"
       ) {
-        res.status(code === "warehouse_forbidden" ? 403 : code === "count_not_found" ? 404 : 400).json({
+        res.status(
+          code === "warehouse_forbidden" || code === "initial_count_requires_admin"
+            ? 403
+            : code === "count_not_found"
+              ? 404
+              : 400
+        ).json({
           error: code,
         });
         return;
@@ -1326,8 +1418,19 @@ export function createInventoryRouter(): Router {
       res.json({ item });
     } catch (err) {
       const code = (err as { code?: string })?.code;
-      if (code === "count_not_found" || code === "count_not_open" || code === "warehouse_forbidden") {
-        res.status(code === "warehouse_forbidden" ? 403 : code === "count_not_found" ? 404 : 400).json({
+      if (
+        code === "count_not_found" ||
+        code === "count_not_open" ||
+        code === "warehouse_forbidden" ||
+        code === "initial_count_requires_admin"
+      ) {
+        res.status(
+          code === "warehouse_forbidden" || code === "initial_count_requires_admin"
+            ? 403
+            : code === "count_not_found"
+              ? 404
+              : 400
+        ).json({
           error: code,
         });
         return;
@@ -1352,8 +1455,19 @@ export function createInventoryRouter(): Router {
       res.json({ item });
     } catch (err) {
       const code = (err as { code?: string })?.code;
-      if (code === "count_not_found" || code === "count_not_open" || code === "warehouse_forbidden") {
-        res.status(code === "warehouse_forbidden" ? 403 : code === "count_not_found" ? 404 : 400).json({
+      if (
+        code === "count_not_found" ||
+        code === "count_not_open" ||
+        code === "warehouse_forbidden" ||
+        code === "initial_count_requires_admin"
+      ) {
+        res.status(
+          code === "warehouse_forbidden" || code === "initial_count_requires_admin"
+            ? 403
+            : code === "count_not_found"
+              ? 404
+              : 400
+        ).json({
           error: code,
         });
         return;
@@ -1379,8 +1493,19 @@ export function createInventoryRouter(): Router {
       res.json({ item });
     } catch (err) {
       const code = (err as { code?: string })?.code;
-      if (code === "count_not_found" || code === "count_not_open" || code === "warehouse_forbidden") {
-        res.status(code === "warehouse_forbidden" ? 403 : code === "count_not_found" ? 404 : 400).json({
+      if (
+        code === "count_not_found" ||
+        code === "count_not_open" ||
+        code === "warehouse_forbidden" ||
+        code === "initial_count_requires_admin"
+      ) {
+        res.status(
+          code === "warehouse_forbidden" || code === "initial_count_requires_admin"
+            ? 403
+            : code === "count_not_found"
+              ? 404
+              : 400
+        ).json({
           error: code,
         });
         return;

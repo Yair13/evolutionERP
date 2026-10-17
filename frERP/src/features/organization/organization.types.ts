@@ -15,6 +15,7 @@ export type UserRow = {
   email: string;
   fullName: string;
   isActive: boolean;
+  hasAdminAccess: boolean;
   createdAt: string;
   roles: string[];
   warehouseIds: string[];

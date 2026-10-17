@@ -249,10 +249,11 @@ export async function createProduct(
   const sale = Number(input.baseSalePrice) || 0;
   const cost = includeCost ? Number(input.productionCost ?? 0) : 0;
   const margin = calcMargin(sale, cost);
+  const cleanRef = input.referenceCode.trim().toUpperCase();
   const barcode =
     input.hasBarcode === false
       ? null
-      : input.barcode?.trim() || generateProductBarcode(input.referenceCode.trim());
+      : input.barcode?.trim().toUpperCase() || generateProductBarcode(cleanRef);
 
   const client = await pool.connect();
   try {
@@ -268,9 +269,9 @@ export async function createProduct(
       RETURNING id::text
       `,
       [
-        input.referenceCode.trim(),
+        cleanRef,
         input.sku?.trim() || null,
-        input.internalCode?.trim() || null,
+        input.internalCode?.trim().toUpperCase() || cleanRef,
         input.name.trim(),
         input.description?.trim() || null,
         input.categoryId || null,

@@ -133,9 +133,6 @@ export function InventoryProductPage() {
         scope={<InvScopeBar focus="stock" allowAllWarehouses requireSingleWarehouse />}
         actions={
           <>
-            <Link to={`/app/productos/${id}`} className="inv-btn inv-btn--ghost">
-              Ficha de producto
-            </Link>
             <Link to="/app/inventario/entrada" className="inv-btn inv-btn--primary">
               Entrada
             </Link>

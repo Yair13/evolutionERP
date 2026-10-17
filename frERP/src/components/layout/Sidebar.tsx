@@ -8,16 +8,21 @@ import {
   History,
   Wallet,
   Building2,
-  Cpu,
   LayoutDashboard,
   Package,
+  PackagePlus,
   PackageSearch,
+  PanelLeftClose,
+  PanelLeftOpen,
   Sparkles,
+  Upload,
   Users,
+  X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.js";
+import { useWarehouse } from "../../context/WarehouseContext.js";
 
 type NavItemProps = {
   to: string;
@@ -34,7 +39,7 @@ function NavItem({ to, end, icon: Icon, label, hint, onNavigate, nested }: NavIt
     <NavLink
       to={to}
       end={end}
-      title={hint}
+      title={hint ?? label}
       onClick={onNavigate}
       className={({ isActive }) =>
         `nav-item${nested ? " nav-item--nested" : ""}${isActive ? " nav-item--active" : ""}`
@@ -92,7 +97,7 @@ function NavGroup({ label, icon: Icon, hint, matchPaths, items, onNavigate, spac
       <button
         type="button"
         className={`nav-item nav-item--group${active ? " nav-item--active" : ""}`}
-        title={hint}
+        title={hint ?? label}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
@@ -128,37 +133,27 @@ function NavGroup({ label, icon: Icon, hint, matchPaths, items, onNavigate, spac
 
 type SidebarProps = {
   open: boolean;
+  pinned?: boolean;
+  onTogglePin?: () => void;
   onNavigate?: () => void;
 };
 
-export function Sidebar({ open, onNavigate }: SidebarProps) {
+export function Sidebar({ open, pinned = false, onTogglePin, onNavigate }: SidebarProps) {
   const { user } = useAuth();
+  const { isAllWarehouses, sessionLabel } = useWarehouse();
+  const [hovered, setHovered] = useState(false);
   const isSuperAdmin = user?.roles.includes("super_admin") ?? false;
   const canOrgAdmin = user?.roles.some((r) => r === "super_admin" || r === "secretaria") ?? false;
-  const hasFullAccess = canOrgAdmin;
 
-  const systemItems: NavGroupChild[] = [];
-  if (isSuperAdmin) {
-    systemItems.push({
-      to: "/app/configuracion/almacenes",
-      end: true,
-      icon: Building2,
-      label: "Sedes",
-      hint: "Estructura de almacenes (super admin)",
-    });
-  }
-  if (canOrgAdmin) {
-    systemItems.push({
-      to: "/app/configuracion/usuarios",
-      end: true,
-      icon: Users,
-      label: "Usuarios",
-      hint: "Cuentas y permisos",
-    });
-  }
+  const isExpanded = open || pinned || hovered;
 
   return (
-    <aside className={`nav-rail${open ? " nav-rail--open" : ""}`} aria-label="Navegación principal">
+    <aside
+      className={`nav-rail${open ? " nav-rail--open" : ""}${pinned ? " nav-rail--pinned" : ""}${isExpanded ? " nav-rail--expanded" : " nav-rail--collapsed"}`}
+      aria-label="Navegación principal"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       <div className="nav-rail__ambient" aria-hidden />
 
       <div className="nav-brand">
@@ -172,81 +167,191 @@ export function Sidebar({ open, onNavigate }: SidebarProps) {
             colchones · S.A.S
           </span>
         </div>
+        {onTogglePin ? (
+          <button
+            type="button"
+            className={`nav-rail__pin${pinned ? " is-pinned" : ""}`}
+            onClick={onTogglePin}
+            title={pinned ? "Contraer menú automáticamente al alejarse" : "Mantener menú fijo abierto"}
+            aria-label={pinned ? "Contraer menú automáticamente al alejarse" : "Mantener menú fijo abierto"}
+            aria-pressed={pinned}
+          >
+            {pinned ? <PanelLeftClose size={16} strokeWidth={2} /> : <PanelLeftOpen size={16} strokeWidth={2} />}
+          </button>
+        ) : null}
+        {onNavigate ? (
+          <button
+            type="button"
+            className="nav-rail__close"
+            onClick={onNavigate}
+            aria-label="Cerrar menú"
+            title="Cerrar menú"
+          >
+            <X size={18} strokeWidth={2.2} aria-hidden />
+          </button>
+        ) : null}
       </div>
 
       <nav className="nav-stack" aria-label="Módulos">
         <p className="nav-section">
           <span className="nav-section__line" aria-hidden />
-          Operación
+          <span className="nav-section__label">{isAllWarehouses ? "Gestión General" : "Operación"}</span>
         </p>
-        <NavItem to="/app" end icon={LayoutDashboard} label="Panel" hint="Resumen y KPIs" onNavigate={onNavigate} />
         <NavItem
-          to="/app/productos"
-          icon={Package}
-          label="Productos"
-          hint="Catálogo de toda la empresa"
-          onNavigate={onNavigate}
-        />
-        <NavGroup
-          label="Inventario"
-          icon={PackageSearch}
-          hint="Stock y cierre por sede"
-          matchPaths={[
-            "/app/inventario",
-            "/app/inventario/cierre",
-            "/app/inventario/producto/*",
-          ]}
-          onNavigate={onNavigate}
-          items={[
-            {
-              to: "/app/inventario",
-              end: true,
-              icon: PackageSearch,
-              label: "Stock",
-              hint: "Existencias por sede",
-            },
-            {
-              to: "/app/inventario/cierre",
-              end: true,
-              icon: ClipboardCheck,
-              label: "Cierre",
-              hint: "Inventario inicial y cierre de descuadre",
-            },
-          ]}
-        />
-        <NavItem
-          to="/app/inventario/semaforo"
+          to="/app"
           end
-          icon={Gauge}
-          label="Alertas de stock"
-          hint="Stock bajo, crítico y sin existencias por sede"
+          icon={LayoutDashboard}
+          label="Panel"
+          hint={isAllWarehouses ? "Resumen consolidado de la empresa" : "Resumen y KPIs de la sede"}
           onNavigate={onNavigate}
         />
-        <NavItem
-          to="/app/inventario/entrada"
-          end
-          icon={ArrowDownToLine}
-          label="Entrada"
-          hint="Recepción visual de stock"
-          onNavigate={onNavigate}
-        />
-        <NavItem
-          to="/app/inventario/salida"
-          end
-          icon={ArrowUpFromLine}
-          label="Salida"
-          hint="Salida tipo punto de venta"
-          onNavigate={onNavigate}
-        />
-        <NavItem
-          to="/app/inventario/historial"
-          end
-          icon={History}
-          label="Historial"
-          hint="Entradas y salidas registradas"
-          onNavigate={onNavigate}
-        />
-        {isSuperAdmin ? (
+
+        {isAllWarehouses ? (
+          <NavGroup
+            label="Productos"
+            icon={Package}
+            hint="Catálogo, creación, cargue masivo e inventario inicial"
+            matchPaths={[
+              "/app/productos/*",
+              "/app/inventario/inicial",
+            ]}
+            onNavigate={onNavigate}
+            items={[
+              {
+                to: "/app/productos",
+                end: true,
+                icon: Package,
+                label: "Catálogo",
+                hint: "Catálogo de productos de toda la empresa",
+              },
+              {
+                to: "/app/productos/nuevo",
+                end: true,
+                icon: PackagePlus,
+                label: "Crear producto",
+                hint: "Registrar un nuevo producto en el catálogo",
+              },
+              {
+                to: "/app/productos/cargue-masivo",
+                end: true,
+                icon: Upload,
+                label: "Cargue masivo",
+                hint: "Importar productos masivamente",
+              },
+              {
+                to: "/app/inventario/inicial",
+                end: true,
+                icon: ClipboardCheck,
+                label: "Inventario inicial",
+                hint: "Cargue de inventario inicial seleccionando por sede",
+              },
+            ]}
+          />
+        ) : null}
+
+        {!isAllWarehouses ? (
+          <>
+            <NavGroup
+              label="Inventario"
+              icon={PackageSearch}
+              hint="Stock y cierre de la sede"
+              matchPaths={[
+                "/app/inventario",
+                "/app/inventario/cierre",
+                "/app/inventario/producto/*",
+              ]}
+              onNavigate={onNavigate}
+              items={[
+                {
+                  to: "/app/inventario",
+                  end: true,
+                  icon: PackageSearch,
+                  label: "Stock",
+                  hint: "Existencias de esta sede",
+                },
+                {
+                  to: "/app/inventario/cierre",
+                  end: true,
+                  icon: ClipboardCheck,
+                  label: "Cierre",
+                  hint: "Cierre y cuadre de descuadre físico",
+                },
+              ]}
+            />
+            <NavItem
+              to="/app/inventario/semaforo"
+              end
+              icon={Gauge}
+              label="Alertas de stock"
+              hint="Stock bajo, crítico y sin existencias en esta sede"
+              onNavigate={onNavigate}
+            />
+            <NavGroup
+              label="Entradas"
+              icon={ArrowDownToLine}
+              hint="Recepción e historial de entradas de la sede"
+              matchPaths={[
+                "/app/inventario/entrada",
+                "/app/inventario/entradas/*",
+              ]}
+              onNavigate={onNavigate}
+              items={[
+                {
+                  to: "/app/inventario/entrada",
+                  end: true,
+                  icon: ArrowDownToLine,
+                  label: "Nueva entrada",
+                  hint: "Recepción visual de stock",
+                },
+                {
+                  to: "/app/inventario/entradas/historial",
+                  end: true,
+                  icon: History,
+                  label: "Listado de entradas",
+                  hint: "Entradas y órdenes registradas en esta sede",
+                },
+              ]}
+            />
+            <NavGroup
+              label="Ventas y salidas"
+              icon={ArrowUpFromLine}
+              hint="Punto de venta y listado de ventas de la sede"
+              matchPaths={[
+                "/app/inventario/salida",
+                "/app/inventario/salidas/*",
+              ]}
+              onNavigate={onNavigate}
+              items={[
+                {
+                  to: "/app/inventario/salida",
+                  end: true,
+                  icon: ArrowUpFromLine,
+                  label: "Nueva venta / salida",
+                  hint: "Salida tipo punto de venta",
+                },
+                {
+                  to: "/app/inventario/salidas/historial",
+                  end: true,
+                  icon: History,
+                  label: "Listado de ventas",
+                  hint: "Ventas y salidas registradas en esta sede",
+                },
+              ]}
+            />
+          </>
+        ) : null}
+
+        {isAllWarehouses ? (
+          <NavItem
+            to="/app/inventario/historial"
+            end
+            icon={History}
+            label="Historial"
+            hint="Historial de entradas y salidas de todas las sedes"
+            onNavigate={onNavigate}
+          />
+        ) : null}
+        {isAllWarehouses && isSuperAdmin ? (
           <NavItem
             to="/app/inventario/utilidades"
             end
@@ -257,26 +362,38 @@ export function Sidebar({ open, onNavigate }: SidebarProps) {
           />
         ) : null}
 
-        {systemItems.length > 0 ? (
-          <NavGroup
-            label="Sistema"
-            icon={Cpu}
-            hint="Sedes y usuarios"
-            matchPaths={["/app/configuracion/*"]}
+        {isAllWarehouses && isSuperAdmin ? (
+          <NavItem
+            to="/app/configuracion/almacenes"
+            end
+            icon={Building2}
+            label="Sedes"
+            hint="Estructura de almacenes (super admin)"
             onNavigate={onNavigate}
-            items={systemItems}
-            spaced
+          />
+        ) : null}
+        {isAllWarehouses && canOrgAdmin ? (
+          <NavItem
+            to="/app/configuracion/usuarios"
+            end
+            icon={Users}
+            label="Usuarios y permisos"
+            hint="Cuentas, roles y sedes asignadas"
+            onNavigate={onNavigate}
           />
         ) : null}
       </nav>
 
       <div className="nav-rail__footer">
-        {hasFullAccess ? (
-          <span className="nav-access-pill" title="Tu rol opera sobre toda la empresa">
-            <span className="nav-access-pill__dot" aria-hidden />
-            Acceso total · todas las sedes
+        <span
+          className="nav-access-pill"
+          title={isAllWarehouses ? "Sesión en Sede Administrativa" : `Operando en ${sessionLabel}`}
+        >
+          <span className="nav-access-pill__dot" aria-hidden />
+          <span className="nav-access-pill__label">
+            {isAllWarehouses ? "Sede Administrativa" : sessionLabel}
           </span>
-        ) : null}
+        </span>
         <span className="nav-version">v0.1</span>
         <span className="nav-env">entorno interno</span>
       </div>

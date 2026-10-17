@@ -57,9 +57,9 @@ export function UtilitiesPage() {
   return (
     <div className="inv-page inv-util">
       <header className="inv-page__header">
-        <Link to="/app/inventario" className="inv-back">
+        <Link to="/app" className="inv-back">
           <ArrowLeft size={18} strokeWidth={2} aria-hidden />
-          Inventario
+          Panel
         </Link>
         <div className="inv-page__title-row">
           <div>

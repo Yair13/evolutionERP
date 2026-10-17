@@ -62,6 +62,7 @@ export function createAuthRouter(): Router {
           email: ctx.email,
           fullName: ctx.fullName,
           roles: ctx.roles,
+          hasAdminAccess: ctx.hasAdminAccess,
           warehouseIds: ctx.warehouseIds,
         },
       });
@@ -77,6 +78,7 @@ export function createAuthRouter(): Router {
       email: a.email,
       fullName: a.fullName,
       roles: a.roles,
+      hasAdminAccess: a.hasAdminAccess,
       warehouseIds: a.warehouseIds,
     });
   });

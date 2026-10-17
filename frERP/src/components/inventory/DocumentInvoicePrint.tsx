@@ -81,16 +81,21 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
   }
 
   const isEntry = doc.docType === "entry";
+  const isAdjustment = doc.docType === "adjustment";
   const kind = documentTypeLabel(doc);
-  const title = isEntry ? "Comprobante de entrada" : "Comprobante de salida";
+  const title = isAdjustment
+    ? "Comprobante de ajuste de inventario"
+    : isEntry
+      ? "Comprobante de entrada"
+      : "Comprobante de salida";
   const isOp = Boolean(
     doc.productionOrderCode || doc.entryType === "production_order" || doc.metadata?.entryType === "production_order"
   );
-  const accent = isOp ? "op" : isEntry ? "entry" : "exit";
-  // Movimientos internos entre almacenes: no se muestran valores de venta
+  const accent = isOp ? "op" : isEntry || isAdjustment ? "entry" : "exit";
+  // Movimientos internos entre almacenes o ajustes de conteo: no se muestran valores de venta
   const internalExit =
     doc.exitKind === "distribution" || doc.exitKind === "transfer" || doc.exitKind === "return_to_factory";
-  const showValues = !isEntry && !internalExit;
+  const showValues = !isEntry && !isAdjustment && !internalExit;
   const lineCount = doc.lines.length;
   const density =
     lineCount <= 3 ? "sparse" : lineCount <= 8 ? "cozy" : lineCount <= 16 ? "dense" : "packed";

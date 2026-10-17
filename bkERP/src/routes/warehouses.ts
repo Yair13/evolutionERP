@@ -5,13 +5,18 @@ import { isUuid } from "../lib/uuid.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { requireAnyRole } from "../middleware/requireRoles.js";
 
-/** Listado completo + alta/edición de sedes: solo super administración. */
+/** Alta/edición de sedes: solo super administración. */
 const superAdminOnly = requireAnyRole("super_admin");
 
 export function createWarehousesRouter(): Router {
   const r = Router();
 
-  r.get("/manage", requireAuth, superAdminOnly, async (_req, res, next) => {
+  r.get("/manage", requireAuth, async (req, res, next) => {
+    const auth = req.auth!;
+    if (!auth.hasAdminAccess && !auth.roles.some((c) => c === "super_admin" || c === "secretaria")) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
     const pool = getPool();
     if (!pool) {
       res.status(503).json({ error: "database_not_configured" });

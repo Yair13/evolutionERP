@@ -6,8 +6,12 @@ export function documentTypeLabel(doc: {
   exitKind?: ExitKind | null;
   productionOrderCode?: string | null;
   entryType?: string | null;
-  metadata?: { entryType?: string | null } | null;
+  reason?: string | null;
+  metadata?: { entryType?: string | null; countKind?: string | null } | null;
 }): string {
+  if (doc.docType === "adjustment") {
+    return "Ajuste de inventario";
+  }
   if (doc.docType === "entry") {
     const et = doc.entryType ?? doc.metadata?.entryType;
     if (doc.productionOrderCode || et === "production_order") {

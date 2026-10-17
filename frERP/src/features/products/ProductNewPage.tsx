@@ -1,10 +1,9 @@
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import JsBarcode from "jsbarcode";
 import { Gauge } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  createCategory,
   createProduct,
-  fetchCategories,
   uploadProductImages,
 } from "../../api/inventory.js";
 import { ImageDropzone, type PendingFile } from "../../components/inventory/ImageDropzone.js";
@@ -12,7 +11,6 @@ import { MoneyInput } from "../../components/ui/MoneyInput.js";
 import { ProductPageHeader } from "../../components/products/ProductPageHeader.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
-import type { ProductCategory } from "../inventory/inventory.types.js";
 
 function formatMoney(n: number): string {
   return new Intl.NumberFormat("es-CO", {
@@ -20,6 +18,54 @@ function formatMoney(n: number): string {
     currency: "COP",
     maximumFractionDigits: 0,
   }).format(n);
+}
+
+function normalizeEvolutionSuffix(raw: string): string {
+  const cleaned = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (cleaned.startsWith("EVOLUTION") && cleaned.length > 9) {
+    return cleaned.slice(9);
+  }
+  return cleaned;
+}
+
+function LiveBarcodePreview({ value }: { value: string }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    if (!canvasRef.current || !value) return;
+    try {
+      JsBarcode(canvasRef.current, value, {
+        format: "CODE128",
+        width: 1.8,
+        height: 42,
+        displayValue: true,
+        font: "monospace",
+        fontSize: 12,
+        fontOptions: "bold",
+        textMargin: 3,
+        margin: 6,
+        background: "#ffffff",
+        lineColor: "#0f172a",
+      });
+    } catch {
+      /* ignore invalid intermediate input */
+    }
+  }, [value]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        display: "block",
+        maxWidth: "100%",
+        height: "auto",
+        marginTop: "6px",
+        borderRadius: "6px",
+        border: "1px solid #e2e8f0",
+        background: "#ffffff",
+      }}
+    />
+  );
 }
 
 export function ProductNewPage() {
@@ -34,44 +80,10 @@ export function ProductNewPage() {
   const [name, setName] = useState("");
   const [codeSuffix, setCodeSuffix] = useState("");
   const [hasBarcode, setHasBarcode] = useState(true);
-  const [categoryId, setCategoryId] = useState("");
-  const [categories, setCategories] = useState<ProductCategory[]>([]);
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [addingCategory, setAddingCategory] = useState(false);
   const [baseSalePrice, setBaseSalePrice] = useState("");
   const [productionCost, setProductionCost] = useState("");
   const [warehousePrices, setWarehousePrices] = useState<Record<string, string>>({});
   const [pendingImages, setPendingImages] = useState<PendingFile[]>([]);
-
-  const loadCategories = useCallback(async () => {
-    if (!token) return;
-    try {
-      const data = await fetchCategories(token);
-      setCategories(data.items);
-    } catch {
-      /* keep empty list */
-    }
-  }, [token]);
-
-  useEffect(() => {
-    void loadCategories();
-  }, [loadCategories]);
-
-  async function onAddCategory() {
-    if (!token || !newCategoryName.trim()) return;
-    setAddingCategory(true);
-    setError(null);
-    try {
-      const { item } = await createCategory(token, newCategoryName.trim());
-      setCategories((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name, "es")));
-      setCategoryId(item.id);
-      setNewCategoryName("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo crear la categoría");
-    } finally {
-      setAddingCategory(false);
-    }
-  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -86,17 +98,18 @@ export function ProductNewPage() {
         }))
         .filter((p) => p.salePrice !== null);
 
-      const fullCode = "EVO-" + codeSuffix.trim();
-      if (!codeSuffix.trim()) {
-        setError("Debes ingresar el consecutivo del código (parte después de EVO-).");
+      const cleanSuffix = normalizeEvolutionSuffix(codeSuffix.trim());
+      const fullCode = "EVOLUTION" + cleanSuffix;
+      if (!cleanSuffix) {
+        setError("Debes ingresar el sufijo del código después de EVOLUTION (letras y números o solo números, ej. S01, CTR012, 01).");
         setLoading(false);
         return;
       }
       const { item } = await createProduct(token, {
         name: name.trim(),
         referenceCode: fullCode,
-        internalCode: fullCode || null,
-        categoryId: categoryId || null,
+        internalCode: fullCode,
+        barcode: hasBarcode ? fullCode : null,
         unit: "und",
         baseSalePrice: Number(baseSalePrice) || 0,
         productionCost: showCost ? Number(productionCost) || 0 : undefined,
@@ -118,7 +131,8 @@ export function ProductNewPage() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Error";
       if (msg === "duplicate_code_or_barcode") {
-        setError(`El código EVO-${codeSuffix.trim()} ya existe en el sistema. Cada producto debe tener un código único.`);
+        const cleanSuffix = normalizeEvolutionSuffix(codeSuffix.trim());
+        setError(`El código EVOLUTION${cleanSuffix} ya existe en el sistema. Cada producto debe tener un código único.`);
       } else {
         setError(msg);
       }
@@ -129,6 +143,8 @@ export function ProductNewPage() {
 
   const salePrice = Number(baseSalePrice);
   const previewImage = pendingImages[0]?.preview;
+  const cleanPreviewSuffix = normalizeEvolutionSuffix(codeSuffix.trim());
+  const fullPreviewCode = cleanPreviewSuffix ? `EVOLUTION${cleanPreviewSuffix}` : "";
 
   return (
     <div className="inv-page">
@@ -148,7 +164,7 @@ export function ProductNewPage() {
             <ul className="inv-form__info-list">
               <li>
                 {hasBarcode
-                  ? "Al guardar se genera un código de barras único. En salida solo se agrega con la pistola."
+                  ? "El código de barras será exactamente el mismo código del producto (ej. EVOLUTIONS01). En salida se escanea con la pistola."
                   : "Sin código de barras: en salida se podrá buscar y agregar desde el listado."}
               </li>
               <li>
@@ -167,68 +183,30 @@ export function ProductNewPage() {
                     <input value={name} onChange={(e) => setName(e.target.value)} required />
                   </label>
                   <label className="field">
-                    <span>Código interno (consecutivo) *</span>
-                    <div style={{ display: "flex", alignItems: "center" }}>
-                      <span style={{ background: "#f1f5f9", padding: "8px 12px", border: "1px solid #cbd5e1", borderRight: "none", borderRadius: "6px 0 0 6px", fontSize: "14px", fontWeight: "bold", color: "#475569" }}>
-                        EVO-
+                    <span>Código del producto (y código de barras) *</span>
+                    <div className="inv-form__prefix-wrap">
+                      <span className="inv-form__prefix-tag">
+                        EVOLUTION
                       </span>
                       <input
                         value={codeSuffix}
-                        onChange={(e) => setCodeSuffix(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))}
+                        onChange={(e) => setCodeSuffix(normalizeEvolutionSuffix(e.target.value))}
                         required
-                        placeholder="Ej: 001"
-                        style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, flex: 1 }}
+                        placeholder="Ej: S01, CTR012, 01"
+                        className="inv-form__prefix-input"
                       />
                     </div>
-                    <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>
-                      Este código es único por producto en todo el sistema. No se puede repetir.
+                    <span className="inv-form__field-note">
+                      Empieza por <strong>EVOLUTION</strong> seguido de letras y números o solo números (ej.{" "}
+                      <code>EVOLUTIONS01</code>). Este mismo código será su código de barras.
                     </span>
                   </label>
-                  <div className="inv-form__category inv-form__full">
-                    <label className="field">
-                      <span>Categoría</span>
-                      <select
-                        value={categoryId}
-                        onChange={(e) => setCategoryId(e.target.value)}
-                        aria-label="Categoría del producto"
-                      >
-                        <option value="">Sin categoría</option>
-                        {categories.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="inv-form__category-add">
-                      <input
-                        value={newCategoryName}
-                        onChange={(e) => setNewCategoryName(e.target.value)}
-                        placeholder="Nueva categoría"
-                        aria-label="Nombre de nueva categoría"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            void onAddCategory();
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        className="inv-btn inv-btn--ghost"
-                        disabled={addingCategory || !newCategoryName.trim()}
-                        onClick={() => void onAddCategory()}
-                      >
-                        {addingCategory ? "…" : "Añadir"}
-                      </button>
-                    </div>
-                  </div>
                   <div className="field inv-form__full">
                     <span>¿Tiene código de barras? *</span>
                     <div
                       role="radiogroup"
                       aria-label="¿Tiene código de barras?"
-                      style={{ display: "flex", gap: "10px", marginTop: "6px" }}
+                      className="inv-form__radio-group"
                     >
                       <button
                         type="button"
@@ -236,7 +214,6 @@ export function ProductNewPage() {
                         aria-checked={hasBarcode}
                         className={`inv-btn ${hasBarcode ? "inv-btn--primary" : "inv-btn--ghost"}`}
                         onClick={() => setHasBarcode(true)}
-                        style={{ flex: 1, padding: "10px 12px", borderRadius: "6px", fontSize: "13px" }}
                       >
                         Sí — se genera al guardar (solo pistola en salida)
                       </button>
@@ -246,7 +223,6 @@ export function ProductNewPage() {
                         aria-checked={!hasBarcode}
                         className={`inv-btn ${!hasBarcode ? "inv-btn--primary" : "inv-btn--ghost"}`}
                         onClick={() => setHasBarcode(false)}
-                        style={{ flex: 1, padding: "10px 12px", borderRadius: "6px", fontSize: "13px" }}
                       >
                         No — buscable en el listado de salida
                       </button>
@@ -321,12 +297,25 @@ export function ProductNewPage() {
               <h3 className="inv-product-preview__name">{name.trim() || "Nombre del producto"}</h3>
               <dl className="inv-product-preview__meta">
                 <div>
-                  <dt>Código interno</dt>
-                  <dd>EVO-{codeSuffix.trim() || "—"}</dd>
+                  <dt>Código del producto</dt>
+                  <dd>{fullPreviewCode || "EVOLUTION—"}</dd>
                 </div>
                 <div>
                   <dt>Código de barras</dt>
-                  <dd>{hasBarcode ? "Se generará al guardar" : "Sin código"}</dd>
+                  <dd>
+                    {hasBarcode ? (
+                      fullPreviewCode ? (
+                        <div>
+                          <span>{fullPreviewCode}</span>
+                          <LiveBarcodePreview value={fullPreviewCode} />
+                        </div>
+                      ) : (
+                        "Igual al código (EVOLUTION…)"
+                      )
+                    ) : (
+                      "Sin código"
+                    )}
+                  </dd>
                 </div>
               </dl>
               {salePrice > 0 ? (

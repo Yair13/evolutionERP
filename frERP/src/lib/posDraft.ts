@@ -48,3 +48,17 @@ export function clearPosDraft(mode: DocType, warehouseId: string): void {
     /* ignore */
   }
 }
+
+export function clearAllPosDrafts(): void {
+  try {
+    const toRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(PREFIX)) toRemove.push(k);
+    }
+    for (const k of toRemove) localStorage.removeItem(k);
+  } catch {
+    /* ignore */
+  }
+}
+

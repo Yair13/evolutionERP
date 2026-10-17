@@ -1,8 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  createCategory,
-  fetchCategories,
   fetchProductMaster,
   updateProductMaster,
   uploadProductImages,
@@ -12,7 +10,6 @@ import { MoneyInput } from "../../components/ui/MoneyInput.js";
 import { ProductPageHeader } from "../../components/products/ProductPageHeader.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
-import type { ProductCategory } from "../inventory/inventory.types.js";
 
 export function ProductEditPage() {
   const { id } = useParams<{ id: string }>();
@@ -30,10 +27,6 @@ export function ProductEditPage() {
 
   const [name, setName] = useState("");
   const [internalCode, setInternalCode] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [categories, setCategories] = useState<ProductCategory[]>([]);
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [addingCategory, setAddingCategory] = useState(false);
   const [baseSalePrice, setBaseSalePrice] = useState("");
   const [productionCost, setProductionCost] = useState("");
   const [warehousePrices, setWarehousePrices] = useState<Record<string, string>>({});
@@ -44,15 +37,10 @@ export function ProductEditPage() {
     setLoadingProduct(true);
     setError(null);
     try {
-      const [prod, cats] = await Promise.all([
-        fetchProductMaster(token, id),
-        fetchCategories(token),
-      ]);
+      const prod = await fetchProductMaster(token, id);
       const item = prod.item;
       setName(item.name);
       setInternalCode(item.internalCode ?? "");
-      setCategoryId(item.categoryId ?? "");
-      setCategories(cats.items);
       setBaseSalePrice(String(item.baseSalePrice));
       setProductionCost(item.productionCost != null ? String(item.productionCost) : "");
 
@@ -76,22 +64,6 @@ export function ProductEditPage() {
     void load();
   }, [load]);
 
-  async function onAddCategory() {
-    if (!token || !newCategoryName.trim()) return;
-    setAddingCategory(true);
-    setError(null);
-    try {
-      const { item } = await createCategory(token, newCategoryName.trim());
-      setCategories((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name, "es")));
-      setCategoryId(item.id);
-      setNewCategoryName("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo crear la categoría");
-    } finally {
-      setAddingCategory(false);
-    }
-  }
-
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!token || !id) return;
@@ -109,7 +81,6 @@ export function ProductEditPage() {
         name: name.trim(),
         referenceCode: internalCode.trim(),
         internalCode: internalCode.trim() || null,
-        categoryId: categoryId || null,
         unit: "und",
         baseSalePrice: Number(baseSalePrice) || 0,
         productionCost: showCost ? Number(productionCost) || 0 : undefined,
@@ -164,48 +135,9 @@ export function ProductEditPage() {
               <input value={name} onChange={(e) => setName(e.target.value)} required />
             </label>
             <label className="field">
-              <span>Código interno (consecutivo) *</span>
+              <span>Código del producto *</span>
               <input value={internalCode} disabled style={{ background: "#f1f5f9", cursor: "not-allowed", color: "#64748b" }} />
             </label>
-            <div className="inv-form__category inv-form__full">
-              <label className="field">
-                <span>Categoría</span>
-                <select
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  aria-label="Categoría del producto"
-                >
-                  <option value="">Sin categoría</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="inv-form__category-add">
-                <input
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
-                  placeholder="Nueva categoría"
-                  aria-label="Nombre de nueva categoría"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      void onAddCategory();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className="inv-btn inv-btn--ghost"
-                  disabled={addingCategory || !newCategoryName.trim()}
-                  onClick={() => void onAddCategory()}
-                >
-                  {addingCategory ? "…" : "Añadir"}
-                </button>
-              </div>
-            </div>
           </div>
         </section>
 

@@ -5,23 +5,21 @@ const BarcodeScannerModal = lazy(() =>
 );
 import { useResolveScan } from "../../hooks/useResolveScan.js";
 import { ArrowDownToLine, ArrowUpFromLine, Search, ScanLine } from "lucide-react";
-import { fetchCatalog, fetchCategories } from "../../api/inventory.js";
+import { fetchCatalog } from "../../api/inventory.js";
 import { InvScopeBar } from "../../components/inventory/InvScopeBar.js";
 import { InventoryPageHeader } from "../../components/inventory/InventoryPageHeader.js";
 import { ProductCard } from "../../components/inventory/ProductCard.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
-import type { CatalogItem, ProductCategory } from "./inventory.types.js";
+import type { CatalogItem } from "./inventory.types.js";
 
 export function CatalogPage() {
   const { token } = useAuth();
   const { warehouseId, warehouses, isAllWarehouses } = useWarehouse();
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [q, setQ] = useState("");
   const [search, setSearch] = useState("");
-  const [categoryId, setCategoryId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -40,19 +38,15 @@ export function CatalogPage() {
     setLoading(true);
     setError(null);
     try {
-      const [catalog, cats] = await Promise.all([
-        fetchCatalog(token, warehouseId, { q: search || undefined, categoryId: categoryId || undefined, limit: 60 }),
-        fetchCategories(token),
-      ]);
+      const catalog = await fetchCatalog(token, warehouseId, { q: search || undefined, limit: 60 });
       setItems(catalog.items);
       setTotal(catalog.total);
-      setCategories(cats.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error");
     } finally {
       setLoading(false);
     }
-  }, [token, warehouseId, search, categoryId]);
+  }, [token, warehouseId, search]);
 
   useEffect(() => {
     void load();
@@ -70,7 +64,7 @@ export function CatalogPage() {
     return { critical, low, out };
   }, [items]);
 
-  const emptyMessage = search || categoryId
+  const emptyMessage = search
     ? "Ningún producto coincide con el filtro."
     : "Aún no hay productos en el catálogo de la empresa.";
 
@@ -99,9 +93,6 @@ export function CatalogPage() {
             <Link to="/app/inventario/semaforo" className="inv-btn inv-btn--ghost">
               Alertas de stock
             </Link>
-            <Link to="/app/productos" className="inv-btn inv-btn--ghost">
-              Productos
-            </Link>
           </>
         }
         toolbar={
@@ -125,19 +116,6 @@ export function CatalogPage() {
                 <ScanLine size={18} strokeWidth={2} aria-hidden />
               </button>
             </div>
-            <select
-              className="inv-filter"
-              value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
-              aria-label="Filtrar por categoría"
-            >
-              <option value="">Todas las categorías</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
           </div>
         }
         alerts={
@@ -195,9 +173,6 @@ export function CatalogPage() {
       ) : items.length === 0 ? (
         <div className="inv-empty">
           <p>{emptyMessage}</p>
-          <Link to="/app/productos/nuevo" className="inv-btn inv-btn--primary">
-            Crear producto en catálogo
-          </Link>
         </div>
       ) : (
         <div className="inv-grid">

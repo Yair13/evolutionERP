@@ -183,6 +183,7 @@ export type CreateProductPayload = {
   criticalStockLevel?: number;
   initialStock?: number;
   imageUrls?: string[];
+  barcode?: string | null;
   /** Si es false, no se genera código de barras (producto buscable por clic en salida). */
   hasBarcode?: boolean;
   /** Sede donde aplicar stock mínimo / entrada inicial (opcional). */
@@ -295,7 +296,7 @@ export async function fetchUtilitiesSummary(token: string, warehouseId?: string)
 export async function fetchDocuments(
   token: string,
   warehouseId?: string | null,
-  docType?: "entry" | "exit",
+  docType?: "entry" | "exit" | "adjustment",
   dates?: { from?: string; to?: string }
 ) {
   const q = new URLSearchParams();
@@ -435,9 +436,23 @@ export async function markLabelsPrinted(
   );
 }
 
+export type BulkImportProductItem = {
+  name: string;
+  referenceCode: string;
+  baseSalePrice: number;
+  productionCost?: number;
+  categoryId?: string | null;
+  hasBarcode?: boolean;
+};
+
 export async function bulkImportProducts(
   token: string,
-  products: { name: string; referenceCode: string; baseSalePrice: number; productionCost?: number }[]
+  products: BulkImportProductItem[],
+  opts?: {
+    updateExisting?: boolean;
+    categoryId?: string | null;
+    hasBarcode?: boolean;
+  }
 ) {
   const base = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
   const res = await fetch(`${base}/inventory/products/bulk`, {
@@ -446,7 +461,12 @@ export async function bulkImportProducts(
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ products }),
+    body: JSON.stringify({
+      products,
+      updateExisting: opts?.updateExisting ?? false,
+      categoryId: opts?.categoryId ?? null,
+      hasBarcode: opts?.hasBarcode ?? true,
+    }),
   });
   if (!res.ok) {
     let msg = res.statusText;
@@ -458,7 +478,12 @@ export async function bulkImportProducts(
     }
     throw new Error(msg);
   }
-  return res.json() as Promise<{ success: boolean; imported: number; duplicates: number }>;
+  return res.json() as Promise<{
+    success: boolean;
+    imported: number;
+    updated?: number;
+    duplicates: number;
+  }>;
 }
 
 /** Actualiza datos del catálogo (sin sede). */

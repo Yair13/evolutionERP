@@ -335,6 +335,11 @@ export async function openCount(
   countKind: CountKind,
   notes?: string | null
 ): Promise<InventoryCountDetail> {
+  if (countKind === "initial" && !auth.hasAdminAccess) {
+    throw Object.assign(new Error("initial_count_requires_admin"), {
+      code: "initial_count_requires_admin",
+    });
+  }
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -443,9 +448,10 @@ export async function updateCountLine(
       id: string;
       warehouse_id: string;
       status: string;
+      count_kind: string;
     }>(
       `
-      SELECT id::text, warehouse_id::text, status
+      SELECT id::text, warehouse_id::text, status, count_kind
       FROM inventory_counts
       WHERE id = $1::uuid
       FOR UPDATE
@@ -458,6 +464,11 @@ export async function updateCountLine(
     }
     if (head.status !== "open") {
       throw Object.assign(new Error("count_not_open"), { code: "count_not_open" });
+    }
+    if (head.count_kind === "initial" && !auth.hasAdminAccess) {
+      throw Object.assign(new Error("initial_count_requires_admin"), {
+        code: "initial_count_requires_admin",
+      });
     }
     if (
       auth.warehouseIds !== null &&
@@ -557,9 +568,10 @@ export async function resetCountedQuantities(
       id: string;
       warehouse_id: string;
       status: string;
+      count_kind: string;
     }>(
       `
-      SELECT id::text, warehouse_id::text, status
+      SELECT id::text, warehouse_id::text, status, count_kind
       FROM inventory_counts
       WHERE id = $1::uuid
       FOR UPDATE
@@ -572,6 +584,11 @@ export async function resetCountedQuantities(
     }
     if (head.status !== "open") {
       throw Object.assign(new Error("count_not_open"), { code: "count_not_open" });
+    }
+    if (head.count_kind === "initial" && !auth.hasAdminAccess) {
+      throw Object.assign(new Error("initial_count_requires_admin"), {
+        code: "initial_count_requires_admin",
+      });
     }
     if (
       auth.warehouseIds !== null &&
@@ -611,9 +628,10 @@ export async function cancelCount(
       id: string;
       warehouse_id: string;
       status: string;
+      count_kind: string;
     }>(
       `
-      SELECT id::text, warehouse_id::text, status
+      SELECT id::text, warehouse_id::text, status, count_kind
       FROM inventory_counts
       WHERE id = $1::uuid
       FOR UPDATE
@@ -626,6 +644,11 @@ export async function cancelCount(
     }
     if (head.status !== "open") {
       throw Object.assign(new Error("count_not_open"), { code: "count_not_open" });
+    }
+    if (head.count_kind === "initial" && !auth.hasAdminAccess) {
+      throw Object.assign(new Error("initial_count_requires_admin"), {
+        code: "initial_count_requires_admin",
+      });
     }
     if (
       auth.warehouseIds !== null &&
@@ -688,6 +711,11 @@ export async function confirmCount(
     }
     if (head.status !== "open") {
       throw Object.assign(new Error("count_not_open"), { code: "count_not_open" });
+    }
+    if (head.count_kind === "initial" && !auth.hasAdminAccess) {
+      throw Object.assign(new Error("initial_count_requires_admin"), {
+        code: "initial_count_requires_admin",
+      });
     }
     if (
       auth.warehouseIds !== null &&

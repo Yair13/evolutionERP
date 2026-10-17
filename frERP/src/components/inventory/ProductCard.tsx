@@ -81,8 +81,8 @@ export function ProductCard({
             <h3 className="inv-card__name" title={item.name}>
               {item.name}
             </h3>
-            {item.categoryName ? (
-              <span className="inv-card__chip">{item.categoryName}</span>
+            {item.referenceCode ? (
+              <span className="inv-card__chip">{item.referenceCode}</span>
             ) : null}
           </div>
           <p className="inv-card__sale">

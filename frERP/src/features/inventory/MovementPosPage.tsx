@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -10,6 +12,7 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  Camera,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -25,7 +28,18 @@ import {
   ZoomIn,
 } from "lucide-react";
 import { useResolveScan } from "../../hooks/useResolveScan.js";
-import { confirmExit, confirmMovement, fetchCatalog, fetchDocumentByInvoice } from "../../api/inventory.js";
+import {
+  confirmExit,
+  confirmMovement,
+  fetchCatalog,
+  fetchDocumentByInvoice,
+  fetchProduct,
+} from "../../api/inventory.js";
+const BarcodeScannerModal = lazy(() =>
+  import("../../components/inventory/BarcodeScannerModal.js").then((m) => ({
+    default: m.BarcodeScannerModal,
+  }))
+);
 import { DocumentInvoicePrint } from "../../components/inventory/DocumentInvoicePrint.js";
 import {
   ExitCheckoutModal,
@@ -37,7 +51,7 @@ import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { resolveLightMediaUrl, resolveMediaUrl } from "../../lib/mediaUrl.js";
 import { clearPosDraft, loadPosDraft, savePosDraft } from "../../lib/posDraft.js";
-import { warmScanCache } from "../../lib/scanCache.js";
+import { clearScanCache, warmScanCache } from "../../lib/scanCache.js";
 import type { ScanMatchable } from "../../lib/scanMatch.js";
 import { isUnitSalePriceValid } from "../../lib/salePrice.js";
 import type { CartLine, CatalogItem, DocType, ExitKind, InventoryDocumentDetail } from "./inventory.types.js";
@@ -74,27 +88,14 @@ const PISTOL_DEBOUNCE_MS = 90;
 const MIN_SCAN_LENGTH = 2;
 
 export function MovementPosPage({ mode }: Props) {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const navigate = useNavigate();
-  const { warehouses, warehouseId, setWarehouseId, isAllWarehouses, canViewAllWarehouses, sessionLabel } =
-    useWarehouse();
+  const { warehouses, warehouseId, sessionLabel } = useWarehouse();
   const currentWarehouse = useMemo(() => warehouses.find((w) => w.id === warehouseId), [warehouses, warehouseId]);
   const isFactory = currentWarehouse?.is_factory === true;
   const isEntry = mode === "entry";
   const title = isEntry ? "Entrada de inventario" : "Salida de inventario";
   const Icon = isEntry ? ArrowDownToLine : ArrowUpFromLine;
-  const needsWarehousePick = isAllWarehouses || !warehouseId;
-
-  // Usuario con una sola sede asignada: fijarla (no aplica a admin con "Todas").
-  useEffect(() => {
-    if (canViewAllWarehouses) return;
-    const assigned = user?.warehouseIds;
-    if (!assigned || assigned.length !== 1) return;
-    const only = assigned[0];
-    if (only && only !== warehouseId && warehouses.some((w) => w.id === only)) {
-      setWarehouseId(only);
-    }
-  }, [user?.warehouseIds, warehouseId, warehouses, setWarehouseId, canViewAllWarehouses]);
 
   const [products, setProducts] = useState<CatalogItem[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -110,10 +111,9 @@ export function MovementPosPage({ mode }: Props) {
   const [lastAdded, setLastAdded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  /** En vertical/móvil el carrito empieza abierto para que el cliente lo vea. */
-  const [cartOpen, setCartOpen] = useState(() =>
-    typeof window !== "undefined" ? window.matchMedia("(max-width: 900px)").matches : false
-  );
+  /** En móvil el carrito inicia plegado en la barra inferior para dejar ver todo el catálogo. */
+  const [cartOpen, setCartOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [expandedPhoto, setExpandedPhoto] = useState<{ url: string; name: string } | null>(null);
   const pistolInputRef = useRef<HTMLInputElement>(null);
   const pistolDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -307,7 +307,7 @@ export function MovementPosPage({ mode }: Props) {
     []
   );
 
-  const loadProducts = useCallback(async () => {
+  const loadProducts = useCallback(async (opts?: { silent?: boolean }) => {
     if (!token || !warehouseId) return;
     // Entradas ligadas a factura: no hace falta el catálogo (solo precarga + verificación local).
     if (hideCatalogPicker) {
@@ -315,7 +315,7 @@ export function MovementPosPage({ mode }: Props) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!opts?.silent) setLoading(true);
     setError(null);
     try {
       const data = await fetchCatalog(token, warehouseId, {
@@ -326,16 +326,91 @@ export function MovementPosPage({ mode }: Props) {
       });
       setProducts(data.items);
       warmScanCache(warehouseId, data.items);
+      const byId = new Map(data.items.map((i) => [i.id, i]));
+      setCart((prev) => {
+        if (prev.length === 0) return prev;
+        let changed = false;
+        const next = prev.map((line) => {
+          const fresh = byId.get(line.productId);
+          if (!fresh) return line;
+          if (
+            line.quantityOnHand === fresh.quantityOnHand &&
+            line.suggestedSalePrice === fresh.baseSalePrice
+          ) {
+            return line;
+          }
+          changed = true;
+          return {
+            ...line,
+            quantityOnHand: fresh.quantityOnHand,
+            suggestedSalePrice: fresh.baseSalePrice,
+            unitSalePrice: Math.max(line.unitSalePrice, fresh.baseSalePrice),
+          };
+        });
+        return changed ? next : prev;
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error");
+      if (!opts?.silent) {
+        setError(err instanceof Error ? err.message : "Error");
+      }
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }, [token, warehouseId, catalogSearch, isEntry, entryType, hideCatalogPicker]);
+
+  const refreshCartStock = useCallback(
+    async (linesToRefresh?: CartLine[]) => {
+      if (!token || !warehouseId || isEntry) return;
+      const targetLines = linesToRefresh ?? cart;
+      if (targetLines.length === 0) return;
+      try {
+        const results = await Promise.all(
+          targetLines.map((l) =>
+            fetchProduct(token, warehouseId, l.productId)
+              .then((r) => r.item)
+              .catch(() => null)
+          )
+        );
+        const freshMap = new Map(
+          results.filter((x): x is NonNullable<typeof x> => x !== null).map((x) => [x.id, x])
+        );
+        if (freshMap.size === 0) return;
+        setCart((prev) =>
+          prev.map((line) => {
+            const fresh = freshMap.get(line.productId);
+            if (!fresh) return line;
+            return {
+              ...line,
+              quantityOnHand: fresh.quantityOnHand,
+              suggestedSalePrice: fresh.baseSalePrice,
+              unitSalePrice: Math.max(line.unitSalePrice, fresh.baseSalePrice),
+            };
+          })
+        );
+      } catch {
+        /* ignore background refresh errors */
+      }
+    },
+    [token, warehouseId, isEntry, cart]
+  );
 
   useEffect(() => {
     void loadProducts();
   }, [loadProducts]);
+
+  useEffect(() => {
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === "hidden") return;
+      void loadProducts({ silent: true });
+      void refreshCartStock();
+    };
+    window.addEventListener("focus", onFocusOrVisible);
+    document.addEventListener("visibilitychange", onFocusOrVisible);
+    return () => {
+      window.removeEventListener("focus", onFocusOrVisible);
+      document.removeEventListener("visibilitychange", onFocusOrVisible);
+    };
+  }, [loadProducts, refreshCartStock]);
 
   // Restaurar borrador tras corte de red / recarga de tablet
   useEffect(() => {
@@ -346,6 +421,7 @@ export function MovementPosPage({ mode }: Props) {
     const draft = loadPosDraft(mode, warehouseId);
     if (!draft || draft.cart.length === 0) return;
     setCart(draft.cart);
+    void refreshCartStock(draft.cart);
     setNotes(draft.notes ?? "");
     if (draft.originInvoiceNumber) setOriginInvoiceNumber(draft.originInvoiceNumber);
     if (draft.scannedByProduct) setScannedByProduct(draft.scannedByProduct);
@@ -355,7 +431,7 @@ export function MovementPosPage({ mode }: Props) {
     if (!isEntry && draft.exitKind) {
       setExitKind(draft.exitKind);
     }
-  }, [mode, warehouseId, isEntry]);
+  }, [mode, warehouseId, isEntry, refreshCartStock]);
 
   // Persistir borrador (carrito + verificación) para no perder trabajo con internet intermitente
   useEffect(() => {
@@ -582,12 +658,33 @@ export function MovementPosPage({ mode }: Props) {
       setError(`«${item.name}» tiene código de barras y solo se puede agregar escaneando con la pistola.`);
       return false;
     }
+    if (opts?.fromScan) {
+      setProducts((prev) =>
+        prev.some((p) => p.id === item.id)
+          ? prev.map((p) => (p.id === item.id ? { ...p, ...item } : p))
+          : prev
+      );
+    }
     if (!isEntry && item.quantityOnHand <= 0) {
+      setCart((prev) =>
+        prev.some((l) => l.productId === item.id)
+          ? prev.map((l) =>
+              l.productId === item.id ? { ...l, quantityOnHand: item.quantityOnHand } : l
+            )
+          : prev
+      );
       setError(`Sin stock: ${item.name}`);
       return false;
     }
     const existingLine = cart.find((l) => l.productId === item.id);
     if (!isEntry && existingLine && existingLine.quantity >= item.quantityOnHand) {
+      if (existingLine.quantityOnHand !== item.quantityOnHand) {
+        setCart((prev) =>
+          prev.map((l) =>
+            l.productId === item.id ? { ...l, quantityOnHand: item.quantityOnHand } : l
+          )
+        );
+      }
       setLastAdded(null);
       setError(
         `Sin más stock: ${item.name} — ya tienes en el carrito ${item.quantityOnHand} ${
@@ -743,13 +840,15 @@ export function MovementPosPage({ mode }: Props) {
       setScannedByProduct({});
       setShowConfirm(false);
       setCartOpen(false);
-      if (warehouseId) clearPosDraft(mode, warehouseId);
+      clearPosDraft(mode, warehouseId);
+      clearScanCache(warehouseId);
       applyLocalStockDelta(
         cart.map((l) => ({ productId: l.productId, quantity: l.quantity })),
         "entry"
       );
+      void loadProducts({ silent: true });
       if (entryType === "production_order") {
-        navigate("/app/inventario/historial", {
+        navigate("/app/inventario/entradas/historial", {
           replace: true,
           state: {
             flash: `Orden de producción ${item.productionOrderCode ?? item.invoiceNumber ?? ""} registrada. Imprime las etiquetas desde la card.`,
@@ -823,7 +922,11 @@ export function MovementPosPage({ mode }: Props) {
       setShowExitCheckout(false);
       setCartOpen(false);
       setInvoiceDoc(item);
-      if (warehouseId) clearPosDraft(mode, warehouseId);
+      clearPosDraft(mode, warehouseId);
+      clearScanCache(warehouseId);
+      if (data.destinationWarehouseId) {
+        clearScanCache(data.destinationWarehouseId);
+      }
       applyLocalStockDelta(
         cart.map((l) => ({
           productId: l.productId,
@@ -832,10 +935,14 @@ export function MovementPosPage({ mode }: Props) {
         })),
         "exit"
       );
+      void loadProducts({ silent: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Error";
       if (msg === "insufficient_stock") {
         setError("Stock insuficiente en uno o más productos.");
+        clearScanCache(warehouseId);
+        void loadProducts({ silent: true });
+        void refreshCartStock();
       } else if (msg === "customer_name_required") {
         setError("Indica el nombre del cliente o selecciona uno para la venta.");
       } else if (msg === "payment_total_mismatch" || msg === "invalid_payment_breakdown") {
@@ -888,34 +995,14 @@ export function MovementPosPage({ mode }: Props) {
             : "Punto de venta · pistolea o toca productos"
         }
         actions={
-          <Link to="/app/inventario/historial" className="inv-btn inv-btn--ghost">
-            Historial
+          <Link
+            to={isEntry ? "/app/inventario/entradas/historial" : "/app/inventario/salidas/historial"}
+            className="inv-btn inv-btn--ghost"
+          >
+            {isEntry ? "Listado de entradas" : "Listado de ventas"}
           </Link>
         }
       />
-
-      {needsWarehousePick ? (
-        <div className="inv-pos-need-sede" role="status">
-          <p>
-            Tu sesión está en <strong>Todas las sedes</strong>. Para registrar un movimiento elige una sede:
-          </p>
-          <select
-            value=""
-            onChange={(e) => {
-              if (e.target.value) setWarehouseId(e.target.value);
-            }}
-            aria-label="Elegir sede para operar"
-          >
-            <option value="">— Elige sede —</option>
-            {warehouses.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-                {w.is_factory ? " · Fábrica" : ""}
-              </option>
-            ))}
-          </select>
-        </div>
-      ) : null}
       {isEntry ? (
         <div className="inv-pos-config">
           <div className="inv-pos-config__grid">
@@ -1039,26 +1126,37 @@ export function MovementPosPage({ mode }: Props) {
             </select>
           </label>
           {!hidePistol ? (
-            <div className="inv-pistol-status inv-pistol-status--inline" role="status">
-              <ScanLine size={16} strokeWidth={2} aria-hidden />
-              <span className="inv-pistol-status__hint">Listo para escanear</span>
-              <input
-                id="inv-pistol-input"
-                ref={pistolInputRef}
-                type="text"
-                className="inv-pistol-trap"
-                value={pistolCode}
-                tabIndex={-1}
-                onChange={(e) => onPistolChange(e.target.value)}
-                onKeyDown={onPistolKeyDown}
-                aria-label="Receptor de pistola de código de barras"
-                inputMode="none"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-              />
-            </div>
+            <>
+              <div className="inv-pistol-status inv-pistol-status--inline" role="status">
+                <ScanLine size={16} strokeWidth={2} aria-hidden />
+                <span className="inv-pistol-status__hint">Listo para escanear</span>
+                <input
+                  id="inv-pistol-input"
+                  ref={pistolInputRef}
+                  type="text"
+                  className="inv-pistol-trap"
+                  value={pistolCode}
+                  tabIndex={-1}
+                  onChange={(e) => onPistolChange(e.target.value)}
+                  onKeyDown={onPistolKeyDown}
+                  aria-label="Receptor de pistola de código de barras"
+                  inputMode="none"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                />
+              </div>
+              <button
+                type="button"
+                className="inv-btn inv-btn--ghost inv-pos-camera-btn"
+                onClick={() => setCameraOpen(true)}
+                title="Escanear código con la cámara del celular"
+              >
+                <Camera size={16} strokeWidth={2} aria-hidden />
+                <span>Cámara</span>
+              </button>
+            </>
           ) : null}
           <span className="inv-pos-sellbar__sede" title={sessionLabel}>
             {sessionLabel}
@@ -1088,6 +1186,15 @@ export function MovementPosPage({ mode }: Props) {
             autoCapitalize="off"
             spellCheck={false}
           />
+          <button
+            type="button"
+            className="inv-btn inv-btn--ghost inv-pos-camera-btn"
+            onClick={() => setCameraOpen(true)}
+            title="Escanear código con la cámara del celular"
+          >
+            <Camera size={16} strokeWidth={2} aria-hidden />
+            <span>Cámara</span>
+          </button>
         </div>
       ) : null}
 
@@ -1320,21 +1427,29 @@ export function MovementPosPage({ mode }: Props) {
                     </span>
                   ) : null}
                   {pickImg ? (
-                    <button
-                      type="button"
-                      className="inv-pos__pick-media inv-pos__pick-media--expand"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (pickImgLg) setExpandedPhoto({ url: pickImgLg, name: item.name });
-                      }}
-                      aria-label={`Ver imagen completa de ${item.name}`}
-                      title="Ver imagen completa"
-                    >
+                    <span className="inv-pos__pick-media inv-pos__pick-media--expand">
                       <img src={pickImg} alt="" loading="lazy" decoding="async" />
-                      <span className="inv-pos__pick-media-zoom" aria-hidden>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        className="inv-pos__pick-media-zoom"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (pickImgLg) setExpandedPhoto({ url: pickImgLg, name: item.name });
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (pickImgLg) setExpandedPhoto({ url: pickImgLg, name: item.name });
+                          }
+                        }}
+                        aria-label={`Ver imagen completa de ${item.name}`}
+                        title="Ampliar foto"
+                      >
                         <ZoomIn size={14} strokeWidth={2.5} />
                       </span>
-                    </button>
+                    </span>
                   ) : (
                     <span className="inv-pos__pick-media">
                       <Package size={22} strokeWidth={1.5} aria-hidden />
@@ -1371,6 +1486,14 @@ export function MovementPosPage({ mode }: Props) {
             </>
           )}
         </section>
+
+        {cartOpen ? (
+          <div
+            className="inv-pos__cart-backdrop"
+            onClick={() => setCartOpen(false)}
+            aria-hidden="true"
+          />
+        ) : null}
 
         <aside className={`inv-pos__cart-panel${cartOpen ? " is-open" : ""}`}>
           <button
@@ -1516,6 +1639,16 @@ export function MovementPosPage({ mode }: Props) {
             netValue: cartTotalValue,
           }}
         />
+      ) : null}
+
+      {cameraOpen ? (
+        <Suspense fallback={null}>
+          <BarcodeScannerModal
+            open={cameraOpen}
+            onClose={() => setCameraOpen(false)}
+            onDetected={(code) => processPistolScanRef.current(code)}
+          />
+        </Suspense>
       ) : null}
 
       {invoiceDoc ? (

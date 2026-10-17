@@ -7,7 +7,7 @@ type State =
   | { status: "ok"; data: DashboardSummary }
   | { status: "error"; message: string };
 
-export function useDashboardSummary(token: string | null) {
+export function useDashboardSummary(token: string | null, warehouseId?: string | null) {
   const [state, setState] = useState<State>({ status: "idle" });
 
   const reload = useCallback(async () => {
@@ -17,12 +17,15 @@ export function useDashboardSummary(token: string | null) {
     }
     setState({ status: "loading" });
     try {
-      const data = await apiGet<DashboardSummary>("/dashboard/summary", token);
+      const path = warehouseId
+        ? `/dashboard/summary?warehouseId=${encodeURIComponent(warehouseId)}`
+        : "/dashboard/summary";
+      const data = await apiGet<DashboardSummary>(path, token);
       setState({ status: "ok", data });
     } catch (err) {
       setState({ status: "error", message: err instanceof Error ? err.message : "Error" });
     }
-  }, [token]);
+  }, [token, warehouseId]);
 
   useEffect(() => {
     void reload();

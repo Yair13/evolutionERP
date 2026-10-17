@@ -11,6 +11,7 @@ import { createDashboardRouter } from "./routes/dashboard.js";
 import { createRolesRouter } from "./routes/roles.js";
 import { createUsersRouter } from "./routes/users.js";
 import { createInventoryRouter } from "./routes/inventory.js";
+import { createSystemRouter } from "./routes/system.js";
 import { createWarehousesRouter } from "./routes/warehouses.js";
 
 const app = express();
@@ -55,6 +56,7 @@ app.use("/roles", createRolesRouter());
 app.use("/users", createUsersRouter());
 app.use("/warehouses", createWarehousesRouter());
 app.use("/inventory", createInventoryRouter());
+app.use("/system", createSystemRouter());
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error(err);

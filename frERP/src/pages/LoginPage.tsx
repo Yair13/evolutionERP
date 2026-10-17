@@ -15,10 +15,12 @@ export function LoginPage() {
   const usernameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    usernameRef.current?.focus();
+    if (typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches) {
+      usernameRef.current?.focus();
+    }
   }, []);
 
-  if (token) return <Navigate to="/app" replace />;
+  if (token) return <Navigate to="/seleccionar-sede" replace />;
 
   function detectCapsLock(e: KeyboardEvent<HTMLInputElement>) {
     if (typeof e.getModifierState === "function") {
@@ -33,7 +35,7 @@ export function LoginPage() {
     setLoading(true);
     try {
       await login(username.trim(), password);
-      navigate("/app", { replace: true });
+      navigate("/seleccionar-sede", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo iniciar sesión");
     } finally {

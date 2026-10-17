@@ -10,13 +10,14 @@ export async function loadAuthContext(
     id: string;
     email: string;
     full_name: string;
+    has_admin_access: boolean;
     roles: string[] | null;
-    unrestricted: boolean | null;
+    is_super_admin: boolean | null;
     warehouse_ids: string[] | null;
   }>(
     `
     WITH u AS (
-      SELECT id, email, full_name
+      SELECT id, email, full_name, has_admin_access
       FROM users
       WHERE id = $1::uuid AND is_active = true
     ),
@@ -27,17 +28,18 @@ export async function loadAuthContext(
       WHERE ur.user_id = (SELECT id FROM u)
     ),
     flags AS (
-      SELECT COALESCE(bool_or(code IN ('super_admin', 'secretaria')), false) AS unrestricted
+      SELECT COALESCE(bool_or(code = 'super_admin'), false) AS is_super_admin
       FROM role_codes
     )
     SELECT
       u.id::text,
       u.email,
       u.full_name,
+      u.has_admin_access,
       COALESCE((SELECT array_agg(code ORDER BY code) FROM role_codes), '{}') AS roles,
-      (SELECT unrestricted FROM flags) AS unrestricted,
+      (SELECT is_super_admin FROM flags) AS is_super_admin,
       CASE
-        WHEN (SELECT unrestricted FROM flags) THEN NULL::uuid[]
+        WHEN (SELECT is_super_admin FROM flags) THEN NULL::uuid[]
         ELSE COALESCE(
           ARRAY(SELECT uw.warehouse_id FROM user_warehouse uw WHERE uw.user_id = u.id),
           '{}'::uuid[]
@@ -51,7 +53,9 @@ export async function loadAuthContext(
   const row = rows[0];
   if (!row) return null;
 
-  const warehouseIds = row.unrestricted
+  const isSuperAdmin = Boolean(row.is_super_admin);
+  const hasAdminAccess = isSuperAdmin || Boolean(row.has_admin_access);
+  const warehouseIds = isSuperAdmin
     ? null
     : (row.warehouse_ids ?? []).map((id) => String(id));
 
@@ -60,6 +64,7 @@ export async function loadAuthContext(
     email: row.email,
     fullName: row.full_name,
     roles: row.roles ?? [],
+    hasAdminAccess,
     warehouseIds,
   };
 }

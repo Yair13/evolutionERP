@@ -3,11 +3,22 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  Building2,
+  Calendar,
+  Factory,
   FileText,
-  Pencil,
   History,
+  Layers,
+  Package,
+  Pencil,
+  RotateCcw,
+  Search,
+  SlidersHorizontal,
+  Store,
   Tag,
   Unlock,
+  User,
+  X,
 } from "lucide-react";
 import {
   editInventoryDocument,
@@ -24,8 +35,11 @@ import { ProductionLabelsModal } from "../../components/inventory/ProductionLabe
 import { InventoryPageHeader } from "../../components/inventory/InventoryPageHeader.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useInventoryScope } from "../../hooks/useInventoryScope.js";
+import { clearScanCache } from "../../lib/scanCache.js";
 import { documentTypeLabel } from "./document-labels.js";
 import type { DocType, InventoryDocumentDetail, InventoryDocumentSummary } from "./inventory.types.js";
+
+type FilterDocType = "" | DocType | "adjustment";
 
 function formatDate(iso: string): string {
   try {
@@ -50,6 +64,23 @@ function localTodayYmd(): string {
   return new Date().toLocaleDateString("en-CA");
 }
 
+function localYesterdayYmd(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toLocaleDateString("en-CA");
+}
+
+function localSevenDaysAgoYmd(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 6);
+  return d.toLocaleDateString("en-CA");
+}
+
+function localMonthStartYmd(): string {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1).toLocaleDateString("en-CA");
+}
+
 function docIsToday(doc: { completedAt?: string | null; createdAt: string }): boolean {
   const when = doc.completedAt ?? doc.createdAt;
   try {
@@ -59,7 +90,15 @@ function docIsToday(doc: { completedAt?: string | null; createdAt: string }): bo
   }
 }
 
-export function MovementsHistoryPage() {
+function isExitCategory(docType: string): boolean {
+  return docType === "exit" || docType === "warranty" || docType === "return";
+}
+
+type MovementsHistoryPageProps = {
+  fixedType?: DocType;
+};
+
+export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = {}) {
   const { token, user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -68,7 +107,10 @@ export function MovementsHistoryPage() {
   const canManageEditing =
     user?.roles.includes("super_admin") || user?.roles.includes("secretaria") || false;
 
-  const [filterType, setFilterType] = useState<"" | DocType>("");
+  const [filterType, setFilterType] = useState<FilterDocType>(fixedType ?? "");
+  const effectiveType: FilterDocType = fixedType ?? filterType;
+  const [selectedSedeId, setSelectedSedeId] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState<string>("");
   const [filterDateFrom, setFilterDateFrom] = useState(localTodayYmd);
   const [filterDateTo, setFilterDateTo] = useState(localTodayYmd);
   const [items, setItems] = useState<InventoryDocumentSummary[]>([]);
@@ -86,38 +128,40 @@ export function MovementsHistoryPage() {
   const [labelsDoc, setLabelsDoc] = useState<InventoryDocumentDetail | null>(null);
   const [labelsLoadingId, setLabelsLoadingId] = useState<string | null>(null);
 
-  async function handleCancel(doc: InventoryDocumentSummary) {
-    if (!token) return;
-    if (!window.confirm(`¿Estás seguro de anular esta factura/comprobante ${doc.invoiceNumber || ""}? Se restablecerá el inventario de forma automática y quedará registrada como inactiva en el historial.`)) {
-      return;
-    }
-    setError(null);
-    try {
-      const wh = doc.warehouseId ?? effectiveWh ?? undefined;
-      await cancelInventoryDocument(token, doc.id, wh);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo anular el documento");
-    }
-  }
+  const showAdminSedeFilter = canViewAllWarehouses && isAllWarehouses;
 
-  const effectiveWh = useMemo(() => {
+  const baseWh = useMemo(() => {
     if (isAllWarehouses) return null;
     if (effectiveWarehouseId) return effectiveWarehouseId;
     if (warehouses.length === 1) return warehouses[0]!.id;
     return null;
   }, [isAllWarehouses, effectiveWarehouseId, warehouses]);
 
-  const showWarehouseOnRows = canViewAllWarehouses && !effectiveWh;
-  const scopeText = sessionLabel;
+  const effectiveWh = showAdminSedeFilter ? selectedSedeId || null : baseWh;
+  const showWarehouseOnRows = canViewAllWarehouses;
+
+  const activeSedeObj = useMemo(
+    () => (selectedSedeId ? warehouses.find((w) => w.id === selectedSedeId) ?? null : null),
+    [selectedSedeId, warehouses]
+  );
+
+  const scopeText = showAdminSedeFilter
+    ? activeSedeObj
+      ? `${activeSedeObj.name} (${activeSedeObj.code})`
+      : "Todas las sedes · Área Administrativa"
+    : sessionLabel;
 
   const load = useCallback(async () => {
     if (!token) return;
-    if (!canViewAllWarehouses && !effectiveWh) return;
+    if (!canViewAllWarehouses && !baseWh) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchDocuments(token, effectiveWh, filterType || undefined, {
+      // Si estamos en Historial general (sin fixedType), traemos todos los documentos del rango
+      // para calcular contadores por sede y por tipo en tiempo real.
+      const queryWh = showAdminSedeFilter ? null : baseWh;
+      const queryType = fixedType ?? undefined;
+      const data = await fetchDocuments(token, queryWh, queryType, {
         from: filterDateFrom,
         to: filterDateTo,
       });
@@ -127,7 +171,7 @@ export function MovementsHistoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, effectiveWh, filterType, filterDateFrom, filterDateTo, canViewAllWarehouses]);
+  }, [token, baseWh, showAdminSedeFilter, fixedType, filterDateFrom, filterDateTo, canViewAllWarehouses]);
 
   useEffect(() => {
     void load();
@@ -141,6 +185,126 @@ export function MovementsHistoryPage() {
       window.setTimeout(() => setFlash(null), 6000);
     }
   }, [location.pathname, location.state, navigate]);
+
+  // Contadores por sede (sobre el rango de fechas actual)
+  const countsByWarehouse = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const doc of items) {
+      if (doc.warehouseId) {
+        map.set(doc.warehouseId, (map.get(doc.warehouseId) ?? 0) + 1);
+      }
+    }
+    return map;
+  }, [items]);
+
+  // Items filtrados por sede seleccionada
+  const sedeFilteredItems = useMemo(() => {
+    if (!showAdminSedeFilter || !selectedSedeId) return items;
+    return items.filter((doc) => doc.warehouseId === selectedSedeId);
+  }, [items, showAdminSedeFilter, selectedSedeId]);
+
+  // Contadores por tipo (sobre la sede activa + rango de fechas)
+  const typeCounts = useMemo(() => {
+    let entries = 0;
+    let exits = 0;
+    let adjustments = 0;
+    for (const doc of sedeFilteredItems) {
+      if (doc.docType === "entry") entries += 1;
+      else if (doc.docType === "adjustment") adjustments += 1;
+      else if (isExitCategory(doc.docType)) exits += 1;
+    }
+    return {
+      all: sedeFilteredItems.length,
+      entry: entries,
+      exit: exits,
+      adjustment: adjustments,
+    };
+  }, [sedeFilteredItems]);
+
+  // Items finales tras aplicar filtro de tipo + búsqueda por texto
+  const visibleItems = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return sedeFilteredItems.filter((doc) => {
+      if (effectiveType === "entry" && doc.docType !== "entry") return false;
+      if (effectiveType === "exit" && !isExitCategory(doc.docType)) return false;
+      if (effectiveType === "adjustment" && doc.docType !== "adjustment") return false;
+
+      if (!q) return true;
+      const label = documentTypeLabel(doc).toLowerCase();
+      const inv = (doc.invoiceNumber ?? "").toLowerCase();
+      const op = (doc.productionOrderCode ?? "").toLowerCase();
+      const cust = (doc.customerName ?? "").toLowerCase();
+      const notes = (doc.notes ?? "").toLowerCase();
+      const user = (doc.createdByName ?? "").toLowerCase();
+      const wh = (doc.warehouseName ?? "").toLowerCase();
+      return (
+        label.includes(q) ||
+        inv.includes(q) ||
+        op.includes(q) ||
+        cust.includes(q) ||
+        notes.includes(q) ||
+        user.includes(q) ||
+        wh.includes(q)
+      );
+    });
+  }, [sedeFilteredItems, effectiveType, searchQuery]);
+
+  // KPIs dinámicos sobre los documentos visibles (excluyendo anulados)
+  const kpiStats = useMemo(() => {
+    let entryDocs = 0;
+    let entryUnits = 0;
+    let exitDocs = 0;
+    let exitUnits = 0;
+    let exitRevenue = 0;
+    let adjustmentDocs = 0;
+    let adjustmentUnits = 0;
+
+    for (const doc of visibleItems) {
+      if (doc.status === "cancelled") continue;
+      if (doc.docType === "entry") {
+        entryDocs += 1;
+        entryUnits += doc.totalQuantity || 0;
+      } else if (doc.docType === "adjustment") {
+        adjustmentDocs += 1;
+        adjustmentUnits += doc.totalQuantity || 0;
+      } else {
+        exitDocs += 1;
+        exitUnits += doc.totalQuantity || 0;
+        exitRevenue += doc.totalAmount || 0;
+      }
+    }
+
+    return {
+      totalDocs: visibleItems.length,
+      entryDocs,
+      entryUnits,
+      exitDocs,
+      exitUnits,
+      exitRevenue,
+      adjustmentDocs,
+      adjustmentUnits,
+    };
+  }, [visibleItems]);
+
+  async function handleCancel(doc: InventoryDocumentSummary) {
+    if (!token) return;
+    if (
+      !window.confirm(
+        `¿Estás seguro de anular esta factura/comprobante ${doc.invoiceNumber || ""}? Se restablecerá el inventario de forma automática y quedará registrada como inactiva en el historial.`
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    try {
+      const wh = doc.warehouseId ?? effectiveWh ?? undefined;
+      await cancelInventoryDocument(token, doc.id, wh);
+      clearScanCache(wh);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo anular el documento");
+    }
+  }
 
   async function openDocument(doc: InventoryDocumentSummary) {
     if (!token) return;
@@ -237,6 +401,7 @@ export function MovementsHistoryPage() {
     try {
       const wh = detail.warehouseId ?? effectiveWh ?? undefined;
       const { item } = await editInventoryDocument(token, detail.id, payload, wh);
+      clearScanCache(wh);
       setDetail(null);
       setEditingDoc(false);
       setItems((prev) =>
@@ -268,82 +433,363 @@ export function MovementsHistoryPage() {
     setEditError(null);
   }
 
+  function resetAllFilters() {
+    const t = localTodayYmd();
+    setFilterDateFrom(t);
+    setFilterDateTo(t);
+    if (!fixedType) setFilterType("");
+    setSelectedSedeId("");
+    setSearchQuery("");
+  }
+
+  const todayYmd = localTodayYmd();
+  const yesterdayYmd = localYesterdayYmd();
+  const sevenDaysYmd = localSevenDaysAgoYmd();
+  const monthStartYmd = localMonthStartYmd();
+
+  const isPresetToday = filterDateFrom === todayYmd && filterDateTo === todayYmd;
+  const isPresetYesterday = filterDateFrom === yesterdayYmd && filterDateTo === yesterdayYmd;
+  const isPreset7Days = filterDateFrom === sevenDaysYmd && filterDateTo === todayYmd;
+  const isPresetMonth = filterDateFrom === monthStartYmd && filterDateTo === todayYmd;
+  const hasCustomFilters =
+    Boolean(selectedSedeId) ||
+    Boolean(searchQuery.trim()) ||
+    (!fixedType && filterType !== "") ||
+    !isPresetToday;
+
+  const pageTitle =
+    fixedType === "entry"
+      ? "Listado de entradas"
+      : fixedType === "exit"
+        ? "Listado de ventas"
+        : "Historial de Movimientos";
+  const HeaderIcon =
+    fixedType === "entry"
+      ? ArrowDownToLine
+      : fixedType === "exit"
+        ? ArrowUpFromLine
+        : History;
+  const pageDescription =
+    fixedType === "entry"
+      ? "Entradas y órdenes registradas en la sede: ver comprobante, imprimir etiquetas o editar."
+      : fixedType === "exit"
+        ? "Ventas y salidas registradas en la sede: ver factura, activar edición o anular."
+        : "Auditoría centralizada de entradas, salidas, traslados y ajustes de inventario por sede.";
+  const backTo =
+    fixedType === "entry"
+      ? "/app/inventario/entrada"
+      : fixedType === "exit"
+        ? "/app/inventario/salida"
+        : isAllWarehouses
+          ? "/app"
+          : "/app/inventario";
+  const backLabel =
+    fixedType === "entry"
+      ? "Nueva entrada"
+      : fixedType === "exit"
+        ? "Nueva venta / salida"
+        : isAllWarehouses
+          ? "Panel"
+          : "Inventario";
+
   return (
     <div className="inv-page inv-page--history">
       <InventoryPageHeader
-        backTo="/app/inventario"
-        backLabel="Inventario"
+        backTo={backTo}
+        backLabel={backLabel}
         title={
           <>
-            <History size={24} strokeWidth={2} aria-hidden />
-            Historial
+            <HeaderIcon size={24} strokeWidth={2} aria-hidden />
+            {pageTitle}
           </>
         }
-        description="Cada movimiento del día tiene sus acciones: ver factura, activar edición (una vez) y editar."
+        description={pageDescription}
+        actions={
+          fixedType === "entry" ? (
+            <Link to="/app/inventario/entrada" className="inv-btn inv-btn--primary">
+              <ArrowDownToLine size={18} strokeWidth={2} aria-hidden />
+              Nueva entrada
+            </Link>
+          ) : fixedType === "exit" ? (
+            <Link to="/app/inventario/salida" className="inv-btn inv-btn--primary">
+              <ArrowUpFromLine size={18} strokeWidth={2} aria-hidden />
+              Nueva venta / salida
+            </Link>
+          ) : undefined
+        }
       />
 
       <section className="inv-history-panel" aria-label="Filtros del historial">
         <div className="inv-history-panel__head">
           <div className="inv-history-panel__scope">
-            <span className="inv-history-panel__scope-label">Viendo</span>
+            <span className="inv-history-panel__scope-label">Viendo movimientos de</span>
             <strong>{scopeText}</strong>
           </div>
-          {canViewAllWarehouses ? (
-            <span className="inv-history-panel__badge">Acceso total</span>
-          ) : null}
+          <div className="inv-history-panel__head-right">
+            {hasCustomFilters ? (
+              <button
+                type="button"
+                className="inv-history-reset-btn"
+                onClick={resetAllFilters}
+                title="Restablecer filtros a Hoy y Todas las sedes"
+              >
+                <RotateCcw size={14} strokeWidth={2.2} aria-hidden />
+                Limpiar filtros
+              </button>
+            ) : null}
+            {canViewAllWarehouses ? (
+              <span className="inv-history-panel__badge">Área Administrativa · Acceso total</span>
+            ) : null}
+          </div>
         </div>
 
-        <div className="inv-history-panel__controls">
-          <label className="inv-history-panel__field inv-history-panel__field--date">
-            <span>Desde</span>
-            <input
-              type="date"
-              value={filterDateFrom}
-              max={filterDateTo}
-              onChange={(e) => setFilterDateFrom(e.target.value)}
-              aria-label="Fecha desde"
-            />
-          </label>
+        {/* Fila 1: Búsqueda + Desde / Hasta + Atajos de fecha en una sola línea alineada */}
+        <div className="inv-history-toolbar">
+          <div className="inv-history-search">
+            <label className="inv-history-filter-label" htmlFor="inv-history-search-input">
+              Buscar
+            </label>
+            <div className="inv-history-search__box">
+              <Search size={16} strokeWidth={2.2} className="inv-history-search__icon" aria-hidden />
+              <input
+                id="inv-history-search-input"
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Nº comprobante, cliente, nota o responsable…"
+                aria-label="Buscar en el historial"
+              />
+              {searchQuery ? (
+                <button
+                  type="button"
+                  className="inv-history-search__clear"
+                  onClick={() => setSearchQuery("")}
+                  aria-label="Limpiar búsqueda"
+                >
+                  <X size={14} strokeWidth={2.2} />
+                </button>
+              ) : null}
+            </div>
+          </div>
 
-          <label className="inv-history-panel__field inv-history-panel__field--date">
-            <span>Hasta</span>
-            <input
-              type="date"
-              value={filterDateTo}
-              min={filterDateFrom}
-              onChange={(e) => setFilterDateTo(e.target.value)}
-              aria-label="Fecha hasta"
-            />
-          </label>
+          <div className="inv-history-date-group">
+            <label className="inv-history-date-field">
+              <span className="inv-history-filter-label">
+                <Calendar size={12} strokeWidth={2.2} aria-hidden /> Desde
+              </span>
+              <input
+                type="date"
+                value={filterDateFrom}
+                max={filterDateTo}
+                onChange={(e) => setFilterDateFrom(e.target.value)}
+                aria-label="Fecha desde"
+              />
+            </label>
 
-          <div className="inv-history-panel__types" role="group" aria-label="Tipo de movimiento">
-            <span className="inv-history-panel__types-label">Tipo</span>
-            <div className="inv-pill-filters">
-              <button
-                type="button"
-                className={`inv-pill-filter${filterType === "" ? " is-active" : ""}`}
-                onClick={() => setFilterType("")}
-              >
-                Todos
-              </button>
-              <button
-                type="button"
-                className={`inv-pill-filter inv-pill-filter--entry${filterType === "entry" ? " is-active" : ""}`}
-                onClick={() => setFilterType("entry")}
-              >
-                Entradas
-              </button>
-              <button
-                type="button"
-                className={`inv-pill-filter inv-pill-filter--exit${filterType === "exit" ? " is-active" : ""}`}
-                onClick={() => setFilterType("exit")}
-              >
-                Salidas
-              </button>
+            <label className="inv-history-date-field">
+              <span className="inv-history-filter-label">
+                <Calendar size={12} strokeWidth={2.2} aria-hidden /> Hasta
+              </span>
+              <input
+                type="date"
+                value={filterDateTo}
+                min={filterDateFrom}
+                onChange={(e) => setFilterDateTo(e.target.value)}
+                aria-label="Fecha hasta"
+              />
+            </label>
+
+            <div className="inv-history-presets-wrap">
+              <span className="inv-history-filter-label">Periodo rápido</span>
+              <div className="inv-history-presets" role="group" aria-label="Rangos rápidos de fecha">
+                <button
+                  type="button"
+                  className={`inv-pill-filter${isPresetToday ? " is-active" : ""}`}
+                  onClick={() => {
+                    const t = localTodayYmd();
+                    setFilterDateFrom(t);
+                    setFilterDateTo(t);
+                  }}
+                >
+                  Hoy
+                </button>
+                <button
+                  type="button"
+                  className={`inv-pill-filter${isPresetYesterday ? " is-active" : ""}`}
+                  onClick={() => {
+                    const y = localYesterdayYmd();
+                    setFilterDateFrom(y);
+                    setFilterDateTo(y);
+                  }}
+                >
+                  Ayer
+                </button>
+                <button
+                  type="button"
+                  className={`inv-pill-filter${isPreset7Days ? " is-active" : ""}`}
+                  onClick={() => {
+                    setFilterDateFrom(localSevenDaysAgoYmd());
+                    setFilterDateTo(localTodayYmd());
+                  }}
+                >
+                  7 días
+                </button>
+                <button
+                  type="button"
+                  className={`inv-pill-filter${isPresetMonth ? " is-active" : ""}`}
+                  onClick={() => {
+                    setFilterDateFrom(localMonthStartYmd());
+                    setFilterDateTo(localTodayYmd());
+                  }}
+                >
+                  Este mes
+                </button>
+              </div>
             </div>
           </div>
         </div>
+
+        {/* Fila 2: Sedes + Tipo de movimiento integrados y alineados */}
+        <div className="inv-history-bottom-filters">
+          {showAdminSedeFilter && warehouses.length > 0 ? (
+            <div className="inv-history-filter-block" role="group" aria-label="Filtrar por sede">
+              <span className="inv-history-filter-label">
+                <Building2 size={12} strokeWidth={2.2} aria-hidden /> Sede operativa
+              </span>
+              <div className="inv-history-sedes__pills">
+                <button
+                  type="button"
+                  className={`inv-sede-pill${selectedSedeId === "" ? " is-active" : ""}`}
+                  onClick={() => setSelectedSedeId("")}
+                >
+                  <Building2 size={14} strokeWidth={2} aria-hidden />
+                  <span className="inv-sede-pill__name">Todas</span>
+                  <span className="inv-sede-pill__count">{items.length}</span>
+                </button>
+                {warehouses.map((w) => {
+                  const count = countsByWarehouse.get(w.id) ?? 0;
+                  const active = selectedSedeId === w.id;
+                  const SedeIcon = w.is_factory ? Factory : Store;
+                  return (
+                    <button
+                      key={w.id}
+                      type="button"
+                      className={`inv-sede-pill${active ? " is-active" : ""}${w.is_factory ? " inv-sede-pill--factory" : ""}`}
+                      onClick={() => setSelectedSedeId(active ? "" : w.id)}
+                    >
+                      <SedeIcon size={14} strokeWidth={2} aria-hidden />
+                      <span className="inv-sede-pill__name">{w.name}</span>
+                      <span className="inv-sede-pill__code">{w.code}</span>
+                      <span className="inv-sede-pill__count">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {!fixedType ? (
+            <div className="inv-history-filter-block" role="group" aria-label="Tipo de movimiento">
+              <span className="inv-history-filter-label">Tipo de movimiento</span>
+              <div className="inv-history-type-pills">
+                <button
+                  type="button"
+                  className={`inv-type-chip${filterType === "" ? " is-active" : ""}`}
+                  onClick={() => setFilterType("")}
+                >
+                  <Layers size={14} strokeWidth={2.2} aria-hidden />
+                  <span>Todos</span>
+                  <span className="inv-type-chip__badge">{typeCounts.all}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`inv-type-chip inv-type-chip--entry${filterType === "entry" ? " is-active" : ""}`}
+                  onClick={() => setFilterType("entry")}
+                >
+                  <ArrowDownToLine size={14} strokeWidth={2.2} aria-hidden />
+                  <span>Entradas</span>
+                  <span className="inv-type-chip__badge">{typeCounts.entry}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`inv-type-chip inv-type-chip--exit${filterType === "exit" ? " is-active" : ""}`}
+                  onClick={() => setFilterType("exit")}
+                >
+                  <ArrowUpFromLine size={14} strokeWidth={2.2} aria-hidden />
+                  <span>Salidas / Ventas</span>
+                  <span className="inv-type-chip__badge">{typeCounts.exit}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`inv-type-chip inv-type-chip--adjustment${filterType === "adjustment" ? " is-active" : ""}`}
+                  onClick={() => setFilterType("adjustment")}
+                >
+                  <SlidersHorizontal size={14} strokeWidth={2.2} aria-hidden />
+                  <span>Ajustes</span>
+                  <span className="inv-type-chip__badge">{typeCounts.adjustment}</span>
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
       </section>
+
+      {/* Tarjetas de resumen rápido (KPIs del filtro actual) */}
+      {!loading && visibleItems.length > 0 ? (
+        <section className="inv-history-kpis" aria-label="Resumen de movimientos filtrados">
+          <div className="inv-history-kpi">
+            <div className="inv-history-kpi__icon inv-history-kpi__icon--all" aria-hidden>
+              <Layers size={18} strokeWidth={2} />
+            </div>
+            <div className="inv-history-kpi__body">
+              <span className="inv-history-kpi__label">Movimientos</span>
+              <strong className="inv-history-kpi__value">{kpiStats.totalDocs}</strong>
+              <span className="inv-history-kpi__sub">En la vista actual</span>
+            </div>
+          </div>
+
+          <div className="inv-history-kpi">
+            <div className="inv-history-kpi__icon inv-history-kpi__icon--entry" aria-hidden>
+              <ArrowDownToLine size={18} strokeWidth={2} />
+            </div>
+            <div className="inv-history-kpi__body">
+              <span className="inv-history-kpi__label">Entradas</span>
+              <strong className="inv-history-kpi__value">{kpiStats.entryUnits} uds</strong>
+              <span className="inv-history-kpi__sub">
+                {kpiStats.entryDocs} {kpiStats.entryDocs === 1 ? "registro" : "registros"}
+              </span>
+            </div>
+          </div>
+
+          <div className="inv-history-kpi">
+            <div className="inv-history-kpi__icon inv-history-kpi__icon--exit" aria-hidden>
+              <ArrowUpFromLine size={18} strokeWidth={2} />
+            </div>
+            <div className="inv-history-kpi__body">
+              <span className="inv-history-kpi__label">Salidas / Ventas</span>
+              <strong className="inv-history-kpi__value">
+                {kpiStats.exitRevenue > 0 ? formatMoney(kpiStats.exitRevenue) : `${kpiStats.exitUnits} uds`}
+              </strong>
+              <span className="inv-history-kpi__sub">
+                {kpiStats.exitDocs} {kpiStats.exitDocs === 1 ? "salida" : "salidas"} · {kpiStats.exitUnits} uds
+              </span>
+            </div>
+          </div>
+
+          <div className="inv-history-kpi">
+            <div className="inv-history-kpi__icon inv-history-kpi__icon--adjustment" aria-hidden>
+              <SlidersHorizontal size={18} strokeWidth={2} />
+            </div>
+            <div className="inv-history-kpi__body">
+              <span className="inv-history-kpi__label">Ajustes de inventario</span>
+              <strong className="inv-history-kpi__value">{kpiStats.adjustmentUnits} uds</strong>
+              <span className="inv-history-kpi__sub">
+                {kpiStats.adjustmentDocs} {kpiStats.adjustmentDocs === 1 ? "conteo/ajuste" : "conteos/ajustes"}
+              </span>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {flash ? (
         <p className="inv-success" role="status">
@@ -365,103 +811,149 @@ export function MovementsHistoryPage() {
 
       {loading ? (
         <p className="inv-page__desc">Cargando movimientos…</p>
-      ) : items.length === 0 ? (
+      ) : visibleItems.length === 0 ? (
         <div className="inv-empty">
-          <p>No hay movimientos con estos filtros.</p>
-          <Link to="/app/inventario/entrada" className="inv-btn inv-btn--primary">
-            <ArrowDownToLine size={18} strokeWidth={2} aria-hidden />
-            Registrar entrada
-          </Link>
+          <p>
+            {fixedType === "entry"
+              ? "No hay entradas registradas en este rango de fechas."
+              : fixedType === "exit"
+                ? "No hay ventas ni salidas registradas en este rango de fechas."
+                : "No hay movimientos que coincidan con los filtros seleccionados."}
+          </p>
+          {hasCustomFilters ? (
+            <button type="button" className="inv-btn inv-btn--ghost" onClick={resetAllFilters}>
+              <RotateCcw size={16} strokeWidth={2} aria-hidden />
+              Restablecer filtros
+            </button>
+          ) : null}
+          {fixedType === "exit" ? (
+            <Link to="/app/inventario/salida" className="inv-btn inv-btn--primary">
+              <ArrowUpFromLine size={18} strokeWidth={2} aria-hidden />
+              Nueva venta / salida
+            </Link>
+          ) : !isAllWarehouses ? (
+            <Link to="/app/inventario/entrada" className="inv-btn inv-btn--primary">
+              <ArrowDownToLine size={18} strokeWidth={2} aria-hidden />
+              Nueva entrada
+            </Link>
+          ) : null}
         </div>
       ) : (
         <ul className="inv-history-list">
-          {items.map((doc) => {
+          {visibleItems.map((doc) => {
             const cancelled = doc.status === "cancelled";
+            const isAdjustment = doc.docType === "adjustment";
             const isEntry = doc.docType === "entry";
             const isOp = isProductionOrderDoc(doc);
             const labelsPrinted = Boolean(doc.labelsPrintedAt);
-            const Icon = isEntry ? ArrowDownToLine : ArrowUpFromLine;
+            const variant = isAdjustment ? "adjustment" : isEntry ? "entry" : "exit";
+            const Icon = isAdjustment
+              ? SlidersHorizontal
+              : isEntry
+                ? ArrowDownToLine
+                : ArrowUpFromLine;
             const when = doc.completedAt ?? doc.createdAt;
             const label = documentTypeLabel(doc);
-            const showAmount = !isEntry && (doc.totalAmount ?? 0) > 0;
+            const showAmount = !isEntry && !isAdjustment && (doc.totalAmount ?? 0) > 0;
             const edited = (doc.editCount ?? 0) > 0;
-            const showEditActions = canManageEditing && docIsToday(doc) && !cancelled;
+            const showEditActions =
+              canManageEditing && docIsToday(doc) && !cancelled && !isAdjustment;
             const unlocked = doc.editingUnlocked === true;
+            const docCode = doc.invoiceNumber || doc.productionOrderCode;
+            const countSubLabel =
+              isAdjustment && doc.metadata?.countKind === "initial"
+                ? "Inventario inicial"
+                : isAdjustment && doc.metadata?.countKind === "audit"
+                  ? "Cierre de conteo"
+                  : null;
 
             return (
               <li key={doc.id} className="inv-history-list__item">
                 <article
-                  className={`inv-history-card inv-history-card--${isEntry ? "entry" : "exit"}${cancelled ? " inv-history-card--cancelled" : ""}`}
+                  className={`inv-history-card inv-history-card--${variant}${cancelled ? " inv-history-card--cancelled" : ""}`}
                 >
                   <div className="inv-history-card__main">
-                  <div className="inv-history-card__icon" aria-hidden>
-                    <Icon size={20} strokeWidth={2} />
-                  </div>
-
-                  <div className="inv-history-card__body">
-                    <div className="inv-history-card__row">
-                      <div className="inv-history-card__tags">
-                        <span
-                          className={`inv-history-card__type inv-history-card__type--${isEntry ? "entry" : "exit"}`}
-                        >
-                          {label}
-                        </span>
-                        {cancelled ? (
-                          <span className="inv-history-card__cancelled">Anulada</span>
-                        ) : null}
-                        {unlocked ? (
-                          <span className="inv-history-card__unlock-badge">Edición activa</span>
-                        ) : null}
-                        {edited ? <span className="inv-history-card__edited">Editado</span> : null}
-                        {isOp && labelsPrinted ? (
-                          <span className="inv-history-card__edited">Etiquetas impresas</span>
-                        ) : null}
-                        {showWarehouseOnRows && doc.warehouseName ? (
-                          <span className="inv-history-card__warehouse">{doc.warehouseName}</span>
-                        ) : null}
-                      </div>
-                      {showAmount ? (
-                        <span className="inv-history-card__amount">{formatMoney(doc.totalAmount!)}</span>
-                      ) : null}
+                    <div className="inv-history-card__icon" aria-hidden>
+                      <Icon size={20} strokeWidth={2.2} />
                     </div>
 
-                    <p className="inv-history-card__meta">
-                      <time dateTime={when}>{formatDate(when)}</time>
-                      <span aria-hidden>·</span>
-                      <span>
-                        {doc.lineCount} {doc.lineCount === 1 ? "línea" : "líneas"} · {doc.totalQuantity} uds
-                      </span>
-                      {doc.createdByName ? (
-                        <>
-                          <span aria-hidden>·</span>
-                          <span>{doc.createdByName}</span>
-                        </>
-                      ) : null}
-                    </p>
-
-                    {doc.lastUnlockObservation ? (
-                      <p className="inv-history-card__obs">
-                        <span>Motivo activación:</span> {doc.lastUnlockObservation}
-                      </p>
-                    ) : null}
-
-                    {(isOp && (doc.invoiceNumber || doc.productionOrderCode)) ||
-                    (!isEntry && (doc.invoiceNumber || doc.customerName)) ||
-                    doc.notes ? (
-                      <p className="inv-history-card__extra">
-                        {isOp && (doc.invoiceNumber || doc.productionOrderCode) ? (
-                          <span className="inv-history-card__invoice">
-                            Nº {doc.invoiceNumber || doc.productionOrderCode}
+                    <div className="inv-history-card__body">
+                      <div className="inv-history-card__row">
+                        <div className="inv-history-card__tags">
+                          <span className={`inv-history-card__type inv-history-card__type--${variant}`}>
+                            {label}
                           </span>
+                          {countSubLabel ? (
+                            <span className="inv-history-card__subkind">{countSubLabel}</span>
+                          ) : null}
+                          {showWarehouseOnRows && doc.warehouseName ? (
+                            <span className="inv-history-card__warehouse">
+                              <Building2 size={12} strokeWidth={2.2} aria-hidden />
+                              {doc.warehouseName}
+                            </span>
+                          ) : null}
+                          {docCode ? (
+                            <span className="inv-history-card__code-pill">Nº {docCode}</span>
+                          ) : null}
+                          {cancelled ? (
+                            <span className="inv-history-card__cancelled">Anulada</span>
+                          ) : null}
+                          {unlocked ? (
+                            <span className="inv-history-card__unlock-badge">Edición activa</span>
+                          ) : null}
+                          {edited ? <span className="inv-history-card__edited">Editado</span> : null}
+                          {isOp && labelsPrinted ? (
+                            <span className="inv-history-card__edited">Etiquetas impresas</span>
+                          ) : null}
+                        </div>
+                        {showAmount ? (
+                          <span className="inv-history-card__amount">{formatMoney(doc.totalAmount!)}</span>
                         ) : null}
-                        {!isEntry && doc.invoiceNumber ? (
-                          <span className="inv-history-card__invoice">Nº {doc.invoiceNumber}</span>
+                      </div>
+
+                      <div className="inv-history-card__meta">
+                        <span className="inv-history-card__meta-item">
+                          <Calendar size={13} strokeWidth={2} aria-hidden />
+                          <time dateTime={when}>{formatDate(when)}</time>
+                        </span>
+                        <span className="inv-history-card__meta-sep" aria-hidden>
+                          ·
+                        </span>
+                        <span className="inv-history-card__meta-item">
+                          <Package size={13} strokeWidth={2} aria-hidden />
+                          {doc.lineCount} {doc.lineCount === 1 ? "línea" : "líneas"} ·{" "}
+                          <strong>{doc.totalQuantity} uds</strong>
+                        </span>
+                        {doc.createdByName ? (
+                          <>
+                            <span className="inv-history-card__meta-sep" aria-hidden>
+                              ·
+                            </span>
+                            <span className="inv-history-card__meta-item">
+                              <User size={13} strokeWidth={2} aria-hidden />
+                              {doc.createdByName}
+                            </span>
+                          </>
                         ) : null}
-                        {!isEntry && doc.customerName ? <span>{doc.customerName}</span> : null}
-                        {doc.notes ? <span className="inv-history-card__notes">{doc.notes}</span> : null}
-                      </p>
-                    ) : null}
-                  </div>
+                      </div>
+
+                      {doc.lastUnlockObservation ? (
+                        <p className="inv-history-card__obs">
+                          <span>Motivo activación:</span> {doc.lastUnlockObservation}
+                        </p>
+                      ) : null}
+
+                      {(!isEntry && !isAdjustment && doc.customerName) || doc.notes ? (
+                        <p className="inv-history-card__extra">
+                          {!isEntry && !isAdjustment && doc.customerName ? (
+                            <span className="inv-history-card__customer">
+                              Cliente: <strong>{doc.customerName}</strong>
+                            </span>
+                          ) : null}
+                          {doc.notes ? <span className="inv-history-card__notes">“{doc.notes}”</span> : null}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="inv-history-card__actions">
@@ -471,7 +963,7 @@ export function MovementsHistoryPage() {
                       onClick={() => void openDocument(doc)}
                     >
                       <FileText size={15} strokeWidth={2} aria-hidden />
-                      Ver factura
+                      {isAdjustment ? "Ver detalle" : isEntry ? "Ver comprobante" : "Ver factura"}
                     </button>
                     {isOp && !cancelled ? (
                       <button
@@ -485,7 +977,7 @@ export function MovementsHistoryPage() {
                         {labelsLoadingId === doc.id ? "Cargando…" : "Imprimir etiquetas"}
                       </button>
                     ) : null}
-                    {!cancelled && canManageEditing ? (
+                    {!cancelled && canManageEditing && !isAdjustment ? (
                       <button
                         type="button"
                         className="inv-history-card__action inv-history-card__action--danger"

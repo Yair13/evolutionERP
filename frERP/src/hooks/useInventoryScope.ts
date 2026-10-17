@@ -23,7 +23,7 @@ export function useInventoryScope() {
     scopeLabel: (filterWarehouseId?: string | null) => {
       if (filterWarehouseId === "" || filterWarehouseId == null) {
         if (canViewAllWarehouses && (isAllWarehouses || filterWarehouseId === "")) {
-          return "Todas las sedes";
+          return "Sede Administrativa";
         }
       }
       const id = filterWarehouseId || warehouseId;

@@ -2,10 +2,20 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react
 import { apiGet, apiPatch, apiPost } from "../../api/client.js";
 import { Modal } from "../../components/ui/Modal.js";
 import { useAuth } from "../../context/AuthContext.js";
+import { useWarehouse } from "../../context/WarehouseContext.js";
+import { clearAllPosDrafts } from "../../lib/posDraft.js";
+import { clearScanCache } from "../../lib/scanCache.js";
 import type { WarehouseRow } from "./organization.types.js";
+
+interface SystemResetResponse {
+  ok: boolean;
+  keptWarehouse: { id: string; code: string; name: string };
+  keptUser: { id: string; email: string; fullName: string };
+}
 
 export function WarehousesManagePage() {
   const { token } = useAuth();
+  const { reload: reloadWarehouses } = useWarehouse();
   const [items, setItems] = useState<WarehouseRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -20,6 +30,12 @@ export function WarehousesManagePage() {
   const [editAddress, setEditAddress] = useState("");
   const [editActive, setEditActive] = useState(true);
   const [editFactory, setEditFactory] = useState(false);
+
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetSuccess, setResetSuccess] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -65,6 +81,7 @@ export function WarehousesManagePage() {
       setAddress("");
       setIsFactory(false);
       await load();
+      await reloadWarehouses();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error");
     }
@@ -88,8 +105,41 @@ export function WarehousesManagePage() {
       );
       setEdit(null);
       await load();
+      await reloadWarehouses();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error");
+    }
+  }
+
+  async function onResetSystem(e: FormEvent) {
+    e.preventDefault();
+    if (!token) return;
+    if (resetConfirmText.trim().toUpperCase() !== "ELIMINAR TODO") {
+      setResetError('Debes escribir exactamente "ELIMINAR TODO" para confirmar.');
+      return;
+    }
+    setResetBusy(true);
+    setResetError(null);
+    setResetSuccess(null);
+    try {
+      const res = await apiPost<SystemResetResponse>(
+        "/system/reset",
+        { confirmText: resetConfirmText.trim().toUpperCase() },
+        token
+      );
+      clearAllPosDrafts();
+      clearScanCache();
+      setResetModalOpen(false);
+      setResetConfirmText("");
+      setResetSuccess(
+        `Sistema reiniciado correctamente. Solo quedaron la sede "${res.keptWarehouse.name}" (${res.keptWarehouse.code}) y el super administrador "${res.keptUser.email}".`
+      );
+      await load();
+      await reloadWarehouses();
+    } catch (err) {
+      setResetError(err instanceof Error ? err.message : "Error al reiniciar el sistema");
+    } finally {
+      setResetBusy(false);
     }
   }
 
@@ -106,6 +156,21 @@ export function WarehousesManagePage() {
       </header>
 
       {error ? <p className="form-error">{error}</p> : null}
+      {resetSuccess ? (
+        <div
+          style={{
+            padding: "0.9rem 1.1rem",
+            borderRadius: "10px",
+            background: "rgba(22, 163, 74, 0.12)",
+            border: "1px solid rgba(22, 163, 74, 0.35)",
+            color: "#15803d",
+            fontWeight: 600,
+            marginBottom: "1rem",
+          }}
+        >
+          {resetSuccess}
+        </div>
+      ) : null}
 
       <section className="org-card">
         <h2 className="org-card__title">Nuevo almacén</h2>
@@ -122,11 +187,11 @@ export function WarehousesManagePage() {
             <span>Dirección (opcional)</span>
             <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Calle, ciudad…" />
           </label>
-          <label className="field field--row" style={{ alignSelf: "flex-end", marginBottom: "8px" }}>
+          <label className="field field--row org-form__inline-check">
             <input type="checkbox" checked={isFactory} onChange={(e) => setIsFactory(e.target.checked)} />
             <span>¿Es Fábrica?</span>
           </label>
-          <button type="submit" className="btn primary" style={{ alignSelf: "flex-end", marginBottom: "8px" }}>
+          <button type="submit" className="btn primary org-form__submit">
             Crear
           </button>
         </form>
@@ -149,13 +214,28 @@ export function WarehousesManagePage() {
             <tbody>
               {sorted.map((w) => (
                 <tr key={w.id}>
-                  <td>
+                  <td data-label="Código">
                     <code>{w.code}</code>
                   </td>
-                  <td>{w.name}</td>
-                  <td>{w.is_factory ? <span className="pill pill--ok" style={{ background: "rgba(37,99,235,0.1)", color: "#1d4ed8", borderColor: "rgba(37,99,235,0.22)" }}>Fábrica</span> : <span className="pill pill--off" style={{ background: "#f1f5f9", color: "#475569" }}>Punto Venta</span>}</td>
-                  <td>{w.is_active ? <span className="pill pill--ok">Activo</span> : <span className="pill pill--off">Inactivo</span>}</td>
-                  <td className="num">
+                  <td data-label="Nombre">{w.name}</td>
+                  <td data-label="Tipo">
+                    {w.is_factory ? (
+                      <span
+                        className="pill pill--ok"
+                        style={{ background: "rgba(37,99,235,0.1)", color: "#1d4ed8", borderColor: "rgba(37,99,235,0.22)" }}
+                      >
+                        Fábrica
+                      </span>
+                    ) : (
+                      <span className="pill pill--off" style={{ background: "#f1f5f9", color: "#475569" }}>
+                        Punto Venta
+                      </span>
+                    )}
+                  </td>
+                  <td data-label="Estado">
+                    {w.is_active ? <span className="pill pill--ok">Activo</span> : <span className="pill pill--off">Inactivo</span>}
+                  </td>
+                  <td data-label="Acciones" className="num">
                     <button type="button" className="btn ghost sm" onClick={() => setEdit(w)}>
                       Editar
                     </button>
@@ -166,6 +246,40 @@ export function WarehousesManagePage() {
           </table>
         </div>
       ) : null}
+
+      <section
+        className="org-card"
+        style={{
+          marginTop: "2rem",
+          borderColor: "rgba(220, 38, 38, 0.35)",
+          background: "rgba(254, 242, 242, 0.45)",
+        }}
+      >
+        <h2 className="org-card__title" style={{ color: "#b91c1c" }}>
+          Zona de peligro · Limpiar todo el sistema
+        </h2>
+        <p className="page-desc" style={{ marginBottom: "1rem" }}>
+          Elimina <strong>todas las entradas, salidas, conteos, productos, imágenes, clientes, gastos, cierres, otras sedes y otros usuarios</strong>.
+          Únicamente se conservarán la sede <strong>Principal (MAIN)</strong> y tu cuenta de <strong>Super Administrador</strong>.
+        </p>
+        <button
+          type="button"
+          className="btn"
+          style={{
+            background: "#dc2626",
+            color: "#fff",
+            borderColor: "#b91c1c",
+            fontWeight: 600,
+          }}
+          onClick={() => {
+            setResetConfirmText("");
+            setResetError(null);
+            setResetModalOpen(true);
+          }}
+        >
+          Limpiar todo el sistema…
+        </button>
+      </section>
 
       <Modal open={!!edit} title="Editar almacén" onClose={() => setEdit(null)}>
         {edit ? (
@@ -201,6 +315,62 @@ export function WarehousesManagePage() {
           </form>
         ) : null}
       </Modal>
+
+      <Modal
+        open={resetModalOpen}
+        title="Confirmar limpieza total del sistema"
+        onClose={() => {
+          if (!resetBusy) setResetModalOpen(false);
+        }}
+      >
+        <form className="org-form org-form--stack" onSubmit={onResetSystem}>
+          <p style={{ margin: 0, lineHeight: 1.5, color: "#334155" }}>
+            Esta acción es <strong>irreversible</strong>. Se borrarán todos los productos, fotos, movimientos de inventario,
+            entradas, salidas, conteos, clientes, sedes adicionales y usuarios adicionales.
+          </p>
+          <p style={{ margin: 0, lineHeight: 1.5, color: "#334155" }}>
+            Solo quedarán la sede <strong>Principal (MAIN)</strong> y tu usuario <strong>Super Administrador</strong>.
+          </p>
+          {resetError ? <p className="form-error">{resetError}</p> : null}
+          <label className="field">
+            <span>
+              Escribe <strong>ELIMINAR TODO</strong> para confirmar:
+            </span>
+            <input
+              value={resetConfirmText}
+              onChange={(e) => setResetConfirmText(e.target.value)}
+              placeholder="ELIMINAR TODO"
+              autoFocus
+              required
+              disabled={resetBusy}
+            />
+          </label>
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={resetBusy}
+              onClick={() => setResetModalOpen(false)}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="btn"
+              disabled={resetBusy || resetConfirmText.trim().toUpperCase() !== "ELIMINAR TODO"}
+              style={{
+                background: "#dc2626",
+                color: "#fff",
+                borderColor: "#b91c1c",
+                fontWeight: 600,
+              }}
+            >
+              {resetBusy ? "Limpiando sistema…" : "Sí, limpiar todo el sistema"}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }
+

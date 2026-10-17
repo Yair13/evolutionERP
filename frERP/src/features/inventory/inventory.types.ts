@@ -149,9 +149,10 @@ export type InventoryDocumentLine = {
 export type InventoryDocumentDetail = {
   id: string;
   warehouseId?: string;
-  docType: DocType | "warranty" | "return";
+  docType: DocType | "warranty" | "return" | "adjustment";
   status: string;
   notes: string | null;
+  reason?: string | null;
   lineCount: number;
   totalQuantity: number;
   createdAt: string;

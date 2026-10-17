@@ -10,12 +10,6 @@ const roleLabelEs: Record<string, string> = {
   admin_local: "Administrador de local",
 };
 
-const UNRESTRICTED_ROLES = new Set(["super_admin", "secretaria"]);
-
-function hasUnrestrictedRole(roles: readonly string[]): boolean {
-  return roles.some((code) => UNRESTRICTED_ROLES.has(code));
-}
-
 export function UsersManagePage() {
   const { token, user } = useAuth();
   const canAssignSuperAdmin = user?.roles.includes("super_admin") ?? false;
@@ -33,11 +27,13 @@ export function UsersManagePage() {
   const [cPassword, setCPassword] = useState("");
   const [cName, setCName] = useState("");
   const [cRoles, setCRoles] = useState<string[]>([]);
+  const [cAdminAccess, setCAdminAccess] = useState(false);
   const [cWh, setCWh] = useState<string[]>([]);
 
   const [eName, setEName] = useState("");
   const [eActive, setEActive] = useState(true);
   const [eRoles, setERoles] = useState<string[]>([]);
+  const [eAdminAccess, setEAdminAccess] = useState(false);
   const [eWh, setEWh] = useState<string[]>([]);
   const [ePassword, setEPassword] = useState("");
 
@@ -46,11 +42,10 @@ export function UsersManagePage() {
     setLoading(true);
     setError(null);
     try {
-      const warehousePath = user?.roles.includes("super_admin") ? "/warehouses/manage" : "/warehouses";
       const [u, r, w] = await Promise.all([
         apiGet<{ items: UserRow[] }>("/users", token),
         apiGet<{ items: RoleRow[] }>("/roles", token),
-        apiGet<{ items: WarehouseRow[] }>(warehousePath, token),
+        apiGet<{ items: WarehouseRow[] }>("/warehouses/manage", token),
       ]);
       setUsers(u.items);
       setRoleCatalog(r.items);
@@ -60,7 +55,7 @@ export function UsersManagePage() {
     } finally {
       setLoading(false);
     }
-  }, [token, user?.roles]);
+  }, [token]);
 
   useEffect(() => {
     void load();
@@ -71,6 +66,7 @@ export function UsersManagePage() {
     setEName(edit.fullName);
     setEActive(edit.isActive);
     setERoles([...edit.roles]);
+    setEAdminAccess(Boolean(edit.hasAdminAccess || edit.roles.includes("super_admin")));
     setEWh([...edit.warehouseIds]);
     setEPassword("");
   }, [edit]);
@@ -87,8 +83,8 @@ export function UsersManagePage() {
     return [...set];
   }
 
-  const cUnrestricted = hasUnrestrictedRole(cRoles);
-  const eUnrestricted = hasUnrestrictedRole(eRoles);
+  const cIsSuperAdmin = cRoles.includes("super_admin");
+  const eIsSuperAdmin = eRoles.includes("super_admin");
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -106,7 +102,8 @@ export function UsersManagePage() {
           password: cPassword,
           fullName: cName.trim(),
           roleCodes: cRoles,
-          warehouseIds: cUnrestricted ? [] : cWh,
+          hasAdminAccess: cIsSuperAdmin ? true : cAdminAccess,
+          warehouseIds: cIsSuperAdmin ? [] : cWh,
         },
         token
       );
@@ -115,6 +112,7 @@ export function UsersManagePage() {
       setCPassword("");
       setCName("");
       setCRoles([]);
+      setCAdminAccess(false);
       setCWh([]);
       await load();
     } catch (err) {
@@ -135,7 +133,8 @@ export function UsersManagePage() {
         fullName: eName.trim(),
         is_active: eActive,
         roleCodes: eRoles,
-        warehouseIds: eUnrestricted ? [] : eWh,
+        hasAdminAccess: eIsSuperAdmin ? true : eAdminAccess,
+        warehouseIds: eIsSuperAdmin ? [] : eWh,
       };
       if (ePassword.trim().length > 0) body.password = ePassword;
       await apiPatch(`/users/${edit.id}`, body, token);
@@ -151,8 +150,8 @@ export function UsersManagePage() {
       <header className="page-header">
         <h1>Usuarios y permisos</h1>
         <p className="page-desc">
-          Alta de cuentas, asignación de roles del catálogo y sedes para administradores de local. El identificador puede
-          ser cualquier nombre de usuario (no necesita ser un correo). Solo super administración y secretaría.
+          Alta de cuentas, asignación de roles, permiso de acceso a la <strong>Sede Administrativa</strong> y sedes
+          operativas asignadas.
         </p>
       </header>
 
@@ -173,46 +172,60 @@ export function UsersManagePage() {
               <tr>
                 <th>Usuario</th>
                 <th>Roles</th>
-                <th>Sedes</th>
+                <th>Sedes y acceso</th>
                 <th>Estado</th>
                 <th className="num">Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
-                <tr key={u.id}>
-                  <td>
-                    <div className="cell-stack">
-                      <span className="cell-strong">{u.fullName}</span>
-                      <span className="muted">{u.email.includes("@") ? u.email : `@${u.email}`}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <div className="tag-row">
-                      {u.roles.map((r) => (
-                        <span key={r} className="pill pill--neutral">
-                          {roleLabelEs[r] ?? r}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td>
-                    {hasUnrestrictedRole(u.roles) ? (
-                      <span className="pill pill--info">Todas las sedes</span>
-                    ) : u.warehouseIds.length ? (
-                      <span className="muted">{u.warehouseIds.length} sede(s)</span>
-                    ) : (
-                      <span className="muted">—</span>
-                    )}
-                  </td>
-                  <td>{u.isActive ? <span className="pill pill--ok">Activo</span> : <span className="pill pill--off">Inactivo</span>}</td>
-                  <td className="num">
-                    <button type="button" className="btn ghost sm" onClick={() => setEdit(u)}>
-                      Editar
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {users.map((u) => {
+                const isSuper = u.roles.includes("super_admin");
+                return (
+                  <tr key={u.id}>
+                    <td data-label="Usuario">
+                      <div className="cell-stack">
+                        <span className="cell-strong">{u.fullName}</span>
+                        <span className="muted">{u.email.includes("@") ? u.email : `@${u.email}`}</span>
+                      </div>
+                    </td>
+                    <td data-label="Roles">
+                      <div className="tag-row">
+                        {u.roles.map((r) => (
+                          <span key={r} className="pill pill--neutral">
+                            {roleLabelEs[r] ?? r}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td data-label="Sedes y acceso">
+                      <div className="tag-row">
+                        {u.hasAdminAccess || isSuper ? (
+                          <span className="pill pill--info">Sede Administrativa</span>
+                        ) : null}
+                        {isSuper ? (
+                          <span className="pill pill--neutral">Todas las sedes</span>
+                        ) : u.warehouseIds.length ? (
+                          <span className="pill pill--neutral">{u.warehouseIds.length} sede(s)</span>
+                        ) : !u.hasAdminAccess ? (
+                          <span className="muted">—</span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td data-label="Estado">
+                      {u.isActive ? (
+                        <span className="pill pill--ok">Activo</span>
+                      ) : (
+                        <span className="pill pill--off">Inactivo</span>
+                      )}
+                    </td>
+                    <td data-label="Acciones" className="num">
+                      <button type="button" className="btn ghost sm" onClick={() => setEdit(u)}>
+                        Editar
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -253,29 +266,49 @@ export function UsersManagePage() {
                   <input
                     type="checkbox"
                     checked={cRoles.includes(r.code)}
-                    onChange={(e) => setCRoles(toggle(cRoles, r.code, e.target.checked))}
+                    onChange={(e) => {
+                      const next = toggle(cRoles, r.code, e.target.checked);
+                      setCRoles(next);
+                      if (e.target.checked && (r.code === "super_admin" || r.code === "secretaria")) {
+                        setCAdminAccess(true);
+                      }
+                    }}
                   />
                   <span>{roleLabelEs[r.code] ?? r.name}</span>
                 </label>
               ))}
             </div>
           </fieldset>
-          <fieldset className="fieldset" disabled={cUnrestricted}>
-            <legend>Sedes asignadas</legend>
-            {cUnrestricted ? (
+          <fieldset className="fieldset">
+            <legend>Parte administrativa</legend>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={cIsSuperAdmin ? true : cAdminAccess}
+                disabled={cIsSuperAdmin}
+                onChange={(e) => setCAdminAccess(e.target.checked)}
+              />
+              <span>
+                <strong>Acceso a Sede Administrativa</strong> · Permite ingresar a la sede administrativa al iniciar sesión
+              </span>
+            </label>
+          </fieldset>
+          <fieldset className="fieldset" disabled={cIsSuperAdmin}>
+            <legend>Sedes operativas asignadas</legend>
+            {cIsSuperAdmin ? (
               <p className="field-hint">
-                Este rol tiene <strong>acceso a todas las sedes</strong> de forma automática.
+                El rol <strong>Super administrador</strong> tiene acceso a todas las sedes operativas de forma automática.
               </p>
             ) : (
-              <p className="field-hint">Recomendado para “Administrador de local”. Puede quedar vacío si no aplica.</p>
+              <p className="field-hint">Marca las sedes operativas a las que puede ingresar este usuario.</p>
             )}
             <div className="checks checks--grid">
               {warehouseCatalog.map((w) => (
                 <label key={w.id} className="check">
                   <input
                     type="checkbox"
-                    checked={cUnrestricted ? true : cWh.includes(w.id)}
-                    disabled={cUnrestricted}
+                    checked={cIsSuperAdmin ? true : cWh.includes(w.id)}
+                    disabled={cIsSuperAdmin}
                     onChange={(e) => setCWh(toggle(cWh, w.id, e.target.checked))}
                   />
                   <span>
@@ -329,20 +362,36 @@ export function UsersManagePage() {
                 ))}
               </div>
             </fieldset>
-            <fieldset className="fieldset" disabled={eUnrestricted}>
-              <legend>Sedes asignadas</legend>
-              {eUnrestricted ? (
+            <fieldset className="fieldset">
+              <legend>Parte administrativa</legend>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={eIsSuperAdmin ? true : eAdminAccess}
+                  disabled={eIsSuperAdmin}
+                  onChange={(e) => setEAdminAccess(e.target.checked)}
+                />
+                <span>
+                  <strong>Acceso a Sede Administrativa</strong> · Permite ingresar a la sede administrativa al iniciar sesión
+                </span>
+              </label>
+            </fieldset>
+            <fieldset className="fieldset" disabled={eIsSuperAdmin}>
+              <legend>Sedes operativas asignadas</legend>
+              {eIsSuperAdmin ? (
                 <p className="field-hint">
-                  Este rol tiene <strong>acceso a todas las sedes</strong> de forma automática.
+                  El rol <strong>Super administrador</strong> tiene acceso a todas las sedes operativas de forma automática.
                 </p>
-              ) : null}
+              ) : (
+                <p className="field-hint">Marca las sedes operativas a las que puede ingresar este usuario.</p>
+              )}
               <div className="checks checks--grid">
                 {warehouseCatalog.map((w) => (
                   <label key={w.id} className="check">
                     <input
                       type="checkbox"
-                      checked={eUnrestricted ? true : eWh.includes(w.id)}
-                      disabled={eUnrestricted}
+                      checked={eIsSuperAdmin ? true : eWh.includes(w.id)}
+                      disabled={eIsSuperAdmin}
                       onChange={(e) => setEWh(toggle(eWh, w.id, e.target.checked))}
                     />
                     <span>

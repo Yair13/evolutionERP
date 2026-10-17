@@ -12,17 +12,19 @@ import { useAuth } from "./AuthContext.js";
 import type { WarehouseOption } from "../features/inventory/inventory.types.js";
 
 const STORAGE_KEY = "evolution_erp_warehouse";
-/** Sentinel en localStorage para sesión "Todas las sedes". */
+/** Sentinel en localStorage para sesión "Sede Administrativa" (vista global). */
 const ALL_SENTINEL = "__all__";
 const UNRESTRICTED_ROLES = new Set(["super_admin", "secretaria"]);
 
 type WarehouseContextValue = {
   warehouses: WarehouseOption[];
-  /** null = sesión "Todas las sedes" (solo admin/secretaria). */
+  /** null = sesión "Sede Administrativa" (solo admin/secretaria) o aún sin seleccionar. */
   warehouseId: string | null;
-  /** true cuando la sesión mira todas las sedes. */
+  /** true cuando la sesión está en la Sede Administrativa (vista general de empresa). */
   isAllWarehouses: boolean;
-  /** Puede elegir "Todas" y cambiar libremente entre sedes. */
+  /** true cuando el usuario ya eligió sede (o Sede Administrativa) para su sesión. */
+  hasSelectedScope: boolean;
+  /** Puede elegir "Sede Administrativa" y cambiar libremente entre sedes. */
   canViewAllWarehouses: boolean;
   setWarehouseId: (id: string | null) => void;
   loading: boolean;
@@ -48,17 +50,21 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
     if (stored === ALL_SENTINEL) return null;
     return stored;
   });
-  /** Distingue "Todas" (null intencional) de "aún no cargó". */
+  /** Distingue "Sede Administrativa" (null intencional) de "aún no eligió sede". */
   const [allMode, setAllMode] = useState(() => readStoredWarehouseId() === ALL_SENTINEL);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const canViewAllWarehouses =
-    user?.warehouseIds == null || (user?.roles ?? []).some((r) => UNRESTRICTED_ROLES.has(r));
+  const canViewAllWarehouses = Boolean(
+    (user?.roles ?? []).includes("super_admin") ||
+      (user?.hasAdminAccess ?? (user?.roles ?? []).some((r) => UNRESTRICTED_ROLES.has(r)))
+  );
 
   const reload = useCallback(async () => {
     if (!token) {
       setWarehouses([]);
+      setWarehouseIdState(null);
+      setAllMode(false);
       setLoading(false);
       return;
     }
@@ -69,54 +75,44 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
       const active = data.items.filter((w) => w.is_active);
       setWarehouses(active);
 
-      setWarehouseIdState((prev) => {
+      setWarehouseIdState(() => {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored === ALL_SENTINEL && canViewAllWarehouses) {
           setAllMode(true);
           return null;
         }
-        if (prev && active.some((w) => w.id === prev)) {
-          setAllMode(false);
-          return prev;
-        }
         if (stored && stored !== ALL_SENTINEL && active.some((w) => w.id === stored)) {
           setAllMode(false);
           return stored;
         }
-        // Usuario con una sola sede: fijarla
-        const assigned = user?.warehouseIds;
-        if (assigned?.length === 1 && active.some((w) => w.id === assigned[0])) {
-          localStorage.setItem(STORAGE_KEY, assigned[0]!);
+        // Usuario normal con una sola sede asignada: entrar directo a esa sede
+        if (!canViewAllWarehouses && active.length === 1) {
+          const onlyId = active[0]!.id;
+          localStorage.setItem(STORAGE_KEY, onlyId);
           setAllMode(false);
-          return assigned[0]!;
+          return onlyId;
         }
-        if (canViewAllWarehouses) {
-          localStorage.setItem(STORAGE_KEY, ALL_SENTINEL);
-          setAllMode(true);
-          return null;
-        }
-        const next = active[0]?.id ?? null;
-        if (next) localStorage.setItem(STORAGE_KEY, next);
-        else localStorage.removeItem(STORAGE_KEY);
+        // Si es admin o tiene varias sedes y no ha elegido en esta sesión, pedir selección en pantalla intermedia
+        localStorage.removeItem(STORAGE_KEY);
         setAllMode(false);
-        return next;
+        return null;
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error");
     } finally {
       setLoading(false);
     }
-  }, [token, canViewAllWarehouses, user?.warehouseIds]);
+  }, [token, canViewAllWarehouses]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
-  // Si pierde permiso de "Todas", salir de allMode
+  // Si pierde permiso de "Sede Administrativa", salir de allMode
   useEffect(() => {
     if (!canViewAllWarehouses && allMode) {
-      const first = warehouses[0]?.id ?? null;
-      if (first) {
+      if (warehouses.length === 1) {
+        const first = warehouses[0]!.id;
         localStorage.setItem(STORAGE_KEY, first);
         setWarehouseIdState(first);
       } else {
@@ -144,9 +140,12 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
   );
 
   const isAllWarehouses = canViewAllWarehouses && allMode;
+  const hasSelectedScope = Boolean(
+    isAllWarehouses || (warehouseId && warehouses.some((w) => w.id === warehouseId))
+  );
 
   const sessionLabel = useMemo(() => {
-    if (isAllWarehouses) return "Todas las sedes";
+    if (isAllWarehouses) return "Sede Administrativa";
     const w = warehouses.find((x) => x.id === warehouseId);
     if (!w) return "Sede";
     return w.is_factory ? `${w.name} · Fábrica` : w.name;
@@ -157,6 +156,7 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
       warehouses,
       warehouseId: isAllWarehouses ? null : warehouseId,
       isAllWarehouses,
+      hasSelectedScope,
       canViewAllWarehouses,
       setWarehouseId,
       loading,
@@ -168,6 +168,7 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
       warehouses,
       warehouseId,
       isAllWarehouses,
+      hasSelectedScope,
       canViewAllWarehouses,
       setWarehouseId,
       loading,

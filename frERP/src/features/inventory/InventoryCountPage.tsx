@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -7,14 +9,17 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
+  Camera,
   CheckCircle2,
   ClipboardCheck,
+  Factory,
   Minus,
   Package,
   Plus,
   RotateCcw,
   ScanLine,
   Search,
+  Store,
   X,
 } from "lucide-react";
 import {
@@ -25,16 +30,20 @@ import {
   resetInventoryCountCounted,
   updateInventoryCountLine,
 } from "../../api/inventory.js";
+const BarcodeScannerModal = lazy(() =>
+  import("../../components/inventory/BarcodeScannerModal.js").then((m) => ({
+    default: m.BarcodeScannerModal,
+  }))
+);
 import { InventoryPageHeader } from "../../components/inventory/InventoryPageHeader.js";
 import { InvScopeBar } from "../../components/inventory/InvScopeBar.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { useResolveScan } from "../../hooks/useResolveScan.js";
 import { resolveLightMediaUrl } from "../../lib/mediaUrl.js";
-import { warmScanCache } from "../../lib/scanCache.js";
+import { clearScanCache } from "../../lib/scanCache.js";
 import type { ScanMatchable } from "../../lib/scanMatch.js";
 import type {
-  CatalogItem,
   CountKind,
   InventoryCountDetail,
   InventoryCountLine,
@@ -43,30 +52,6 @@ import type {
 const MIN_SCAN_LENGTH = 2;
 
 type LineFilter = "all" | "pending" | "short" | "over" | "matched";
-
-function linesToScanCatalog(lines: InventoryCountLine[]): CatalogItem[] {
-  return lines.map((l) => ({
-    id: l.productId,
-    referenceCode: l.referenceCode,
-    sku: null,
-    internalCode: null,
-    name: l.productName,
-    description: null,
-    brand: null,
-    unit: l.unit,
-    status: "active",
-    categoryId: null,
-    categoryName: null,
-    baseSalePrice: 0,
-    marginPercent: null,
-    barcode: l.barcode,
-    imageUrl: l.imageUrl,
-    quantityOnHand: l.expectedQuantity,
-    minStockLevel: 0,
-    stockSignal: "ok" as const,
-    isActive: true,
-  }));
-}
 
 function lineStatus(line: InventoryCountLine): "pending" | "short" | "over" | "matched" | "idle" {
   if (line.countedQuantity === 0 && line.expectedQuantity > 0) return "pending";
@@ -84,26 +69,42 @@ function progressPct(counted: number, expected: number): number {
 function countErrorMessage(code: string): string {
   switch (code) {
     case "count_already_open":
-      return "Ya hay un cierre abierto en esta sede.";
+      return "Ya hay un conteo/cierre abierto en esta sede.";
     case "no_active_products":
-      return "No hay productos activos para cerrar.";
+      return "No hay productos activos en el catálogo para inventariar.";
     case "count_not_open":
-      return "El cierre ya no está abierto.";
+      return "El conteo ya no está abierto.";
     case "count_not_found":
-      return "Cierre no encontrado.";
+      return "Conteo no encontrado.";
     case "product_not_found":
       return "Producto no encontrado.";
     case "warehouse_id_required":
       return "Selecciona una sede para continuar.";
+    case "initial_count_requires_admin":
+      return "El inventario inicial solo lo puede realizar la Sede Administrativa.";
     default:
       return code || "Error";
   }
 }
 
-export function InventoryCountPage() {
+type InventoryCountPageProps = {
+  /**
+   * "initial" = Inventario inicial por sedes (exclusivo de Sede Administrativa).
+   * "audit"   = Cierre / descuadre operativo de la sede activa.
+   */
+  mode?: CountKind;
+};
+
+export function InventoryCountPage({ mode }: InventoryCountPageProps) {
   const { token, user } = useAuth();
   const { warehouseId, setWarehouseId, isAllWarehouses, canViewAllWarehouses, warehouses } =
     useWarehouse();
+
+  const effectiveMode: CountKind = mode ?? (isAllWarehouses ? "initial" : "audit");
+  const isInitialMode = effectiveMode === "initial";
+
+  /** En Sede Administrativa (inventario inicial), la sede se elige localmente por sede. */
+  const [targetWarehouseId, setTargetWarehouseId] = useState<string | null>(null);
 
   const [count, setCount] = useState<InventoryCountDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -116,6 +117,7 @@ export function InventoryCountPage() {
   const [query, setQuery] = useState("");
   const [pistolCode, setPistolCode] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [notes, setNotes] = useState("");
 
   const pistolInputRef = useRef<HTMLInputElement>(null);
@@ -134,10 +136,24 @@ export function InventoryCountPage() {
     }
   }, [user?.warehouseIds, warehouseId, warehouses, setWarehouseId, canViewAllWarehouses]);
 
-  const needsWarehouse = isAllWarehouses || !warehouseId;
+  // Si en modo inicial solo existe una sede activa, preseleccionarla
+  useEffect(() => {
+    if (!isInitialMode) return;
+    if (targetWarehouseId && warehouses.some((w) => w.id === targetWarehouseId)) return;
+    if (warehouses.length === 1) {
+      setTargetWarehouseId(warehouses[0]!.id);
+    }
+  }, [isInitialMode, targetWarehouseId, warehouses]);
+
+  const activeWarehouseId = isInitialMode ? targetWarehouseId : warehouseId;
+  const selectedWarehouse = useMemo(
+    () => warehouses.find((w) => w.id === activeWarehouseId) ?? null,
+    [warehouses, activeWarehouseId]
+  );
+  const needsWarehouse = isInitialMode ? !activeWarehouseId : isAllWarehouses || !activeWarehouseId;
 
   const loadOpen = useCallback(async () => {
-    if (!token || !warehouseId || isAllWarehouses) {
+    if (!token || !activeWarehouseId || (!isInitialMode && isAllWarehouses)) {
       setCount(null);
       setLoading(false);
       return;
@@ -145,9 +161,8 @@ export function InventoryCountPage() {
     setLoading(true);
     setError(null);
     try {
-      const { item } = await fetchOpenInventoryCount(token, warehouseId);
+      const { item } = await fetchOpenInventoryCount(token, activeWarehouseId);
       setCount(item);
-      warmScanCache(warehouseId, linesToScanCatalog(item.lines));
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
       if (msg === "count_not_open") {
@@ -159,7 +174,7 @@ export function InventoryCountPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, warehouseId, isAllWarehouses]);
+  }, [token, activeWarehouseId, isInitialMode, isAllWarehouses]);
 
   useEffect(() => {
     void loadOpen();
@@ -177,7 +192,7 @@ export function InventoryCountPage() {
     }));
   }, [count]);
 
-  const resolveScan = useResolveScan(token, warehouseId, {
+  const resolveScan = useResolveScan(token, activeWarehouseId, {
     getLocalItems: getLocalScanItems,
   });
 
@@ -187,7 +202,7 @@ export function InventoryCountPage() {
 
   const bumpLine = useCallback(
     async (productId: string, delta: number) => {
-      if (!token || !warehouseId || !count || count.status !== "open") return;
+      if (!token || !activeWarehouseId || !count || count.status !== "open") return;
       setError(null);
       // Optimistic local update for immediate UI feedback
       setCount((prev) => {
@@ -209,7 +224,7 @@ export function InventoryCountPage() {
       setFlashProductId(productId);
       window.setTimeout(() => setFlashProductId(null), 700);
       try {
-        const { item } = await updateInventoryCountLine(token, warehouseId, count.id, {
+        const { item } = await updateInventoryCountLine(token, activeWarehouseId, count.id, {
           productId,
           delta,
         });
@@ -219,12 +234,12 @@ export function InventoryCountPage() {
         void loadOpen();
       }
     },
-    [token, warehouseId, count, applyServerCount, loadOpen]
+    [token, activeWarehouseId, count, applyServerCount, loadOpen]
   );
 
   const setLineQty = useCallback(
     async (productId: string, countedQuantity: number) => {
-      if (!token || !warehouseId || !count || count.status !== "open") return;
+      if (!token || !activeWarehouseId || !count || count.status !== "open") return;
       const qty = Math.max(0, Math.round(countedQuantity));
       setCount((prev) => {
         if (!prev) return prev;
@@ -237,7 +252,7 @@ export function InventoryCountPage() {
         return { ...prev, lines, countedTotal: prev.countedTotal + deltaTotal };
       });
       try {
-        const { item } = await updateInventoryCountLine(token, warehouseId, count.id, {
+        const { item } = await updateInventoryCountLine(token, activeWarehouseId, count.id, {
           productId,
           countedQuantity: qty,
         });
@@ -247,7 +262,7 @@ export function InventoryCountPage() {
         void loadOpen();
       }
     },
-    [token, warehouseId, count, applyServerCount, loadOpen]
+    [token, activeWarehouseId, count, applyServerCount, loadOpen]
   );
 
   const processScan = useCallback(
@@ -293,17 +308,16 @@ export function InventoryCountPage() {
   };
 
   const startCount = async (kind: CountKind) => {
-    if (!token || !warehouseId) return;
+    if (!token || !activeWarehouseId) return;
     setOpening(true);
     setError(null);
     setSuccess(null);
     try {
-      const { item } = await openInventoryCount(token, warehouseId, { countKind: kind });
+      const { item } = await openInventoryCount(token, activeWarehouseId, { countKind: kind });
       setCount(item);
-      warmScanCache(warehouseId, linesToScanCatalog(item.lines));
       setSuccess(
         kind === "initial"
-          ? "Inventario inicial abierto. Pistolea o ingresa cantidades."
+          ? `Inventario inicial abierto para ${selectedWarehouse?.name ?? "la sede"}. Pistolea o ingresa cantidades.`
           : "Cierre abierto. Compara sistema vs físico."
       );
     } catch (err) {
@@ -318,16 +332,20 @@ export function InventoryCountPage() {
   };
 
   const handleResetCounted = async () => {
-    if (!token || !warehouseId || !count) return;
+    if (!token || !activeWarehouseId || !count) return;
     if (!window.confirm("¿Reiniciar todas las cantidades contadas a cero? El stock del sistema no cambia.")) {
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      const { item } = await resetInventoryCountCounted(token, warehouseId, count.id);
+      const { item } = await resetInventoryCountCounted(token, activeWarehouseId, count.id);
       applyServerCount(item);
-      setSuccess("Cierre reiniciado. Puedes volver a pistolear.");
+      setSuccess(
+        count.countKind === "initial"
+          ? "Inventario inicial reiniciado. Puedes volver a pistolear."
+          : "Cierre reiniciado. Puedes volver a pistolear."
+      );
     } catch (err) {
       setError(countErrorMessage(err instanceof Error ? err.message : "Error"));
     } finally {
@@ -336,14 +354,15 @@ export function InventoryCountPage() {
   };
 
   const handleCancel = async () => {
-    if (!token || !warehouseId || !count) return;
-    if (!window.confirm("¿Cancelar este cierre? No se aplicará ningún ajuste de stock.")) return;
+    if (!token || !activeWarehouseId || !count) return;
+    const label = count.countKind === "initial" ? "este inventario inicial" : "este cierre";
+    if (!window.confirm(`¿Cancelar ${label}? No se aplicará ningún ajuste de stock.`)) return;
     setSaving(true);
     setError(null);
     try {
-      await cancelInventoryCount(token, warehouseId, count.id);
+      await cancelInventoryCount(token, activeWarehouseId, count.id);
       setCount(null);
-      setSuccess("Cierre cancelado.");
+      setSuccess(count.countKind === "initial" ? "Inventario inicial cancelado." : "Cierre cancelado.");
     } catch (err) {
       setError(countErrorMessage(err instanceof Error ? err.message : "Error"));
     } finally {
@@ -352,19 +371,22 @@ export function InventoryCountPage() {
   };
 
   const handleConfirm = async () => {
-    if (!token || !warehouseId || !count) return;
+    if (!token || !activeWarehouseId || !count) return;
     setSaving(true);
     setError(null);
     try {
-      const { item } = await confirmInventoryCount(token, warehouseId, count.id, notes || undefined);
+      const { item } = await confirmInventoryCount(token, activeWarehouseId, count.id, notes || undefined);
+      clearScanCache(activeWarehouseId);
       const diffs = item.lines.filter((l) => l.difference !== 0).length;
       setCount(null);
       setConfirmOpen(false);
       setNotes("");
       setSuccess(
         diffs > 0
-          ? `Ajuste aplicado: ${diffs} referencia(s) con descuadre corregida(s).`
-          : "Cierre sin descuadres. Stock sin cambios."
+          ? item.countKind === "initial"
+            ? `Inventario inicial aplicado en ${selectedWarehouse?.name ?? "la sede"}: ${diffs} referencia(s) actualizada(s).`
+            : `Ajuste aplicado: ${diffs} referencia(s) con descuadre corregida(s).`
+          : "Confirmado sin diferencias. Stock sin cambios."
       );
     } catch (err) {
       setError(countErrorMessage(err instanceof Error ? err.message : "Error"));
@@ -444,12 +466,31 @@ export function InventoryCountPage() {
         title={
           <>
             <ClipboardCheck size={28} strokeWidth={2} aria-hidden />
-            Cierre de inventario
+            {isInitialMode ? "Inventario inicial por sede" : "Cierre de inventario"}
           </>
         }
-        description="Compara el stock del sistema con lo físico. Cada referencia muestra su barra de progreso y el descuadre."
-        backTo="/app/inventario"
-        scope={<InvScopeBar focus="stock" requireSingleWarehouse lockWarehouse />}
+        description={
+          isInitialMode
+            ? "Exclusivo de Sede Administrativa. Elige la sede a inventariar y registra el conteo inicial sin salir de la administración general."
+            : "Compara el stock del sistema con lo físico en esta sede. Cada referencia muestra su barra de progreso y el descuadre."
+        }
+        backTo={isInitialMode ? "/app" : "/app/inventario"}
+        scope={
+          isInitialMode ? (
+            <InvScopeBar
+              focus="stock"
+              warehouseId={targetWarehouseId}
+              onWarehouseChange={(id) => {
+                setError(null);
+                setSuccess(null);
+                setTargetWarehouseId(id);
+              }}
+              requireSingleWarehouse
+            />
+          ) : (
+            <InvScopeBar focus="stock" requireSingleWarehouse lockWarehouse />
+          )
+        }
         alerts={
           <>
             {error ? (
@@ -467,35 +508,83 @@ export function InventoryCountPage() {
       />
 
       {needsWarehouse ? (
-        <p className="inv-page__desc">Selecciona una sede concreta en el selector para abrir o continuar un cierre.</p>
+        isInitialMode ? (
+          <div className="inv-count-start">
+            {warehouses.length === 0 ? (
+              <p className="inv-page__desc">
+                No hay sedes operativas activas aún. Crea primero una sede en Sistema → Sedes.
+              </p>
+            ) : (
+              warehouses.map((w) => (
+                <button
+                  key={w.id}
+                  type="button"
+                  className="inv-count-start__card"
+                  onClick={() => {
+                    setError(null);
+                    setSuccess(null);
+                    setTargetWarehouseId(w.id);
+                  }}
+                >
+                  <strong style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    {w.is_factory ? (
+                      <Factory size={18} strokeWidth={2} aria-hidden />
+                    ) : (
+                      <Store size={18} strokeWidth={2} aria-hidden />
+                    )}
+                    {w.name}
+                  </strong>
+                  <span>
+                    Código <code>{w.code}</code> ·{" "}
+                    {w.is_factory ? "Fábrica" : "Punto de venta"} — Seleccionar esta sede para abrir o continuar su inventario inicial.
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        ) : (
+          <p className="inv-page__desc">Selecciona una sede operativa para abrir o continuar un cierre.</p>
+        )
       ) : loading ? (
         <p className="inv-page__desc">Cargando…</p>
       ) : !count ? (
         <div className="inv-count-start">
-          <button
-            type="button"
-            className="inv-count-start__card"
-            disabled={opening}
-            onClick={() => void startCount("initial")}
-          >
-            <strong>Inventario inicial</strong>
+          {isInitialMode ? (
+            <button
+              type="button"
+              className="inv-count-start__card"
+              disabled={opening}
+              onClick={() => void startCount("initial")}
+            >
+              <strong>
+                Abrir inventario inicial en {selectedWarehouse?.name ?? "la sede seleccionada"}
+              </strong>
+              <span>
+                Ideal al arrancar o inicializar {selectedWarehouse?.name ?? "la sede"}. Congela el stock actual (normalmente en cero) y registras lo físico con pistola o manualmente. Al confirmar se ajusta el inventario de esa sede.
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="inv-count-start__card"
+              disabled={opening}
+              onClick={() => void startCount("audit")}
+            >
+              <strong>Cierre / descuadre</strong>
+              <span>
+                Compara lo que el sistema tiene vs lo que pistoleas en esta sede. Ves faltantes y sobrantes por referencia y aplicas el ajuste al cerrar.
+              </span>
+            </button>
+          )}
+        </div>
+      ) : !isInitialMode && count.countKind === "initial" ? (
+        <div className="inv-count-start">
+          <div className="inv-count-start__card">
+            <strong>Inventario inicial en curso ({count.invoiceNumber ?? "abierto"})</strong>
             <span>
-              Ideal al arrancar una sede. Congela el stock actual (normalmente en cero) y registras lo físico.
-              Al confirmar se ajusta el inventario.
+              Esta sede tiene un inventario inicial abierto desde la Sede Administrativa. El inventario inicial solo puede gestionarse y confirmarse desde la Sede Administrativa.
             </span>
-          </button>
-          <button
-            type="button"
-            className="inv-count-start__card"
-            disabled={opening}
-            onClick={() => void startCount("audit")}
-          >
-            <strong>Cierre / descuadre</strong>
-            <span>
-              Compara lo que el sistema tiene vs lo que pistoleas. Ves faltantes y sobrantes por referencia y
-              aplicas el ajuste al cerrar.
-            </span>
-          </button>
+          </div>
         </div>
       ) : (
         <>
@@ -504,6 +593,7 @@ export function InventoryCountPage() {
               <div>
                 <p className="inv-count-summary__kind">
                   {count.countKind === "initial" ? "Inventario inicial" : "Cierre / descuadre"}
+                  {selectedWarehouse ? ` · ${selectedWarehouse.name}` : ""}
                   {count.invoiceNumber ? ` · ${count.invoiceNumber}` : ""}
                 </p>
                 <p className="inv-count-summary__totals">
@@ -557,6 +647,15 @@ export function InventoryCountPage() {
                 aria-label="Escanear con pistola"
               />
             </label>
+            <button
+              type="button"
+              className="inv-btn inv-btn--ghost inv-count-camera-btn"
+              onClick={() => setCameraOpen(true)}
+              title="Escanear código con la cámara del celular"
+            >
+              <Camera size={16} strokeWidth={2} aria-hidden />
+              <span>Cámara</span>
+            </button>
             <label className="inv-count-search">
               <Search size={16} strokeWidth={2} aria-hidden />
               <input
@@ -785,6 +884,16 @@ export function InventoryCountPage() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {cameraOpen ? (
+        <Suspense fallback={null}>
+          <BarcodeScannerModal
+            open={cameraOpen}
+            onClose={() => setCameraOpen(false)}
+            onDetected={(code) => void processScan(code)}
+          />
+        </Suspense>
       ) : null}
     </div>
   );

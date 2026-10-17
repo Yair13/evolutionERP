@@ -49,9 +49,10 @@ function resolveUnitSalePrice(requested: number | undefined, suggested: number):
 export type InventoryDocumentSummary = {
   id: string;
   warehouseId?: string;
-  docType: DocType | "warranty" | "return";
+  docType: DocType | "warranty" | "return" | "adjustment";
   status: string;
   notes: string | null;
+  reason?: string | null;
   lineCount: number;
   totalQuantity: number;
   createdAt: string;
@@ -139,7 +140,7 @@ function warehouseScopeSql(
     params.push(warehouseId);
     return `${alias}.warehouse_id = $${params.length}::uuid`;
   }
-  if (auth.warehouseIds === null) {
+  if (auth.warehouseIds === null || auth.hasAdminAccess) {
     return "TRUE";
   }
   if (auth.warehouseIds.length === 0) {
@@ -946,7 +947,7 @@ export async function listDocuments(
   auth: AuthContext,
   opts?: {
     warehouseId?: string | null;
-    docType?: DocType;
+    docType?: DocType | "adjustment";
     dateFrom?: string;
     dateTo?: string;
     limit?: number;
@@ -962,6 +963,8 @@ export async function listDocuments(
     typeFilter = ` AND d.doc_type = 'entry'`;
   } else if (opts?.docType === "exit") {
     typeFilter = ` AND d.doc_type IN ('exit', 'warranty', 'return')`;
+  } else if (opts?.docType === "adjustment") {
+    typeFilter = ` AND d.doc_type = 'adjustment'`;
   }
 
   let dateFilter = "";
@@ -992,6 +995,8 @@ export async function listDocuments(
     doc_type: string;
     status: string;
     notes: string | null;
+    reason: string | null;
+    metadata: any;
     line_count: string;
     total_qty: string;
     total_amount: string;
@@ -1018,6 +1023,8 @@ export async function listDocuments(
       d.doc_type,
       d.status,
       d.notes,
+      d.reason,
+      d.metadata,
       COUNT(l.id)::text AS line_count,
       COALESCE(SUM(l.quantity), 0)::text AS total_qty,
       COALESCE(SUM(l.quantity * COALESCE(l.unit_sale_price, 0)), 0)::text AS total_amount,
@@ -1056,7 +1063,7 @@ export async function listDocuments(
     LEFT JOIN users u ON u.id = d.created_by
     LEFT JOIN customers c ON c.id = d.customer_id
     WHERE d.status IN ('completed', 'cancelled') AND (${whFilter}) ${typeFilter}${dateFilter}
-    GROUP BY d.id, d.warehouse_id, w.name, w.code, u.full_name, d.invoice_number, d.exit_kind, c.display_name, d.metadata
+    GROUP BY d.id, d.warehouse_id, w.name, w.code, u.full_name, d.invoice_number, d.exit_kind, c.display_name, d.metadata, d.reason
     ORDER BY d.completed_at DESC NULLS LAST, d.created_at DESC
     LIMIT $${limitIdx} OFFSET $${offsetIdx}
     `,
@@ -1072,6 +1079,8 @@ export async function listDocuments(
       docType: r.doc_type as InventoryDocumentSummary["docType"],
       status: r.status,
       notes: r.notes,
+      reason: r.reason,
+      metadata: r.metadata ?? null,
       lineCount: Number(r.line_count),
       totalQuantity: Number(r.total_qty),
       createdAt: r.created_at,
@@ -1443,6 +1452,7 @@ export async function getDocument(
     doc_type: string;
     status: string;
     notes: string | null;
+    reason: string | null;
     line_count: string;
     total_qty: string;
     total_amount: string;
@@ -1470,6 +1480,7 @@ export async function getDocument(
       d.doc_type,
       d.status,
       d.notes,
+      d.reason,
       COUNT(l.id)::text AS line_count,
       COALESCE(SUM(l.quantity), 0)::text AS total_qty,
       COALESCE(SUM(l.quantity * COALESCE(l.unit_sale_price, 0)), 0)::text AS total_amount,
@@ -1511,7 +1522,7 @@ export async function getDocument(
     LEFT JOIN users u ON u.id = d.created_by
     LEFT JOIN customers c ON c.id = d.customer_id
     WHERE d.id = $1::uuid AND (${whFilter})
-    GROUP BY d.id, d.warehouse_id, u.full_name, w.name, w.code, c.display_name, c.tax_id, c.phone, c.address, d.metadata
+    GROUP BY d.id, d.warehouse_id, u.full_name, w.name, w.code, c.display_name, c.tax_id, c.phone, c.address, d.metadata, d.reason
     `,
     params
   );
@@ -1567,6 +1578,7 @@ export async function getDocument(
     docType: head.doc_type as InventoryDocumentSummary["docType"],
     status: head.status,
     notes: head.notes,
+    reason: head.reason,
     lineCount: Number(head.line_count),
     totalQuantity: Number(head.total_qty),
     createdAt: head.created_at,

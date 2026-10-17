@@ -26,20 +26,12 @@ export function useResolveScan(
       const trimmed = code.trim();
       if (!trimmed) throw new Error("Código vacío");
 
-      const localItems = getLocalItems?.() ?? [];
-      const localHit = matchByScanCode(trimmed, localItems);
-      if (localHit) {
-        const item = toScanCatalogItem(localHit as ScanMatchable & Partial<CatalogItem>);
-        if (warehouseId) putCachedScan(warehouseId, item);
-        return item;
-      }
-
-      if (warehouseId) {
-        const cached = getCachedScan(warehouseId, trimmed);
-        if (cached) return cached;
-      }
-
       if (localOnly) {
+        const localItems = getLocalItems?.() ?? [];
+        const localHit = matchByScanCode(trimmed, localItems);
+        if (localHit) {
+          return toScanCatalogItem(localHit as ScanMatchable & Partial<CatalogItem>);
+        }
         throw new Error("Código no corresponde a ningún producto del despacho");
       }
 
@@ -51,10 +43,21 @@ export function useResolveScan(
         return item;
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
-        if (msg === "product_not_found") throw new Error("Producto no encontrado para ese código");
+        if (msg === "product_not_found") {
+          throw new Error("Producto no encontrado para ese código");
+        }
+        // Fallback local/caché únicamente ante corte de red
+        const localItems = getLocalItems?.() ?? [];
+        const localHit = matchByScanCode(trimmed, localItems);
+        if (localHit) {
+          return toScanCatalogItem(localHit as ScanMatchable & Partial<CatalogItem>);
+        }
+        const cached = getCachedScan(warehouseId, trimmed);
+        if (cached) return cached;
         throw err;
       }
     },
     [token, warehouseId, getLocalItems, localOnly]
   );
 }
+

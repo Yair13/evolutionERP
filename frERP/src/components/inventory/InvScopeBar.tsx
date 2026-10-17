@@ -29,44 +29,26 @@ export function InvScopeBar({
   warehouseId: controlledId,
   onWarehouseChange,
   allowEmptyWarehouse = false,
-  emptyLabel = "Sin sede aún",
+  emptyLabel = "— Elige una sede —",
   stockHint,
-  lockWarehouse = false,
-  allowAllWarehouses = false,
   requireSingleWarehouse = false,
 }: InvScopeBarProps) {
   const {
     warehouses,
-    warehouseId: ctxId,
     isAllWarehouses,
-    canViewAllWarehouses,
-    setWarehouseId,
     loading,
     error,
     sessionLabel,
   } = useWarehouse();
+
   const isControlled = onWarehouseChange != null;
-  const showAll = allowAllWarehouses && canViewAllWarehouses;
-  const value = isControlled
-    ? controlledId == null
-      ? ""
-      : controlledId
-    : isAllWarehouses
-      ? ""
-      : (ctxId ?? "");
-  const selected = warehouses.find((w) => w.id === value);
-  const needsSede = requireSingleWarehouse && (isControlled ? !controlledId : isAllWarehouses);
-  // Selector local solo si: controlado, alta sin sede, o hay que salir de "Todas" para operar
-  const showLocalSelect =
-    isControlled || allowEmptyWarehouse || (requireSingleWarehouse && (needsSede || canViewAllWarehouses));
+  const value = isControlled ? (controlledId ?? "") : "";
+  const selected = isControlled ? warehouses.find((w) => w.id === value) : null;
+  const needsSede = isControlled && requireSingleWarehouse && !controlledId;
 
   function onSelect(id: string) {
-    const next = id === "" ? null : id;
-    if (isControlled) {
-      onWarehouseChange(next);
-    } else {
-      setWarehouseId(next);
-    }
+    if (!onWarehouseChange) return;
+    onWarehouseChange(id === "" ? null : id);
   }
 
   return (
@@ -90,31 +72,27 @@ export function InvScopeBar({
           <span className="inv-wh-select inv-wh-select--loading">Cargando sedes…</span>
         ) : error ? (
           <span className="inv-wh-select inv-wh-select--error">{error}</span>
-        ) : warehouses.length === 0 ? (
-          <span className="inv-wh-select inv-wh-select--error">Sin sede asignada</span>
-        ) : showLocalSelect ? (
+        ) : warehouses.length === 0 && (!isAllWarehouses || isControlled) ? (
+          <span className="inv-wh-select inv-wh-select--error">Sin sedes activas</span>
+        ) : isControlled ? (
           <label className="inv-wh-select inv-wh-select--scope">
             <Building2 size={16} strokeWidth={2} aria-hidden />
             <span className="inv-scope__text">
-              <span className="inv-scope__title">
-                {requireSingleWarehouse ? "Operar en sede" : "Sede"}
-              </span>
+              <span className="inv-scope__title">Sede a inventariar</span>
               <span className="inv-scope__sub">
-                {requireSingleWarehouse ? "Requerida para movimientos" : "Ámbito"}
+                {selected
+                  ? `${selected.name}${selected.is_factory ? " · Fábrica" : ""}`
+                  : "Selecciona una sede"}
               </span>
             </span>
             <select
               value={value}
               onChange={(e) => onSelect(e.target.value)}
-              aria-label="Sede"
+              aria-label="Seleccionar sede para inventario inicial"
             >
-              {showAll && !requireSingleWarehouse ? (
-                <option value="">Todas las sedes</option>
+              {(requireSingleWarehouse || allowEmptyWarehouse) ? (
+                <option value="">{emptyLabel}</option>
               ) : null}
-              {requireSingleWarehouse ? (
-                <option value="">— Elige una sede —</option>
-              ) : null}
-              {allowEmptyWarehouse ? <option value="">{emptyLabel}</option> : null}
               {warehouses.map((w) => (
                 <option key={w.id} value={w.id}>
                   {w.name}
@@ -127,7 +105,7 @@ export function InvScopeBar({
           <div className="inv-wh-select inv-wh-select--scope inv-wh-select--locked">
             <Building2 size={16} strokeWidth={2} aria-hidden />
             <span className="inv-scope__text">
-              <span className="inv-scope__title">Sesión</span>
+              <span className="inv-scope__title">Sede activa</span>
               <span className="inv-scope__sub">{sessionLabel}</span>
             </span>
           </div>
@@ -135,16 +113,7 @@ export function InvScopeBar({
         {stockHint ? <p className="inv-scope__hint">{stockHint}</p> : null}
         {needsSede ? (
           <p className="inv-scope__hint" style={{ color: "#b45309" }}>
-            Estás en “Todas las sedes”. Elige una sede concreta para operar.
-          </p>
-        ) : null}
-        {!showLocalSelect && !lockWarehouse ? (
-          <p className="inv-scope__hint">Cámbiala en el selector del encabezado.</p>
-        ) : null}
-        {!needsSede && selected && requireSingleWarehouse ? (
-          <p className="inv-scope__hint">
-            Operando en {selected.name}
-            {selected.is_factory ? " (fábrica)" : ""}.
+            Selecciona la sede en la que vas a cargar el inventario inicial.
           </p>
         ) : null}
       </div>

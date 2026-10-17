@@ -8,7 +8,9 @@ declare global {
         email: string;
         fullName: string;
         roles: string[];
-        /** null = acceso a todas las sedes */
+        /** true si el usuario tiene acceso a la Sede Administrativa */
+        hasAdminAccess: boolean;
+        /** null = acceso a todas las sedes operativas */
         warehouseIds: string[] | null;
       };
     }

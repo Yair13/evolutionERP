@@ -24,6 +24,7 @@ export function createUsersRouter(): Router {
         email: string;
         full_name: string;
         is_active: boolean;
+        has_admin_access: boolean;
         created_at: Date;
         roles: string[] | null;
         warehouse_ids: string[] | null;
@@ -33,6 +34,7 @@ export function createUsersRouter(): Router {
            u.email,
            u.full_name,
            u.is_active,
+           u.has_admin_access,
            u.created_at,
            COALESCE(array_agg(DISTINCT r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles,
            COALESCE(array_agg(DISTINCT uw.warehouse_id::text) FILTER (WHERE uw.warehouse_id IS NOT NULL), '{}') AS warehouse_ids
@@ -44,15 +46,19 @@ export function createUsersRouter(): Router {
          ORDER BY u.created_at DESC`
       );
       res.json({
-        items: rows.map((row) => ({
-          id: row.id,
-          email: row.email,
-          fullName: row.full_name,
-          isActive: row.is_active,
-          createdAt: new Date(row.created_at).toISOString(),
-          roles: row.roles ?? [],
-          warehouseIds: row.warehouse_ids ?? [],
-        })),
+        items: rows.map((row) => {
+          const roles = row.roles ?? [];
+          return {
+            id: row.id,
+            email: row.email,
+            fullName: row.full_name,
+            isActive: row.is_active,
+            hasAdminAccess: Boolean(row.has_admin_access || roles.includes("super_admin")),
+            createdAt: new Date(row.created_at).toISOString(),
+            roles,
+            warehouseIds: row.warehouse_ids ?? [],
+          };
+        }),
       });
     } catch (err) {
       next(err);
@@ -76,6 +82,7 @@ export function createUsersRouter(): Router {
         email: string;
         full_name: string;
         is_active: boolean;
+        has_admin_access: boolean;
         created_at: Date;
         roles: string[] | null;
         warehouse_ids: string[] | null;
@@ -85,6 +92,7 @@ export function createUsersRouter(): Router {
            u.email,
            u.full_name,
            u.is_active,
+           u.has_admin_access,
            u.created_at,
            COALESCE(array_agg(DISTINCT r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles,
            COALESCE(array_agg(DISTINCT uw.warehouse_id::text) FILTER (WHERE uw.warehouse_id IS NOT NULL), '{}') AS warehouse_ids
@@ -101,14 +109,16 @@ export function createUsersRouter(): Router {
         res.status(404).json({ error: "not_found" });
         return;
       }
+      const roles = row.roles ?? [];
       res.json({
         item: {
           id: row.id,
           email: row.email,
           fullName: row.full_name,
           isActive: row.is_active,
+          hasAdminAccess: Boolean(row.has_admin_access || roles.includes("super_admin")),
           createdAt: new Date(row.created_at).toISOString(),
-          roles: row.roles ?? [],
+          roles,
           warehouseIds: row.warehouse_ids ?? [],
         },
       });
@@ -138,6 +148,9 @@ export function createUsersRouter(): Router {
     const warehouseIds = Array.isArray(req.body?.warehouseIds)
       ? req.body.warehouseIds.filter((x: unknown) => typeof x === "string" && isUuid(x))
       : [];
+    const hasAdminAccess = roleCodes.includes("super_admin")
+      ? true
+      : Boolean(req.body?.hasAdminAccess);
 
     if (!username || !password || !fullName) {
       res.status(400).json({ error: "username_password_fullname_required" });
@@ -168,10 +181,10 @@ export function createUsersRouter(): Router {
         await assertValidRoleCodes(client, roleCodes);
         const passwordHash = await hashPassword(password);
         const { rows: urows } = await client.query<{ id: string }>(
-          `INSERT INTO users (email, password_hash, full_name)
-           VALUES ($1, $2, $3)
+          `INSERT INTO users (email, password_hash, full_name, has_admin_access)
+           VALUES ($1, $2, $3, $4)
            RETURNING id::text`,
-          [username, passwordHash, fullName]
+          [username, passwordHash, fullName, hasAdminAccess]
         );
         const userId = urows[0]!.id;
         await replaceRoles(client, userId, roleCodes);
@@ -249,6 +262,16 @@ export function createUsersRouter(): Router {
             body.is_active,
             userId,
           ]);
+        }
+
+        if (typeof body.hasAdminAccess === "boolean" || roleCodes?.includes("super_admin")) {
+          const nextAdminAccess = roleCodes?.includes("super_admin")
+            ? true
+            : Boolean(body.hasAdminAccess);
+          await client.query(
+            `UPDATE users SET has_admin_access = $1, updated_at = now() WHERE id = $2::uuid`,
+            [nextAdminAccess, userId]
+          );
         }
 
         if (typeof body.password === "string" && body.password.length > 0) {

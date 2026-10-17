@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import JsBarcode from "jsbarcode";
 import { Link, useParams } from "react-router-dom";
 import { Barcode, Pencil, Trash2 } from "lucide-react";
 import {
@@ -19,6 +20,46 @@ function formatMoney(n: number): string {
     currency: "COP",
     maximumFractionDigits: 0,
   }).format(n);
+}
+
+function DetailBarcodeCanvas({ value }: { value: string }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    if (!canvasRef.current || !value) return;
+    try {
+      JsBarcode(canvasRef.current, value, {
+        format: "CODE128",
+        width: 1.8,
+        height: 44,
+        displayValue: true,
+        font: "monospace",
+        fontSize: 12,
+        fontOptions: "bold",
+        textMargin: 3,
+        margin: 6,
+        background: "#ffffff",
+        lineColor: "#0f172a",
+      });
+    } catch {
+      /* ignore */
+    }
+  }, [value]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        display: "block",
+        maxWidth: "100%",
+        height: "auto",
+        marginTop: "6px",
+        borderRadius: "6px",
+        border: "1px solid #e2e8f0",
+        background: "#ffffff",
+      }}
+    />
+  );
 }
 
 export function ProductDetailPage() {
@@ -169,7 +210,6 @@ export function ProductDetailPage() {
         </div>
         <div className="inv-detail__info">
           <h1>{item.name}</h1>
-          {item.categoryName ? <p className="inv-detail__cat">{item.categoryName}</p> : null}
           <p className="inv-detail__price">{formatMoney(item.baseSalePrice)}</p>
           {showCost && item.productionCost != null ? (
             <p className="inv-detail__cost">
@@ -191,31 +231,36 @@ export function ProductDetailPage() {
             {item.barcode ? (
               <div className="inv-detail__barcode-block">
                 <dt>Código de barras</dt>
-                <dd className="inv-detail__barcode">
-                  <Barcode size={16} strokeWidth={2} aria-hidden />
-                  {item.barcode}
+                <dd className="inv-detail__barcode" style={{ flexDirection: "column", alignItems: "flex-start" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                    <Barcode size={16} strokeWidth={2} aria-hidden />
+                    {item.barcode}
+                  </span>
+                  <DetailBarcodeCanvas value={item.barcode} />
                 </dd>
               </div>
             ) : null}
           </dl>
 
           {item.warehousePrices && item.warehousePrices.length > 0 ? (
-            <div style={{ marginTop: "24px", border: "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden" }}>
-              <div style={{ background: "#f8fafc", padding: "10px 14px", borderBottom: "1px solid #e2e8f0", fontWeight: "bold", fontSize: "13px", color: "#1e293b" }}>
+            <div className="inv-detail__prices-card">
+              <div className="inv-detail__prices-head">
                 Precios de venta específicos por sede
               </div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+              <table className="inv-detail__prices-table">
                 <thead>
-                  <tr style={{ background: "#f1f5f9", textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
-                    <th style={{ padding: "8px 12px", color: "#475569" }}>Sede</th>
-                    <th style={{ padding: "8px 12px", color: "#475569" }}>Precio Especial</th>
+                  <tr>
+                    <th>Sede</th>
+                    <th>Precio Especial</th>
                   </tr>
                 </thead>
                 <tbody>
                   {item.warehousePrices.map((wp) => (
-                    <tr key={wp.warehouseId} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                      <td style={{ padding: "8px 12px", fontWeight: "600" }}>{wp.warehouseName} ({wp.warehouseCode})</td>
-                      <td style={{ padding: "8px 12px", color: wp.salePrice != null ? "#0f766e" : "#64748b", fontWeight: wp.salePrice != null ? "bold" : "normal" }}>
+                    <tr key={wp.warehouseId}>
+                      <td>
+                        <strong>{wp.warehouseName}</strong> <span>({wp.warehouseCode})</span>
+                      </td>
+                      <td className={wp.salePrice != null ? "is-custom" : "is-default"}>
                         {wp.salePrice != null ? formatMoney(wp.salePrice) : "Usa precio default"}
                       </td>
                     </tr>

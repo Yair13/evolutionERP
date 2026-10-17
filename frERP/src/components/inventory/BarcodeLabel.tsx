@@ -25,8 +25,8 @@ const BARCODE_SCREEN = {
 
 const BARCODE_PRINT = {
   format: "CODE128" as const,
-  width: 2.4,
-  height: 70,
+  width: 2,
+  height: 48,
   displayValue: false,
   margin: 2,
 };
@@ -92,31 +92,31 @@ export function BarcodeLabel({ value, title, subtitle, salePrice, productionOrde
     <div className="inv-barcode-print-container" id="inv-barcode-label-print">
       {Array.from({ length: copies }).map((_, idx) => (
         <article key={idx} className="inv-barcode-sheet" aria-label="Etiqueta adhesiva">
-          <header className="inv-barcode-sheet__brand" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", borderBottom: "2px solid #0d9488", paddingBottom: "4px", marginBottom: "8px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <img src={LOGO_SRC} alt="" className="inv-barcode-sheet__logo" width={40} height={40} />
+          <header className="inv-barcode-sheet__brand" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", borderBottom: "1.5px solid #0d9488", paddingBottom: "3px", marginBottom: "4px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <img src={LOGO_SRC} alt="" className="inv-barcode-sheet__logo" width={34} height={34} />
               <div className="inv-barcode-sheet__brand-text">
-                <strong style={{ fontSize: "14px", color: "#0f766e" }}>Evolution</strong>
-                <span style={{ fontSize: "9px", color: "#64748b", textTransform: "uppercase" }}>Colchones S.A.S</span>
+                <strong style={{ fontSize: "13px", color: "#0f766e" }}>Evolution</strong>
+                <span style={{ fontSize: "8px", color: "#64748b", textTransform: "uppercase" }}>Colchones S.A.S</span>
               </div>
             </div>
-            <div style={{ fontSize: "11px", color: "#475569", fontWeight: "bold" }}>
+            <div className="inv-barcode-sheet__date" style={{ fontSize: "10px", color: "#475569", fontWeight: "bold" }}>
               Fecha: {displayDate}
             </div>
           </header>
-          <div className="inv-barcode-sheet__body" style={{ marginBottom: "8px" }}>
-            <p className="inv-barcode-sheet__name" style={{ fontSize: "15px", fontWeight: "800", margin: "0 0 4px", color: "#0f172a" }}>{title}</p>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#475569", margin: "0 0 4px" }}>
+          <div className="inv-barcode-sheet__body" style={{ marginBottom: "4px" }}>
+            <p className="inv-barcode-sheet__name" style={{ fontSize: "13px", fontWeight: "800", margin: "0 0 2px", color: "#0f172a", lineHeight: 1.15 }}>{title}</p>
+            <div className="inv-barcode-sheet__ref" style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#475569", margin: "0 0 2px", lineHeight: 1.2 }}>
               <span>Ref: {subtitle || "—"}</span>
               {priceLabel ? <span>Precio: {priceLabel}</span> : null}
             </div>
-            <p style={{ margin: "0 0 6px", fontSize: "12px", fontWeight: "bold", color: "#0f172a" }}>
+            <p className="inv-barcode-sheet__op" style={{ margin: 0, fontSize: "11px", fontWeight: "bold", color: "#0f172a", lineHeight: 1.2 }}>
               Orden Prod: {displayOP}
             </p>
           </div>
           <div className="inv-barcode-sheet__code" style={{ textAlign: "center" }}>
-            <svg ref={printRefCallback} role="img" aria-hidden style={{ display: "block", margin: "0 auto", maxWidth: "90%" }} />
-            <p className="inv-barcode-sheet__digits" style={{ fontSize: "11px", fontWeight: "bold", letterSpacing: "0.12em", marginTop: "4px", color: "#334155" }}>{value}</p>
+            <svg ref={printRefCallback} role="img" aria-hidden style={{ display: "block", margin: "0 auto", maxWidth: "90%", maxHeight: "20mm" }} />
+            <p className="inv-barcode-sheet__digits" style={{ fontSize: "10px", fontWeight: "bold", letterSpacing: "0.12em", marginTop: "2px", color: "#334155" }}>{value}</p>
           </div>
         </article>
       ))}
