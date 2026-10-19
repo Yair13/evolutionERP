@@ -916,6 +916,9 @@ export function MovementPosPage({ mode }: Props) {
         paymentMethod: data.paymentMethod || null,
         paymentBreakdown: data.paymentBreakdown || null,
         destinationWarehouseId: data.destinationWarehouseId || null,
+        layawayId: data.layawayId || null,
+        receiptUrl: data.receiptUrl || null,
+        receiptFilename: data.receiptFilename || null,
       });
       setCart([]);
       setNotes("");
@@ -967,6 +970,10 @@ export function MovementPosPage({ mode }: Props) {
         setError("En un cambio debes incluir producto(s) de salida y de retorno.");
       } else if (msg === "exchange_net_value_required") {
         setError("El valor neto del cambio no puede ser $0.");
+      } else if (msg === "layaway_not_found") {
+        setError("El apartado seleccionado no fue encontrado.");
+      } else if (msg === "layaway_not_active") {
+        setError("El apartado seleccionado ya no se encuentra activo.");
       } else {
         setError(msg);
       }

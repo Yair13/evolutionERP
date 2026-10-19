@@ -640,6 +640,9 @@ export function createInventoryRouter(): Router {
         paymentBreakdown,
         destinationWarehouseId:
           typeof req.body?.destinationWarehouseId === "string" ? req.body.destinationWarehouseId : null,
+        layawayId: typeof req.body?.layawayId === "string" ? req.body.layawayId : null,
+        receiptUrl: typeof req.body?.receiptUrl === "string" ? req.body.receiptUrl : null,
+        receiptFilename: typeof req.body?.receiptFilename === "string" ? req.body.receiptFilename : null,
       });
       res.status(201).json({ item });
     } catch (err: unknown) {
@@ -664,6 +667,10 @@ export function createInventoryRouter(): Router {
         "exchange_lines_required",
         "exchange_net_value_required",
         "lines_required",
+        "initial_payment_exceeds_total",
+        "insufficient_credit_balance",
+        "layaway_not_found",
+        "layaway_not_active",
       ]);
       if (e?.code && clientCodes.has(e.code)) {
         res.status(e.code === "insufficient_stock" ? 409 : 400).json({
@@ -1193,7 +1200,7 @@ export function createInventoryRouter(): Router {
     }
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
     try {
-      let queryStr = `SELECT id::text, display_name AS "displayName", tax_id AS "taxId", phone, address FROM customers`;
+      let queryStr = `SELECT id::text, display_name AS "displayName", tax_id AS "taxId", phone, address, COALESCE(credit_balance, 0)::float AS "creditBalance" FROM customers`;
       const params: any[] = [];
       if (q) {
         queryStr += ` WHERE display_name ILIKE $1 OR tax_id ILIKE $1 OR phone ILIKE $1`;
@@ -1222,7 +1229,7 @@ export function createInventoryRouter(): Router {
       const { rows } = await pool.query(
         `INSERT INTO customers (display_name, tax_id, phone, address)
          VALUES ($1, $2, $3, $4)
-         RETURNING id::text, display_name AS "displayName", tax_id AS "taxId", phone, address`,
+         RETURNING id::text, display_name AS "displayName", tax_id AS "taxId", phone, address, COALESCE(credit_balance, 0)::float AS "creditBalance"`,
         [displayName.trim(), taxId?.trim() || null, phone?.trim() || null, address?.trim() || null]
       );
       res.status(201).json({ item: rows[0] });

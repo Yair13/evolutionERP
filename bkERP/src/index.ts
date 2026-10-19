@@ -11,6 +11,7 @@ import { createDashboardRouter } from "./routes/dashboard.js";
 import { createRolesRouter } from "./routes/roles.js";
 import { createUsersRouter } from "./routes/users.js";
 import { createInventoryRouter } from "./routes/inventory.js";
+import { createFinanceRouter } from "./routes/finance.js";
 import { createSystemRouter } from "./routes/system.js";
 import { createWarehousesRouter } from "./routes/warehouses.js";
 
@@ -56,6 +57,7 @@ app.use("/roles", createRolesRouter());
 app.use("/users", createUsersRouter());
 app.use("/warehouses", createWarehousesRouter());
 app.use("/inventory", createInventoryRouter());
+app.use("/finance", createFinanceRouter());
 app.use("/system", createSystemRouter());
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

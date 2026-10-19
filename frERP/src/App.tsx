@@ -22,6 +22,13 @@ import { ProductEditPage } from "./features/products/ProductEditPage.js";
 import { ProductNewPage } from "./features/products/ProductNewPage.js";
 import { ProductBulkUploadPage } from "./features/products/ProductBulkUploadPage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
+import { ReceivablesPage } from "./features/finance/ReceivablesPage.js";
+import { PaymentsCashPage } from "./features/finance/PaymentsCashPage.js";
+import { LayawaysPage } from "./features/finance/LayawaysPage.js";
+import { PayablesPage } from "./features/finance/PayablesPage.js";
+import { CashOutflowsPage } from "./features/finance/CashOutflowsPage.js";
+import { PayrollPage } from "./features/finance/PayrollPage.js";
+import { DailyClosurePage } from "./features/finance/DailyClosurePage.js";
 
 function RootRedirect() {
   const { token } = useAuth();
@@ -63,6 +70,13 @@ export default function App() {
           <Route path="/app" element={<AppLayout />}>
             <Route index element={<DashboardPage />} />
             <Route path="inventario/historial" element={<HistoryRoute />} />
+            <Route path="finanzas/cartera" element={<ReceivablesPage />} />
+            <Route path="finanzas/caja" element={<PaymentsCashPage />} />
+            <Route path="finanzas/apartados" element={<LayawaysPage />} />
+            <Route path="finanzas/proveedores" element={<PayablesPage />} />
+            <Route path="finanzas/egresos" element={<CashOutflowsPage />} />
+            <Route path="finanzas/nomina" element={<PayrollPage />} />
+            <Route path="finanzas/cierre-diario" element={<DailyClosurePage />} />
 
             <Route element={<RequireAdminHeadquarters />}>
               <Route path="productos" element={<ProductsCatalogPage />} />

@@ -249,6 +249,9 @@ export type ConfirmExitPayload = {
   paymentMethod?: string | null;
   paymentBreakdown?: { method: string; amount: number }[] | null;
   destinationWarehouseId?: string | null;
+  layawayId?: string | null;
+  receiptUrl?: string | null;
+  receiptFilename?: string | null;
 };
 
 export async function confirmMovement(
@@ -501,6 +504,7 @@ export type Customer = {
   taxId: string | null;
   phone: string | null;
   address: string | null;
+  creditBalance?: number;
 };
 
 export async function fetchDocumentByInvoice(

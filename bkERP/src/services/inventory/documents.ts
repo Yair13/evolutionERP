@@ -6,6 +6,8 @@ import {
   canManageMovementEditing,
   MOVEMENT_EDIT_TZ,
 } from "./movement-edit-settings.js";
+import { recordCreditFromExitDocument } from "../finance/receivables.js";
+import { redeemLayawayInSale } from "../finance/layaways.js";
 
 export type DocType = "entry" | "exit";
 export type ExitKind = "sale" | "return" | "credit" | "warranty" | "distribution" | "transfer" | "return_to_factory" | "exchange";
@@ -21,6 +23,9 @@ export type ConfirmExitInput = {
   paymentMethod?: string | null;
   paymentBreakdown?: { method: string; amount: number }[] | null;
   destinationWarehouseId?: string | null;
+  layawayId?: string | null;
+  receiptUrl?: string | null;
+  receiptFilename?: string | null;
 };
 
 export type ConfirmLineInput = {
@@ -663,7 +668,7 @@ export async function confirmExitDocument(
 ): Promise<InventoryDocumentDetail> {
   const { exitKind, lines, notes, customerName, relatedInvoiceNumber } = input;
 
-  if (exitKind === "sale" && !customerName?.trim() && !input.customerId) {
+  if ((exitKind === "sale" || exitKind === "credit") && !customerName?.trim() && !input.customerId) {
     throw Object.assign(new Error("customer_name_required"), { code: "customer_name_required" });
   }
   if (exitKind === "warranty" && !relatedInvoiceNumber?.trim()) {
@@ -712,6 +717,28 @@ export async function confirmExitDocument(
     if (invalidPayment || Math.abs(saleTotal - paidTotal) >= 0.01) {
       throw Object.assign(new Error("payment_total_mismatch"), {
         code: "payment_total_mismatch",
+      });
+    }
+  }
+
+  if (exitKind === "credit" && input.paymentBreakdown && input.paymentBreakdown.length > 0) {
+    const saleTotal = cleaned.reduce(
+      (sum, line) => sum + line.quantity * (Number(line.unitSalePrice) || 0),
+      0
+    );
+    const paidTotal = input.paymentBreakdown.reduce(
+      (sum, payment) => sum + Number(payment.amount),
+      0
+    );
+    const invalidPayment = input.paymentBreakdown.some(
+      (payment) =>
+        !payment.method?.trim() ||
+        !Number.isFinite(Number(payment.amount)) ||
+        Number(payment.amount) <= 0
+    );
+    if (invalidPayment || paidTotal > saleTotal + 0.01) {
+      throw Object.assign(new Error("initial_payment_exceeds_total"), {
+        code: "initial_payment_exceeds_total",
       });
     }
   }
@@ -794,10 +821,12 @@ export async function confirmExitDocument(
       productionOrderCode: null,
       productionOrderId: null,
       paymentMethod: input.paymentMethod || null,
-      paymentBreakdown: exitKind === "sale" ? input.paymentBreakdown || null : null,
+      paymentBreakdown:
+        exitKind === "sale" || exitKind === "credit" ? input.paymentBreakdown || null : null,
       destinationWarehouseId: input.destinationWarehouseId || null,
       destinationWarehouseName,
       destinationWarehouseCode,
+      layawayId: input.layawayId || null,
     };
 
     let customerId = input.customerId || null;
@@ -811,9 +840,9 @@ export async function confirmExitDocument(
       `
       INSERT INTO inventory_documents (
         warehouse_id, doc_type, status, notes, metadata, created_by, completed_at,
-        invoice_number, exit_kind, customer_id, reason
+        invoice_number, exit_kind, customer_id, reason, receipt_url, receipt_filename
       )
-      VALUES ($1::uuid, $2, 'completed', $3, $4::jsonb, $5::uuid, now(), $6, $7, $8::uuid, $9)
+      VALUES ($1::uuid, $2, 'completed', $3, $4::jsonb, $5::uuid, now(), $6, $7, $8::uuid, $9, $10, $11)
       RETURNING id::text
       `,
       [
@@ -826,6 +855,8 @@ export async function confirmExitDocument(
         exitKind,
         customerId,
         exitKindLabel(exitKind),
+        input.receiptUrl?.trim() || null,
+        input.receiptFilename?.trim() || null,
       ]
     );
     const documentId = docRows[0]!.id;
@@ -927,6 +958,57 @@ export async function confirmExitDocument(
           null,
         ]
       );
+    }
+
+    if (exitKind === "credit") {
+      const saleTotal = cleaned.reduce(
+        (sum, line) => sum + line.quantity * (Number(line.unitSalePrice) || 0),
+        0
+      );
+      await recordCreditFromExitDocument(client, {
+        documentId,
+        invoiceNumber,
+        warehouseId,
+        customerId: customerId!,
+        totalAmount: saleTotal,
+        initialPayments: input.paymentBreakdown || null,
+        notes: notes?.trim() || null,
+        userId: auth.userId,
+      });
+    } else if (exitKind === "sale" && input.paymentBreakdown) {
+      for (const p of input.paymentBreakdown) {
+        if (p.method === "saldo_a_favor" && customerId) {
+          const { rows: custRows } = await client.query<{ credit_balance: string }>(
+            `SELECT credit_balance::text FROM customers WHERE id = $1::uuid FOR UPDATE`,
+            [customerId]
+          );
+          const currentBalance = Number(custRows[0]?.credit_balance ?? 0);
+          if (currentBalance < p.amount) {
+            throw Object.assign(new Error("insufficient_credit_balance"), {
+              code: "insufficient_credit_balance",
+              available: currentBalance,
+              requested: p.amount,
+            });
+          }
+          await client.query(
+            `UPDATE customers SET credit_balance = credit_balance - $1 WHERE id = $2::uuid`,
+            [p.amount, customerId]
+          );
+        }
+      }
+    }
+
+    if (input.layawayId && customerId) {
+      const saleTotal = cleaned.reduce(
+        (sum, line) => sum + line.quantity * (Number(line.unitSalePrice) || 0),
+        0
+      );
+      await redeemLayawayInSale(client, {
+        layawayId: input.layawayId,
+        documentId,
+        saleTotal,
+        customerId,
+      });
     }
 
     await client.query("COMMIT");

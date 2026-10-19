@@ -4,6 +4,8 @@ import { EXIT_KIND_OPTIONS } from "../../features/inventory/exit-labels.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { fetchCustomers, createCustomer, type Customer } from "../../api/inventory.js";
+import { Camera, Upload, CheckCircle2 } from "lucide-react";
+import { fetchCustomerActiveLayaway, type LayawaySummaryItem, uploadClosureReceiptFile } from "../../api/finance.js";
 
 export type ExitCheckoutData = {
   exitKind: ExitKind;
@@ -14,6 +16,9 @@ export type ExitCheckoutData = {
   paymentMethod?: string | null;
   paymentBreakdown?: PaymentPart[] | null;
   destinationWarehouseId?: string | null;
+  layawayId?: string | null;
+  receiptUrl?: string | null;
+  receiptFilename?: string | null;
 };
 
 export type PaymentPart = {
@@ -30,6 +35,8 @@ const PAYMENT_METHODS = [
   { value: "addi", label: "Addi" },
   { value: "sistecredito", label: "Sistecrédito" },
   { value: "bold", label: "Bold" },
+  { value: "saldo_a_favor", label: "Saldo a favor" },
+  { value: "apartado", label: "Apartado / Plan Separe" },
 ] as const;
 
 type PaymentDraft = {
@@ -103,6 +110,11 @@ export function ExitCheckoutModal({
   ]);
   const [nextPaymentId, setNextPaymentId] = useState(2);
   const [destinationWarehouseId, setDestinationWarehouseId] = useState("");
+  const [activeLayaway, setActiveLayaway] = useState<LayawaySummaryItem | null>(null);
+  const [selectedLayawayId, setSelectedLayawayId] = useState<string | null>(null);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptPreviewUrl, setReceiptPreviewUrl] = useState<string | null>(null);
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
 
   const destOptions = warehouses.filter((w) => {
     if (!w.is_active || w.id === currentWarehouseId) return false;
@@ -112,7 +124,8 @@ export function ExitCheckoutModal({
 
   useEffect(() => {
     if (!open) return;
-    setExitKind(lockedKind ?? "sale");
+    const initKind = lockedKind ?? "sale";
+    setExitKind(initKind);
     setCustomerName("");
     setRelatedInvoiceNumber("");
     setNotes("");
@@ -121,11 +134,42 @@ export function ExitCheckoutModal({
     setCustomerList([]);
     setSelectedCustomer(null);
     setCustomerId(null);
+    setActiveLayaway(null);
+    setSelectedLayawayId(null);
     setShowCreateNew(false);
-    setPayments([{ id: 1, method: "efectivo", amount: String(totalValue) }]);
+    setReceiptFile(null);
+    setReceiptPreviewUrl(null);
+    setUploadingReceipt(false);
+    if (initKind === "credit") {
+      setPayments([{ id: 1, method: "efectivo", amount: "" }]);
+    } else {
+      setPayments([{ id: 1, method: "efectivo", amount: String(totalValue) }]);
+    }
     setNextPaymentId(2);
     setDestinationWarehouseId("");
   }, [open, totalValue, lockedKind]);
+
+  // Consulta si el cliente tiene un apartado activo con saldo acumulado
+  useEffect(() => {
+    if (!open || !token || !customerId) {
+      setActiveLayaway(null);
+      setSelectedLayawayId(null);
+      return;
+    }
+    let cancelled = false;
+    fetchCustomerActiveLayaway(token, customerId)
+      .then((res) => {
+        if (!cancelled) {
+          setActiveLayaway(res.item || null);
+        }
+      })
+      .catch((err) => {
+        console.error("Error fetching customer active layaway:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, token, customerId]);
 
   // Buscador de clientes
   useEffect(() => {
@@ -175,8 +219,20 @@ export function ExitCheckoutModal({
     }
   }
 
-  function submit() {
-    if (exitKind === "sale" && !customerId) {
+  function handleReceiptChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) {
+      setReceiptFile(file);
+      if (file.type.startsWith("image/")) {
+        setReceiptPreviewUrl(URL.createObjectURL(file));
+      } else {
+        setReceiptPreviewUrl(null);
+      }
+    }
+  }
+
+  async function submit() {
+    if ((exitKind === "sale" || exitKind === "credit") && !customerId) {
       setError("Debes seleccionar un cliente existente o registrar uno nuevo.");
       return;
     }
@@ -207,31 +263,63 @@ export function ExitCheckoutModal({
     }
 
     const paymentBreakdown: PaymentPart[] =
-      exitKind === "sale"
-        ? payments.map((payment) => ({
-            method: payment.method,
-            amount: Number(payment.amount),
-          }))
+      exitKind === "sale" || exitKind === "credit"
+        ? payments
+            .filter((payment) => Number(payment.amount) > 0)
+            .map((payment) => ({
+              method: payment.method,
+              amount: Number(payment.amount),
+            }))
         : [];
-    if (
-      exitKind === "sale" &&
-      paymentBreakdown.some(
-        (payment) =>
-          !payment.method || !Number.isFinite(payment.amount) || payment.amount <= 0
-      )
-    ) {
-      setError("Cada método de pago debe tener un valor mayor que $0.");
-      return;
+
+    if (exitKind === "sale") {
+      if (
+        paymentBreakdown.length === 0 ||
+        paymentBreakdown.some(
+          (payment) => !payment.method || !Number.isFinite(payment.amount) || payment.amount <= 0
+        )
+      ) {
+        setError("Cada método de pago debe tener un valor mayor que $0.");
+        return;
+      }
+      const paidTotal = paymentBreakdown.reduce((sum, payment) => sum + payment.amount, 0);
+      if (Math.abs(paidTotal - totalValue) >= 0.01) {
+        const difference = totalValue - paidTotal;
+        setError(
+          difference > 0
+            ? `Faltan ${formatMoney(difference)} por asignar en los métodos de pago.`
+            : `Los pagos superan el total por ${formatMoney(Math.abs(difference))}.`
+        );
+        return;
+      }
     }
-    const paidTotal = paymentBreakdown.reduce((sum, payment) => sum + payment.amount, 0);
-    if (exitKind === "sale" && Math.abs(paidTotal - totalValue) >= 0.01) {
-      const difference = totalValue - paidTotal;
-      setError(
-        difference > 0
-          ? `Faltan ${formatMoney(difference)} por asignar en los métodos de pago.`
-          : `Los pagos superan el total por ${formatMoney(Math.abs(difference))}.`
-      );
-      return;
+
+    if (exitKind === "credit") {
+      const paidTotal = paymentBreakdown.reduce((sum, payment) => sum + payment.amount, 0);
+      if (paidTotal > totalValue + 0.01) {
+        setError(
+          `El abono inicial (${formatMoney(paidTotal)}) no puede superar el total de la venta (${formatMoney(totalValue)}).`
+        );
+        return;
+      }
+    }
+
+    let uploadedUrl: string | null = null;
+    let uploadedFilename: string | null = null;
+
+    if (receiptFile && token) {
+      setUploadingReceipt(true);
+      try {
+        const upRes = await uploadClosureReceiptFile(token, receiptFile);
+        uploadedUrl = upRes.publicUrl;
+        uploadedFilename = upRes.filename;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Error al subir comprobante de consignación");
+        setUploadingReceipt(false);
+        return;
+      } finally {
+        setUploadingReceipt(false);
+      }
     }
 
     setError(null);
@@ -242,16 +330,19 @@ export function ExitCheckoutModal({
       notes: notes.trim(),
       customerId,
       paymentMethod:
-        exitKind === "sale"
-          ? paymentBreakdown.length === 1
-            ? paymentBreakdown[0].method
-            : "mixto"
+        paymentBreakdown.length === 1
+          ? paymentBreakdown[0].method
+          : paymentBreakdown.length > 1
+          ? "mixto"
           : null,
-      paymentBreakdown: exitKind === "sale" ? paymentBreakdown : null,
+      paymentBreakdown: paymentBreakdown.length > 0 ? paymentBreakdown : null,
       destinationWarehouseId:
         exitKind === "transfer" || exitKind === "distribution" || exitKind === "return_to_factory"
           ? destinationWarehouseId
           : null,
+      layawayId: selectedLayawayId || null,
+      receiptUrl: uploadedUrl,
+      receiptFilename: uploadedFilename,
     });
   }
 
@@ -359,6 +450,106 @@ export function ExitCheckoutModal({
                 <div className="inv-checkout-customer__selected-info">
                   <strong>{selectedCustomer.displayName}</strong>
                   <span>Cédula: {selectedCustomer.taxId || "—"} · Tel: {selectedCustomer.phone || "—"}</span>
+                  {selectedCustomer.creditBalance != null && selectedCustomer.creditBalance > 0 ? (
+                    <div style={{ marginTop: "0.35rem", color: "#10b981", fontSize: "0.85rem", fontWeight: 600, display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                      <span>💰 Saldo a favor: {formatMoney(selectedCustomer.creditBalance)}</span>
+                      <button
+                        type="button"
+                        style={{
+                          background: "rgba(16, 185, 129, 0.15)",
+                          border: "1px solid #10b981",
+                          color: "#10b981",
+                          borderRadius: 4,
+                          padding: "2px 8px",
+                          fontSize: "0.75rem",
+                          cursor: "pointer",
+                        }}
+                        onClick={() => {
+                          const maxToUse = Math.min(selectedCustomer.creditBalance || 0, totalValue);
+                          if (exitKind === "sale") {
+                            if (maxToUse === totalValue) {
+                              setPayments([{ id: 1, method: "saldo_a_favor", amount: String(maxToUse) }]);
+                            } else {
+                              setPayments([
+                                { id: 1, method: "saldo_a_favor", amount: String(maxToUse) },
+                                { id: 2, method: "efectivo", amount: String(totalValue - maxToUse) },
+                              ]);
+                            }
+                          } else if (exitKind === "credit") {
+                            setPayments([{ id: 1, method: "saldo_a_favor", amount: String(maxToUse) }]);
+                          }
+                        }}
+                      >
+                        Aplicar saldo a favor
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {activeLayaway && activeLayaway.paidAmount > 0 ? (
+                    <div
+                      style={{
+                        marginTop: "0.5rem",
+                        padding: "8px 10px",
+                        background: "rgba(99, 102, 241, 0.08)",
+                        border: "1px solid rgba(99, 102, 241, 0.3)",
+                        borderRadius: 6,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: "0.5rem",
+                      }}
+                    >
+                      <div>
+                        <div style={{ color: "#818cf8", fontSize: "0.85rem", fontWeight: 700 }}>
+                          🔖 Apartado Activo: {activeLayaway.code}
+                        </div>
+                        <div style={{ fontSize: "0.8rem", color: "var(--inv-text-muted, #94a3b8)" }}>
+                          Abono acumulado: <strong style={{ color: "var(--inv-text, #fff)" }}>{formatMoney(activeLayaway.paidAmount)}</strong>
+                          {activeLayaway.paidAmount >= totalValue ? (
+                            <span style={{ color: "#10b981", marginLeft: "0.35rem" }}>
+                              (Cubre el 100% · {formatMoney(activeLayaway.paidAmount - totalValue)} pasará a Saldo a Favor)
+                            </span>
+                          ) : (
+                            <span style={{ color: "#f59e0b", marginLeft: "0.35rem" }}>
+                              (Faltan {formatMoney(totalValue - activeLayaway.paidAmount)} por pagar)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        style={{
+                          background: selectedLayawayId === activeLayaway.id ? "#10b981" : "#6366f1",
+                          border: "none",
+                          color: "#fff",
+                          borderRadius: 4,
+                          padding: "4px 10px",
+                          fontSize: "0.75rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                        onClick={() => {
+                          setSelectedLayawayId(activeLayaway.id);
+                          const maxToUse = Math.min(activeLayaway.paidAmount, totalValue);
+                          if (exitKind === "sale") {
+                            if (maxToUse === totalValue) {
+                              setPayments([{ id: 1, method: "apartado", amount: String(maxToUse) }]);
+                            } else {
+                              setPayments([
+                                { id: 1, method: "apartado", amount: String(maxToUse) },
+                                { id: 2, method: "efectivo", amount: String(totalValue - maxToUse) },
+                              ]);
+                            }
+                          } else if (exitKind === "credit") {
+                            setPayments([{ id: 1, method: "apartado", amount: String(maxToUse) }]);
+                          }
+                        }}
+                      >
+                        {selectedLayawayId === activeLayaway.id ? "✓ Apartado aplicado" : "Aplicar apartado"}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 <button
                   type="button"
@@ -465,13 +656,19 @@ export function ExitCheckoutModal({
           </label>
         )}
 
-        {/* Métodos de Pago */}
-        {exitKind === "sale" && (
+        {/* Métodos de Pago o Abono Inicial */}
+        {(exitKind === "sale" || exitKind === "credit") && (
           <section className="inv-checkout-payments" aria-labelledby="payment-methods-title">
             <div className="inv-checkout-payments__head">
               <div>
-                <h3 id="payment-methods-title">Métodos de pago</h3>
-                <p>Divide el total entre uno o varios medios.</p>
+                <h3 id="payment-methods-title">
+                  {exitKind === "credit" ? "Abono inicial (opcional)" : "Métodos de pago"}
+                </h3>
+                <p>
+                  {exitKind === "credit"
+                    ? "Si el cliente abona una parte hoy, regístralo aquí. El saldo restante generará la Cuenta por Cobrar."
+                    : "Divide el total entre uno o varios medios."}
+                </p>
               </div>
               <button
                 type="button"
@@ -533,20 +730,115 @@ export function ExitCheckoutModal({
               ))}
             </div>
 
-            <div
-              className={`inv-checkout-payments__balance${
-                Math.abs(paymentDifference) < 0.01 ? " is-complete" : " is-pending"
-              }`}
-            >
-              <span>Pagado: <strong>{formatMoney(paidTotal)}</strong></span>
-              <span>
-                {paymentDifference > 0
-                  ? `Falta: ${formatMoney(paymentDifference)}`
-                  : paymentDifference < 0
-                    ? `Excede: ${formatMoney(Math.abs(paymentDifference))}`
-                    : "Pago completo"}
-              </span>
-            </div>
+            {exitKind === "credit" ? (
+              <div
+                className="inv-checkout-payments__balance is-complete"
+                style={{
+                  background: "rgba(99, 102, 241, 0.08)",
+                  borderColor: "rgba(99, 102, 241, 0.25)",
+                }}
+              >
+                <span>Abono inicial hoy: <strong>{formatMoney(paidTotal)}</strong></span>
+                <span>
+                  Saldo a crédito (Por cobrar):{" "}
+                  <strong style={{ color: "#ef4444" }}>
+                    {formatMoney(Math.max(0, totalValue - paidTotal))}
+                  </strong>
+                </span>
+              </div>
+            ) : (
+              <div
+                className={`inv-checkout-payments__balance${
+                  Math.abs(paymentDifference) < 0.01 ? " is-complete" : " is-pending"
+                }`}
+              >
+                <span>Pagado: <strong>{formatMoney(paidTotal)}</strong></span>
+                <span>
+                  {paymentDifference > 0
+                    ? `Falta: ${formatMoney(paymentDifference)}`
+                    : paymentDifference < 0
+                      ? `Excede: ${formatMoney(Math.abs(paymentDifference))}`
+                      : "Pago completo"}
+                </span>
+              </div>
+            )}
+
+            {payments.some(
+              (p) => Number(p.amount) > 0 && p.method !== "efectivo" && p.method !== "saldo_a_favor"
+            ) && (
+              <div
+                style={{
+                  marginTop: "0.85rem",
+                  padding: "0.85rem 1rem",
+                  border: "1px dashed #6366f1",
+                  borderRadius: "8px",
+                  background: "rgba(99, 102, 241, 0.04)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.35rem" }}>
+                  <Camera size={18} color="#6366f1" />
+                  <strong style={{ fontSize: "0.9rem", color: "#1e293b" }}>
+                    Comprobante de Consignación / Transferencia (No Efectivo)
+                  </strong>
+                </div>
+                <p style={{ fontSize: "0.8rem", color: "#64748b", margin: "0 0 0.65rem 0" }}>
+                  Toma una foto o adjunta la captura del pago por Bancolombia, Nequi u otro banco para registrarla en el sistema y cierre de caja.
+                </p>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+                  <label
+                    className="inv-btn inv-btn--ghost"
+                    style={{
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.4rem",
+                      margin: 0,
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    <Upload size={15} />
+                    <span>{receiptFile ? "Cambiar foto" : "Tomar foto / Subir comprobante"}</span>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      capture="environment"
+                      style={{ display: "none" }}
+                      onChange={handleReceiptChange}
+                    />
+                  </label>
+                  {receiptFile && (
+                    <span
+                      style={{
+                        fontSize: "0.85rem",
+                        color: "#10b981",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "0.3rem",
+                        fontWeight: 500,
+                      }}
+                    >
+                      <CheckCircle2 size={16} />
+                      {receiptFile.name}
+                    </span>
+                  )}
+                </div>
+                {receiptPreviewUrl && (
+                  <div style={{ marginTop: "0.6rem" }}>
+                    <img
+                      src={receiptPreviewUrl}
+                      alt="Vista previa comprobante"
+                      style={{
+                        maxWidth: "160px",
+                        maxHeight: "120px",
+                        objectFit: "contain",
+                        borderRadius: "6px",
+                        border: "1px solid #cbd5e1",
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </section>
         )}
 
@@ -583,11 +875,11 @@ export function ExitCheckoutModal({
         ) : null}
 
         <div className="inv-modal__actions inv-modal__actions--spaced">
-          <button type="button" className="inv-btn inv-btn--ghost" disabled={confirming} onClick={onClose}>
+          <button type="button" className="inv-btn inv-btn--ghost" disabled={confirming || uploadingReceipt} onClick={onClose}>
             Cancelar
           </button>
-          <button type="button" className="inv-btn inv-btn--primary" disabled={confirming} onClick={submit}>
-            {confirming ? "Generando…" : "Confirmar y generar comprobante"}
+          <button type="button" className="inv-btn inv-btn--primary" disabled={confirming || uploadingReceipt} onClick={submit}>
+            {confirming || uploadingReceipt ? "Guardando…" : "Confirmar y generar comprobante"}
           </button>
         </div>
       </div>

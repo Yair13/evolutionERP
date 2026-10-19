@@ -17,6 +17,12 @@ import {
   Sparkles,
   Upload,
   Users,
+  CreditCard,
+  PiggyBank,
+  Bookmark,
+  Truck,
+  ArrowLeftRight,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -351,6 +357,65 @@ export function Sidebar({ open, pinned = false, onTogglePin, onNavigate }: Sideb
             onNavigate={onNavigate}
           />
         ) : null}
+
+        <NavGroup
+          label="Finanzas y Caja"
+          icon={Wallet}
+          hint="Control de cartera, créditos a clientes y arqueo de caja"
+          matchPaths={["/app/finanzas/*"]}
+          onNavigate={onNavigate}
+          items={[
+            {
+              to: "/app/finanzas/cartera",
+              end: true,
+              icon: CreditCard,
+              label: "Cuentas por cobrar",
+              hint: "Créditos, abonos y saldos a favor",
+            },
+            {
+              to: "/app/finanzas/caja",
+              end: true,
+              icon: PiggyBank,
+              label: "Arqueo y Medios",
+              hint: "Arqueo de ingresos por efectivo, bancos y plataformas",
+            },
+            {
+              to: "/app/finanzas/apartados",
+              end: true,
+              icon: Bookmark,
+              label: "Apartados (Separe)",
+              hint: "Plan separe de clientes y control de abonos",
+            },
+            {
+              to: "/app/finanzas/proveedores",
+              end: true,
+              icon: Truck,
+              label: "Proveedores y Pagos",
+              hint: "Cuentas por pagar a proveedores y saldos a favor",
+            },
+            {
+              to: "/app/finanzas/egresos",
+              end: true,
+              icon: ArrowLeftRight,
+              label: "Salidas y Traslados",
+              hint: "Comprobantes de egreso, vales y traslados de efectivo",
+            },
+            {
+              to: "/app/finanzas/nomina",
+              end: true,
+              icon: Users,
+              label: "Nómina y Empleados",
+              hint: "Liquidación de sueldos, vouchers y transferencias",
+            },
+            {
+              to: "/app/finanzas/cierre-diario",
+              end: true,
+              icon: ShieldCheck,
+              label: "Cierre Diario",
+              hint: "Arqueo de caja acumulativo, arranques y auditoría de soportes",
+            },
+          ]}
+        />
         {isAllWarehouses && isSuperAdmin ? (
           <NavItem
             to="/app/inventario/utilidades"
