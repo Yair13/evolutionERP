@@ -234,3 +234,123 @@ async function resetSystemDataInTx(
     },
   };
 }
+
+export interface CleanTestDataResult {
+  clearedOperations: boolean;
+  message: string;
+  keptCounts: {
+    warehouses: number;
+    users: number;
+    products: number;
+    suppliers: number;
+    employees: number;
+    customers: number;
+  };
+}
+
+/**
+ * Limpia únicamente movimientos operacionales y financieros de prueba:
+ * - Ventas, compras, movimientos de stock, documentos e inventarios.
+ * - Cuentas por cobrar, abonos y apartados.
+ * - Cuentas por pagar, comprobantes de egreso y traslados de efectivo.
+ * - Nómina y liquidaciones.
+ * - Cierres diarios y cierres generales.
+ * 
+ * CONSERVA INTACTOS:
+ * - Todos los productos del catálogo, imágenes, precios y categorías.
+ * - Todas las sedes / almacenes activos.
+ * - Todos los usuarios, roles y asignaciones.
+ * - Todos los proveedores creados.
+ * - Todos los empleados dados de alta.
+ * - Todos los clientes (reiniciando saldos a favor de prueba a $0).
+ */
+export async function cleanOperationalTestData(pool: Pool): Promise<CleanTestDataResult> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1. Vaciar únicamente tablas transaccionales de prueba
+    await client.query(`
+      TRUNCATE TABLE
+        inventory_count_lines,
+        inventory_counts,
+        document_status_events,
+        inventory_document_lines,
+        inventory_documents,
+        stock_movements,
+        production_orders,
+        closure_payment_breakdown,
+        daily_closures,
+        layaway_payments,
+        layaways,
+        receivable_payments,
+        accounts_receivable,
+        expenses,
+        payable_payments,
+        accounts_payable,
+        cash_outflows,
+        cash_transfers,
+        payroll_payments,
+        global_closures,
+        notifications,
+        audit_logs
+      RESTART IDENTITY CASCADE
+    `);
+
+    // 2. Reiniciar saldos a favor de clientes y proveedores a 0
+    await client.query(`UPDATE customers SET credit_balance = 0`);
+    await client.query(`UPDATE suppliers SET credit_balance = 0`);
+
+    // 3. Reiniciar configuración de desbloqueo de edición de movimientos
+    await client.query(`
+      INSERT INTO inventory_movement_settings (singleton, entry_editing_enabled, exit_editing_enabled, editing_date, updated_by, updated_at)
+      VALUES (1, false, false, NULL, NULL, now())
+      ON CONFLICT (singleton) DO UPDATE SET
+        entry_editing_enabled = false,
+        exit_editing_enabled = false,
+        editing_date = NULL,
+        updated_by = NULL,
+        updated_at = now()
+    `);
+
+    // 4. Contar lo que se conservó intacto
+    const { rows: wCount } = await client.query<{ c: string }>(`SELECT COUNT(*)::text AS c FROM warehouses WHERE is_active = true`);
+    const { rows: uCount } = await client.query<{ c: string }>(`SELECT COUNT(*)::text AS c FROM users WHERE is_active = true`);
+    const { rows: pCount } = await client.query<{ c: string }>(`SELECT COUNT(*)::text AS c FROM products WHERE is_active = true`);
+    const { rows: sCount } = await client.query<{ c: string }>(`SELECT COUNT(*)::text AS c FROM suppliers WHERE is_active = true`);
+    const { rows: eCount } = await client.query<{ c: string }>(`SELECT COUNT(*)::text AS c FROM employees WHERE is_active = true`);
+    const { rows: cCount } = await client.query<{ c: string }>(`SELECT COUNT(*)::text AS c FROM customers`);
+
+    await client.query("COMMIT");
+
+    // Limpiar comprobantes temporales en disco (uploads/closures y uploads/payroll) SIN TOCAR uploads/products
+    try {
+      await rm(join(UPLOADS_ROOT, "closures"), { recursive: true, force: true });
+      await rm(join(UPLOADS_ROOT, "payroll"), { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+
+    return {
+      clearedOperations: true,
+      message: "Operaciones de prueba limpiadas con éxito. Catálogo de productos, sedes, usuarios, empleados y proveedores conservados intactos.",
+      keptCounts: {
+        warehouses: Number(wCount[0]?.c ?? 0),
+        users: Number(uCount[0]?.c ?? 0),
+        products: Number(pCount[0]?.c ?? 0),
+        suppliers: Number(sCount[0]?.c ?? 0),
+        employees: Number(eCount[0]?.c ?? 0),
+        customers: Number(cCount[0]?.c ?? 0),
+      },
+    };
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}

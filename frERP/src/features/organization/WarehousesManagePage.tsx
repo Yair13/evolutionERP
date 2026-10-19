@@ -37,6 +37,11 @@ export function WarehousesManagePage() {
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetSuccess, setResetSuccess] = useState<string | null>(null);
 
+  const [cleanTestModalOpen, setCleanTestModalOpen] = useState(false);
+  const [cleanTestConfirmText, setCleanTestConfirmText] = useState("");
+  const [cleanTestBusy, setCleanTestBusy] = useState(false);
+  const [cleanTestError, setCleanTestError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     if (!token) return;
     setLoading(true);
@@ -140,6 +145,46 @@ export function WarehousesManagePage() {
       setResetError(err instanceof Error ? err.message : "Error al reiniciar el sistema");
     } finally {
       setResetBusy(false);
+    }
+  }
+
+  async function onCleanTestData(e: FormEvent) {
+    e.preventDefault();
+    if (!token) return;
+    if (cleanTestConfirmText.trim().toUpperCase() !== "LIMPIAR PRUEBAS") {
+      setCleanTestError('Debes escribir exactamente "LIMPIAR PRUEBAS" para confirmar.');
+      return;
+    }
+    setCleanTestBusy(true);
+    setCleanTestError(null);
+    setResetSuccess(null);
+    try {
+      const res = await apiPost<{
+        ok: boolean;
+        message: string;
+        keptCounts: {
+          warehouses: number;
+          users: number;
+          products: number;
+          suppliers: number;
+          employees: number;
+          customers: number;
+        };
+      }>("/system/clean-test-data", { confirmText: cleanTestConfirmText.trim().toUpperCase() }, token);
+
+      clearAllPosDrafts();
+      clearScanCache();
+      setCleanTestModalOpen(false);
+      setCleanTestConfirmText("");
+      setResetSuccess(
+        `${res.message} Se conservaron intactos: ${res.keptCounts.products} productos, ${res.keptCounts.warehouses} sedes, ${res.keptCounts.users} usuarios, ${res.keptCounts.suppliers} proveedores y ${res.keptCounts.employees} empleados.`
+      );
+      await load();
+      await reloadWarehouses();
+    } catch (err) {
+      setCleanTestError(err instanceof Error ? err.message : "Error al limpiar datos de prueba");
+    } finally {
+      setCleanTestBusy(false);
     }
   }
 
@@ -247,19 +292,57 @@ export function WarehousesManagePage() {
         </div>
       ) : null}
 
+      {/* Sección 1: Limpiar datos de prueba para arrancar en vivo (Conserva productos, sedes, usuarios) */}
       <section
         className="org-card"
         style={{
           marginTop: "2rem",
+          borderColor: "rgba(245, 158, 11, 0.4)",
+          background: "rgba(254, 243, 199, 0.25)",
+        }}
+      >
+        <h2 className="org-card__title" style={{ color: "#d97706" }}>
+          Puesta en Marcha Oficial · Limpiar Movimientos de Prueba
+        </h2>
+        <p className="page-desc" style={{ marginBottom: "0.5rem" }}>
+          Elimina <strong>todas las ventas, facturas, movimientos de stock, créditos, apartados, egresos, traslados, nóminas y cierres de caja</strong> de prueba para arrancar la operación en ceros.
+        </p>
+        <p className="page-desc" style={{ marginBottom: "1rem", color: "#16a34a", fontWeight: 600 }}>
+          ✓ CONSERVA INTACTOS: Todos los productos creados, precios, imágenes, códigos de barras, sedes, usuarios, roles, proveedores y empleados.
+        </p>
+        <button
+          type="button"
+          className="btn"
+          style={{
+            background: "#d97706",
+            color: "#fff",
+            borderColor: "#b45309",
+            fontWeight: 600,
+          }}
+          onClick={() => {
+            setCleanTestConfirmText("");
+            setCleanTestError(null);
+            setCleanTestModalOpen(true);
+          }}
+        >
+          Limpiar datos de prueba (Arrancar en limpio)…
+        </button>
+      </section>
+
+      {/* Sección 2: Reinicio Total a Fábrica */}
+      <section
+        className="org-card"
+        style={{
+          marginTop: "1.5rem",
           borderColor: "rgba(220, 38, 38, 0.35)",
           background: "rgba(254, 242, 242, 0.45)",
         }}
       >
         <h2 className="org-card__title" style={{ color: "#b91c1c" }}>
-          Zona de peligro · Limpiar todo el sistema
+          Zona de peligro · Reinicio total a fábrica
         </h2>
         <p className="page-desc" style={{ marginBottom: "1rem" }}>
-          Elimina <strong>todas las entradas, salidas, conteos, productos, imágenes, clientes, gastos, cierres, otras sedes y otros usuarios</strong>.
+          Elimina <strong>absolutamente todo</strong>: productos, imágenes, clientes, gastos, cierres, otras sedes y otros usuarios.
           Únicamente se conservarán la sede <strong>Principal (MAIN)</strong> y tu cuenta de <strong>Super Administrador</strong>.
         </p>
         <button
@@ -316,6 +399,72 @@ export function WarehousesManagePage() {
         ) : null}
       </Modal>
 
+      {/* Modal: Limpiar solo movimientos de prueba */}
+      <Modal
+        open={cleanTestModalOpen}
+        title="Limpiar movimientos de prueba (Arrancar en vivo)"
+        onClose={() => {
+          if (!cleanTestBusy) setCleanTestModalOpen(false);
+        }}
+      >
+        <form className="org-form org-form--stack" onSubmit={onCleanTestData}>
+          <p style={{ margin: 0, lineHeight: 1.5, color: "#334155" }}>
+            Esta acción borrará todas las <strong>ventas, facturas, compras, stock/movimientos, créditos, apartados, egresos, traslados, nómina y cierres</strong> de prueba.
+          </p>
+          <div
+            style={{
+              padding: "0.75rem 1rem",
+              background: "#ecfdf5",
+              border: "1px solid #a7f3d0",
+              borderRadius: "8px",
+              fontSize: "0.85rem",
+              color: "#065f46",
+              fontWeight: 500,
+            }}
+          >
+            ✓ Se conservarán intactos: Catálogo de productos, fotos, precios, códigos de barras, sedes, usuarios, empleados y proveedores.
+          </div>
+          {cleanTestError ? <p className="form-error">{cleanTestError}</p> : null}
+          <label className="field">
+            <span>
+              Escribe <strong>LIMPIAR PRUEBAS</strong> para confirmar:
+            </span>
+            <input
+              value={cleanTestConfirmText}
+              onChange={(e) => setCleanTestConfirmText(e.target.value)}
+              placeholder="LIMPIAR PRUEBAS"
+              autoFocus
+              required
+              disabled={cleanTestBusy}
+            />
+          </label>
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={cleanTestBusy}
+              onClick={() => setCleanTestModalOpen(false)}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="btn"
+              disabled={cleanTestBusy || cleanTestConfirmText.trim().toUpperCase() !== "LIMPIAR PRUEBAS"}
+              style={{
+                background: "#d97706",
+                color: "#fff",
+                borderColor: "#b45309",
+                fontWeight: 600,
+              }}
+            >
+              {cleanTestBusy ? "Limpiando pruebas…" : "Sí, limpiar pruebas y arrancar"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Reinicio total a fábrica */}
       <Modal
         open={resetModalOpen}
         title="Confirmar limpieza total del sistema"
