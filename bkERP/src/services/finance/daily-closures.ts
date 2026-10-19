@@ -361,7 +361,7 @@ export async function getDailyClosureData(
     `
     SELECT
       d.id,
-      d.doc_number AS "docNumber",
+      COALESCE(d.invoice_number, d.id::text) AS "docNumber",
       d.receipt_url AS "receiptUrl",
       d.receipt_filename AS "receiptFilename",
       d.created_at AS "createdAt",
