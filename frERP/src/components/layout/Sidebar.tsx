@@ -23,6 +23,7 @@ import {
   Truck,
   ArrowLeftRight,
   ShieldCheck,
+  FileSpreadsheet,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -413,6 +414,13 @@ export function Sidebar({ open, pinned = false, onTogglePin, onNavigate }: Sideb
               icon: ShieldCheck,
               label: "Cierre Diario",
               hint: "Arqueo de caja acumulativo, arranques y auditoría de soportes",
+            },
+            {
+              to: "/app/finanzas/cierre-general",
+              end: true,
+              icon: FileSpreadsheet,
+              label: "Cierre General (Rango)",
+              hint: "Consolidado contable por fechas, fondo en caja y retiro",
             },
           ]}
         />

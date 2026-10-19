@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   CheckCircle2,
   AlertTriangle,
@@ -51,13 +52,23 @@ function localFirstDayOfMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
-export function DailyClosurePage() {
+export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "history" | "general" } = {}) {
   const { token, user } = useAuth();
   const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
+  const location = useLocation();
   const canSeeAll =
     isAllWarehouses || user?.roles.includes("super_admin") || user?.roles.includes("secretaria");
 
-  const [activeTab, setActiveTab] = useState<"current" | "history" | "general">("current");
+  const initialTab = defaultTab || (location.pathname.includes("cierre-general") ? "general" : "current");
+  const [activeTab, setActiveTab] = useState<"current" | "history" | "general">(initialTab);
+
+  useEffect(() => {
+    if (defaultTab) {
+      setActiveTab(defaultTab);
+    } else if (location.pathname.includes("cierre-general")) {
+      setActiveTab("general");
+    }
+  }, [defaultTab, location.pathname]);
 
   // Filtros principales Cierre Diario
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(

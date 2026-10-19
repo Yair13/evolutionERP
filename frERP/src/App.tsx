@@ -77,6 +77,7 @@ export default function App() {
             <Route path="finanzas/egresos" element={<CashOutflowsPage />} />
             <Route path="finanzas/nomina" element={<PayrollPage />} />
             <Route path="finanzas/cierre-diario" element={<DailyClosurePage />} />
+            <Route path="finanzas/cierre-general" element={<DailyClosurePage defaultTab="general" />} />
 
             <Route element={<RequireAdminHeadquarters />}>
               <Route path="productos" element={<ProductsCatalogPage />} />
