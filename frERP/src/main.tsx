@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App.js";
 import "./index.css";
 import "./styles/inventory.css";
+import "./styles/finance.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

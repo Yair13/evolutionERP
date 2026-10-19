@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   Clock,
   Filter,
+  RefreshCw,
 } from "lucide-react";
 
 function formatMoney(n: number): string {
@@ -38,11 +39,19 @@ function formatDate(iso: string | null): string {
 }
 
 export function LayawaysPage() {
-  const { token, user } = useAuth();
-  const { warehouses, warehouseId, setWarehouseId } = useWarehouse();
+  const { token } = useAuth();
+  const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
 
   // Filtros
-  const [selectedWarehouse, setSelectedWarehouse] = useState<string>(warehouseId || "");
+  const [selectedWarehouse, setSelectedWarehouse] = useState<string>(
+    isAllWarehouses ? "" : (warehouseId || "")
+  );
+
+  useEffect(() => {
+    if (!isAllWarehouses && warehouseId) {
+      setSelectedWarehouse(warehouseId);
+    }
+  }, [isAllWarehouses, warehouseId]);
   const [selectedStatus, setSelectedStatus] = useState<string>("active");
   const [searchQuery, setSearchQuery] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -103,301 +112,352 @@ export function LayawaysPage() {
   const totalPages = Math.ceil(total / limit) || 1;
 
   return (
-    <div className="inv-page">
+    <div className="fin-page">
       {/* Header */}
-      <div className="inv-page__header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem" }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <Bookmark size={28} color="#6366f1" />
-            <h1 className="inv-page__title">Plan Separe / Apartados</h1>
+      <div className="fin-header">
+        <div className="fin-header__info">
+          <div className="fin-header__title-row">
+            <div className="fin-header__icon-badge fin-header__icon-badge--indigo">
+              <Bookmark size={24} />
+            </div>
+            <div>
+              <h1 className="fin-header__title">Plan Separe / Apartados</h1>
+              <p className="fin-header__subtitle">
+                Control de abonos de clientes para apartar mercancía, liquidación en caja y saldos a favor.
+              </p>
+            </div>
           </div>
-          <p className="inv-page__subtitle">
-            Control de abonos de clientes para apartar mercancía, liquidación en caja y saldos a favor.
-          </p>
         </div>
 
-        <button
-          type="button"
-          className="inv-btn inv-btn--primary"
-          onClick={() => setOpenCreate(true)}
-          style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}
-        >
-          <PlusCircle size={18} />
-          Nuevo Apartado
-        </button>
+        <div className="fin-header__actions">
+          <button
+            type="button"
+            className="fin-btn fin-btn--primary"
+            onClick={() => setOpenCreate(true)}
+          >
+            <PlusCircle size={17} />
+            <span>Nuevo Apartado</span>
+          </button>
+        </div>
       </div>
 
       {/* KPI Summary Cards */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: "1rem",
-          margin: "1.5rem 0",
-        }}
-      >
-        <div style={{ background: "var(--inv-bg-elevated)", padding: "1.25rem", borderRadius: 10, border: "1px solid var(--inv-border)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--inv-text-muted)", fontSize: "0.85rem" }}>
-            <span>Apartados Activos</span>
-            <Bookmark size={18} color="#6366f1" />
+      <div className="fin-kpi-grid fin-kpi-grid--4">
+        <div className="fin-kpi-card fin-kpi-card--indigo">
+          <div className="fin-kpi-top">
+            <span className="fin-kpi-label">Apartados Activos</span>
+            <div className="fin-kpi-icon fin-kpi-icon--indigo">
+              <Bookmark size={18} />
+            </div>
           </div>
-          <div style={{ fontSize: "1.8rem", fontWeight: 700, marginTop: "0.5rem" }}>
+          <div className="fin-kpi-val fin-kpi-val--indigo">
             {summary.activeCount}
           </div>
-          <div style={{ fontSize: "0.8rem", color: "var(--inv-text-muted)", marginTop: "0.25rem" }}>
+          <div className="fin-kpi-sub">
             Clientes con mercancía reservada
           </div>
         </div>
 
-        <div style={{ background: "var(--inv-bg-elevated)", padding: "1.25rem", borderRadius: 10, border: "1px solid var(--inv-border)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--inv-text-muted)", fontSize: "0.85rem" }}>
-            <span>Total Mercancía Apartada</span>
-            <Clock size={18} color="#818cf8" />
+        <div className="fin-kpi-card fin-kpi-card--teal">
+          <div className="fin-kpi-top">
+            <span className="fin-kpi-label">Total Mercancía</span>
+            <div className="fin-kpi-icon fin-kpi-icon--teal">
+              <Clock size={18} />
+            </div>
           </div>
-          <div style={{ fontSize: "1.8rem", fontWeight: 700, marginTop: "0.5rem" }}>
+          <div className="fin-kpi-val fin-kpi-val--teal">
             {formatMoney(summary.totalTarget)}
           </div>
-          <div style={{ fontSize: "0.8rem", color: "var(--inv-text-muted)", marginTop: "0.25rem" }}>
-            Valor total de planes activos
+          <div className="fin-kpi-sub">
+            Valor acumulado en planes
           </div>
         </div>
 
-        <div style={{ background: "var(--inv-bg-elevated)", padding: "1.25rem", borderRadius: 10, border: "1px solid var(--inv-border)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--inv-text-muted)", fontSize: "0.85rem" }}>
-            <span>Total Recaudado en Abonos</span>
-            <CheckCircle2 size={18} color="#10b981" />
+        <div className="fin-kpi-card fin-kpi-card--emerald">
+          <div className="fin-kpi-top">
+            <span className="fin-kpi-label" style={{ color: "#059669" }}>Total Recaudado</span>
+            <div className="fin-kpi-icon fin-kpi-icon--emerald">
+              <CheckCircle2 size={18} />
+            </div>
           </div>
-          <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "#10b981", marginTop: "0.5rem" }}>
+          <div className="fin-kpi-val fin-kpi-val--emerald">
             {formatMoney(summary.totalCollected)}
           </div>
-          <div style={{ fontSize: "0.8rem", color: "var(--inv-text-muted)", marginTop: "0.25rem" }}>
-            Dinero recibido en caja
+          <div className="fin-kpi-sub">
+            Dinero recibido en caja por abonos
           </div>
         </div>
 
-        <div style={{ background: "var(--inv-bg-elevated)", padding: "1.25rem", borderRadius: 10, border: "1px solid var(--inv-border)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--inv-text-muted)", fontSize: "0.85rem" }}>
-            <span>Saldo Pendiente por Recaudar</span>
-            <Wallet size={18} color="#f59e0b" />
+        <div className="fin-kpi-card fin-kpi-card--amber">
+          <div className="fin-kpi-top">
+            <span className="fin-kpi-label" style={{ color: "#d97706" }}>Saldo Pendiente</span>
+            <div className="fin-kpi-icon fin-kpi-icon--amber">
+              <Wallet size={18} />
+            </div>
           </div>
-          <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "#f59e0b", marginTop: "0.5rem" }}>
+          <div className="fin-kpi-val fin-kpi-val--amber">
             {formatMoney(summary.totalRemaining)}
           </div>
-          <div style={{ fontSize: "0.8rem", color: "var(--inv-text-muted)", marginTop: "0.25rem" }}>
-            Por cobrar antes de entrega
+          <div className="fin-kpi-sub">
+            Por cobrar antes de entregar
           </div>
         </div>
       </div>
 
       {/* Filtros */}
-      <div
-        style={{
-          background: "var(--inv-bg-elevated)",
-          padding: "1rem",
-          borderRadius: 8,
-          marginBottom: "1rem",
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "1rem",
-          alignItems: "center",
-        }}
-      >
+      <div className="fin-filter-card">
         {/* Sede */}
-        <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", minWidth: 160 }}>
-          <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>SEDE</span>
-          <select
-            value={selectedWarehouse}
-            onChange={(e) => {
-              setSelectedWarehouse(e.target.value);
-              setWarehouseId(e.target.value);
-              setPage(1);
-            }}
-            disabled={!user?.hasAdminAccess && warehouses.length <= 1}
-            style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
-          >
-            <option value="">Todas las sedes</option>
-            {warehouses.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name} ({w.code})
-              </option>
-            ))}
-          </select>
-        </label>
+        {isAllWarehouses ? (
+          <div className="fin-filter-field" style={{ minWidth: 170 }}>
+            <span>SEDE</span>
+            <select
+              className="fin-select"
+              value={selectedWarehouse}
+              onChange={(e) => {
+                setSelectedWarehouse(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">Todas las sedes</option>
+              {warehouses.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name} ({w.code})
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="fin-filter-field" style={{ minWidth: 160 }}>
+            <span>SEDE ACTUAL</span>
+            <input
+              className="fin-input"
+              disabled
+              value={warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
+            />
+          </div>
+        )}
 
         {/* Estado */}
-        <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", minWidth: 140 }}>
-          <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>ESTADO</span>
+        <div className="fin-filter-field" style={{ minWidth: 150 }}>
+          <span>ESTADO</span>
           <select
+            className="fin-select"
             value={selectedStatus}
             onChange={(e) => {
               setSelectedStatus(e.target.value);
               setPage(1);
             }}
-            style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
           >
-            <option value="all">Todos</option>
-            <option value="active">Activos</option>
+            <option value="all">Todos los Estados</option>
+            <option value="active">Activos / Vigentes</option>
             <option value="completed">Completados / Redimidos</option>
             <option value="cancelled">Cancelados</option>
           </select>
-        </label>
+        </div>
 
         {/* Búsqueda */}
-        <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", flex: 1, minWidth: 200 }}>
-          <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>BUSCAR CLIENTE O CÓDIGO</span>
-          <div style={{ position: "relative" }}>
+        <div className="fin-filter-field" style={{ flex: 2, minWidth: 220 }}>
+          <span>BUSCAR CLIENTE O CÓDIGO</span>
+          <div className="fin-search-wrap">
+            <Search size={16} className="fin-search-wrap__icon" />
             <input
+              className="fin-input"
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
                 setPage(1);
               }}
               placeholder="Buscar por código, nombre, cédula o teléfono..."
-              style={{ width: "100%", padding: "6px 10px 6px 30px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
             />
-            <Search size={15} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--inv-text-muted)" }} />
           </div>
-        </label>
+        </div>
 
         {/* Fechas */}
-        <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-          <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>DESDE</span>
+        <div className="fin-filter-field" style={{ minWidth: 130 }}>
+          <span>DESDE</span>
           <input
+            className="fin-input"
             type="date"
             value={dateFrom}
             onChange={(e) => {
               setDateFrom(e.target.value);
               setPage(1);
             }}
-            style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
           />
-        </label>
+        </div>
 
-        <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-          <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>HASTA</span>
+        <div className="fin-filter-field" style={{ minWidth: 130 }}>
+          <span>HASTA</span>
           <input
+            className="fin-input"
             type="date"
             value={dateTo}
             onChange={(e) => {
               setDateTo(e.target.value);
               setPage(1);
             }}
-            style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
           />
-        </label>
+        </div>
+
+        <div className="fin-filter-field fin-filter-field--fixed">
+          <button
+            type="button"
+            className="fin-btn fin-btn--ghost"
+            onClick={() => void loadData()}
+            title="Refrescar datos"
+            disabled={loading}
+          >
+            <RefreshCw size={16} className={loading ? "spin" : ""} />
+            <span>Refrescar</span>
+          </button>
+        </div>
       </div>
 
-      {error && <div className="inv-form-error" style={{ marginBottom: "1rem" }}>{error}</div>}
+      {error && <div className="fin-alert fin-alert--danger">{error}</div>}
 
       {/* Tabla de Resultados */}
-      <div style={{ background: "var(--inv-bg-elevated)", borderRadius: 10, overflow: "hidden", border: "1px solid var(--inv-border)" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table className="inv-table" style={{ width: "100%" }}>
+      <div className="fin-table-card">
+        <div className="fin-table-header">
+          <h3 className="fin-table-title">
+            <Bookmark size={18} color="var(--accent)" />
+            <span>Listado de Planes Separe</span>
+          </h3>
+          <span className="fin-badge fin-badge--neutral">
+            {total} apartados encontrados
+          </span>
+        </div>
+
+        <div className="fin-table-wrap">
+          <table className="fin-table">
             <thead>
               <tr>
                 <th>Código</th>
                 <th>Cliente</th>
                 <th>Sede</th>
-                <th>Meta</th>
-                <th>Abonado</th>
-                <th>Saldo Pendiente</th>
-                <th>Estado</th>
-                <th>Fecha Creación</th>
-                <th>Vencimiento</th>
+                <th style={{ textAlign: "right" }}>Meta Total</th>
+                <th style={{ textAlign: "right" }}>Abonado</th>
+                <th style={{ minWidth: 120 }}>Avance</th>
+                <th style={{ textAlign: "right" }}>Saldo Pendiente</th>
+                <th style={{ textAlign: "center" }}>Estado</th>
+                <th>Creación</th>
+                <th>Vence</th>
                 <th style={{ textAlign: "right" }}>Acciones</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={10} style={{ textAlign: "center", padding: "2rem", color: "var(--inv-text-muted)" }}>
-                    Cargando apartados...
+                  <td colSpan={11} style={{ textAlign: "center", padding: "2.5rem", color: "#64748b" }}>
+                    <RefreshCw size={24} className="spin" style={{ margin: "0 auto 0.5rem" }} />
+                    <div>Cargando apartados…</div>
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={10} style={{ textAlign: "center", padding: "3rem 1rem", color: "var(--inv-text-muted)" }}>
-                    <Filter size={32} style={{ margin: "0 auto 0.75rem", opacity: 0.5 }} />
-                    <div>No se encontraron apartados con los filtros seleccionados.</div>
+                  <td colSpan={11} style={{ textAlign: "center", padding: "3rem 1rem", color: "#64748b" }}>
+                    <Filter size={32} style={{ margin: "0 auto 0.75rem", opacity: 0.4 }} />
+                    <div style={{ fontWeight: 600, color: "#1e293b" }}>No se encontraron apartados con los filtros seleccionados</div>
+                    <div style={{ fontSize: "0.82rem", marginTop: 4 }}>Usa el botón "Nuevo Apartado" para registrar una separación.</div>
                   </td>
                 </tr>
               ) : (
-                items.map((item) => (
-                  <tr key={item.id}>
-                    <td>
-                      <strong style={{ color: "#818cf8" }}>{item.code}</strong>
-                    </td>
-                    <td>
-                      <div>
-                        <strong>{item.customerName}</strong>
-                        <div style={{ fontSize: "0.78rem", color: "var(--inv-text-muted)" }}>
-                          CC: {item.customerTaxId || "—"} · Tel: {item.customerPhone || "—"}
+                items.map((item) => {
+                  const percent = item.targetAmount > 0
+                    ? Math.min(100, Math.round((item.paidAmount / item.targetAmount) * 100))
+                    : 0;
+
+                  return (
+                    <tr key={item.id}>
+                      <td>
+                        <span className="fin-badge fin-badge--teal" style={{ fontWeight: 800 }}>
+                          {item.code}
+                        </span>
+                      </td>
+                      <td>
+                        <div>
+                          <strong style={{ color: "#0f172a" }}>{item.customerName}</strong>
+                          <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                            CC: {item.customerTaxId || "—"} · Tel: {item.customerPhone || "—"}
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td>
-                      <span>{item.warehouseName}</span>
-                    </td>
-                    <td style={{ fontWeight: 600 }}>
-                      {formatMoney(item.targetAmount)}
-                    </td>
-                    <td style={{ fontWeight: 700, color: "#10b981" }}>
-                      {formatMoney(item.paidAmount)}
-                    </td>
-                    <td style={{ fontWeight: 700, color: item.remainingAmount === 0 ? "#10b981" : "#f59e0b" }}>
-                      {formatMoney(item.remainingAmount)}
-                    </td>
-                    <td>
-                      {item.status === "active" && (
-                        <span className="badge badge--primary" style={{ background: "rgba(99, 102, 241, 0.15)", color: "#818cf8" }}>
-                          Activo
-                        </span>
-                      )}
-                      {item.status === "completed" && (
-                        <span className="badge badge--success" style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981" }}>
-                          Redimido
-                        </span>
-                      )}
-                      {item.status === "cancelled" && (
-                        <span className="badge badge--neutral" style={{ background: "rgba(239, 68, 68, 0.15)", color: "#ef4444" }}>
-                          Cancelado
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ fontSize: "0.82rem", color: "var(--inv-text-muted)" }}>
-                      {formatDate(item.createdAt)}
-                    </td>
-                    <td style={{ fontSize: "0.82rem", color: item.expiryDate ? "inherit" : "var(--inv-text-muted)" }}>
-                      {item.expiryDate || "—"}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      <div style={{ display: "inline-flex", gap: "0.35rem" }}>
+                      </td>
+                      <td>
+                        <span className="fin-badge fin-badge--neutral">{item.warehouseName}</span>
+                      </td>
+                      <td className="fin-table-num">
+                        {formatMoney(item.targetAmount)}
+                      </td>
+                      <td className="fin-table-num" style={{ color: "#059669", fontWeight: 700 }}>
+                        {formatMoney(item.paidAmount)}
+                      </td>
+                      <td>
+                        <div className="fin-progress">
+                          <div className="fin-progress__bar-wrap">
+                            <div
+                              className="fin-progress__bar-fill"
+                              style={{ width: `${percent}%` }}
+                            />
+                          </div>
+                          <div className="fin-progress__text">
+                            <span>{percent}%</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="fin-table-num">
+                        <strong style={{ color: item.remainingAmount === 0 ? "#059669" : "#d97706", fontSize: "0.95rem" }}>
+                          {formatMoney(item.remainingAmount)}
+                        </strong>
+                      </td>
+                      <td style={{ textAlign: "center" }}>
                         {item.status === "active" && (
+                          <span className="fin-badge fin-badge--warning">
+                            Activo
+                          </span>
+                        )}
+                        {item.status === "completed" && (
+                          <span className="fin-badge fin-badge--success">
+                            Redimido
+                          </span>
+                        )}
+                        {item.status === "cancelled" && (
+                          <span className="fin-badge fin-badge--danger">
+                            Cancelado
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ fontSize: "0.82rem", color: "#64748b", whiteSpace: "nowrap" }}>
+                        {formatDate(item.createdAt)}
+                      </td>
+                      <td style={{ fontSize: "0.82rem", color: item.expiryDate ? "#0f172a" : "#94a3b8", whiteSpace: "nowrap" }}>
+                        {item.expiryDate || "—"}
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <div style={{ display: "inline-flex", gap: "0.35rem" }}>
+                          {item.status === "active" && (
+                            <button
+                              type="button"
+                              className="fin-btn fin-btn--primary fin-btn--sm"
+                              onClick={() => setSelectedForPayment(item)}
+                              title="Abonar al apartado"
+                            >
+                              <Wallet size={14} />
+                              <span>Abonar</span>
+                            </button>
+                          )}
                           <button
                             type="button"
-                            className="inv-btn inv-btn--primary"
-                            style={{ padding: "4px 8px", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: 3 }}
-                            onClick={() => setSelectedForPayment(item)}
-                            title="Abonar al apartado"
+                            className="fin-btn fin-btn--ghost fin-btn--sm"
+                            onClick={() => setSelectedDetailId(item.id)}
+                            title="Ver detalle"
                           >
-                            <Wallet size={14} />
-                            Abonar
+                            <Eye size={14} />
+                            <span>Detalle</span>
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          className="inv-btn inv-btn--ghost"
-                          style={{ padding: "4px 8px", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: 3 }}
-                          onClick={() => setSelectedDetailId(item.id)}
-                          title="Ver detalle"
-                        >
-                          <Eye size={14} />
-                          Detalle
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -407,12 +467,13 @@ export function LayawaysPage() {
         {totalPages > 1 && (
           <div
             style={{
-              padding: "0.75rem 1rem",
+              padding: "0.85rem 1.25rem",
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              borderTop: "1px solid var(--inv-border)",
+              borderTop: "1px solid var(--border-color)",
               fontSize: "0.85rem",
+              background: "#fcfdfe",
             }}
           >
             <span>
@@ -421,7 +482,7 @@ export function LayawaysPage() {
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <button
                 type="button"
-                className="inv-btn inv-btn--ghost"
+                className="fin-btn fin-btn--ghost fin-btn--sm"
                 disabled={page <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
               >
@@ -429,7 +490,7 @@ export function LayawaysPage() {
               </button>
               <button
                 type="button"
-                className="inv-btn inv-btn--ghost"
+                className="fin-btn fin-btn--ghost fin-btn--sm"
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               >

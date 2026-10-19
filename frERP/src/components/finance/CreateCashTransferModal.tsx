@@ -11,10 +11,12 @@ type Props = {
 };
 
 export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
-  const { token, user } = useAuth();
-  const { warehouses, warehouseId } = useWarehouse();
+  const { token } = useAuth();
+  const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
 
-  const [originWarehouseId, setOriginWarehouseId] = useState<string>(warehouseId || "");
+  const [originWarehouseId, setOriginWarehouseId] = useState<string>(
+    isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || "")
+  );
   const [destinationWarehouseId, setDestinationWarehouseId] = useState<string>("");
   const [amountStr, setAmountStr] = useState<string>("");
   const [carrierName, setCarrierName] = useState<string>("");
@@ -162,21 +164,28 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
             <label className="field">
               <span>Sede de Origen (Emisora) *</span>
-              <select
-                value={originWarehouseId}
-                onChange={(e) => {
-                  setOriginWarehouseId(e.target.value);
-                  const firstDest = warehouses.find((w) => w.is_active && w.id !== e.target.value)?.id ?? "";
-                  setDestinationWarehouseId(firstDest);
-                }}
-                disabled={submitting || (!user?.hasAdminAccess && warehouses.length <= 1)}
-              >
-                {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name} ({w.code})
-                  </option>
-                ))}
-              </select>
+              {isAllWarehouses ? (
+                <select
+                  value={originWarehouseId}
+                  onChange={(e) => {
+                    setOriginWarehouseId(e.target.value);
+                    const firstDest = warehouses.find((w) => w.is_active && w.id !== e.target.value)?.id ?? "";
+                    setDestinationWarehouseId(firstDest);
+                  }}
+                  disabled={submitting}
+                  required
+                >
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} ({w.code})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-elevated)", fontWeight: 600, fontSize: "0.9rem" }}>
+                  {warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
+                </div>
+              )}
             </label>
 
             <label className="field">

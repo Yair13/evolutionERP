@@ -23,6 +23,7 @@ import {
   Building2,
   ArrowRight,
   Filter,
+  RefreshCw,
 } from "lucide-react";
 
 function formatMoney(n: number): string {
@@ -45,13 +46,21 @@ function formatDate(iso: string | null): string {
 }
 
 export function CashOutflowsPage() {
-  const { token, user } = useAuth();
-  const { warehouses, warehouseId, setWarehouseId } = useWarehouse();
+  const { token } = useAuth();
+  const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
 
   const [activeTab, setActiveTab] = useState<"outflows" | "transfers">("outflows");
 
   // Filtros de Egresos
-  const [selectedWarehouse, setSelectedWarehouse] = useState<string>(warehouseId || "");
+  const [selectedWarehouse, setSelectedWarehouse] = useState<string>(
+    isAllWarehouses ? "" : (warehouseId || "")
+  );
+
+  useEffect(() => {
+    if (!isAllWarehouses && warehouseId) {
+      setSelectedWarehouse(warehouseId);
+    }
+  }, [isAllWarehouses, warehouseId]);
   const [paymentMethod, setPaymentMethod] = useState<string>("");
   const [searchOutflows, setSearchOutflows] = useState<string>("");
   const [dateFrom, setDateFrom] = useState<string>("");
@@ -84,8 +93,9 @@ export function CashOutflowsPage() {
     setLoading(true);
     setError(null);
     try {
+      const targetWh = isAllWarehouses ? (selectedWarehouse || null) : (warehouseId || null);
       const res = await fetchCashOutflows(token, {
-        warehouseId: selectedWarehouse || null,
+        warehouseId: targetWh,
         paymentMethod: paymentMethod || null,
         dateFrom: dateFrom || null,
         dateTo: dateTo || null,
@@ -101,9 +111,9 @@ export function CashOutflowsPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, selectedWarehouse, paymentMethod, dateFrom, dateTo, searchOutflows, outflowsPage]);
+  }, [token, isAllWarehouses, warehouseId, selectedWarehouse, paymentMethod, dateFrom, dateTo, searchOutflows, outflowsPage]);
 
-  // Cargar Traslados
+  // Cargar Traslados de Dinero
   const loadTransfers = useCallback(async () => {
     if (!token) return;
     setLoading(true);
@@ -111,21 +121,19 @@ export function CashOutflowsPage() {
     try {
       const res = await fetchCashTransfers(token, {
         warehouseId: selectedWarehouse || null,
-        limit: 50,
       });
       setTransfers(res.items);
       setTotalTransfers(res.total);
 
-      // Filtrar los que están pendientes de recibir en la sede actual seleccionada
+      // Filtrar los que van dirigidos a la sede actual y están pendientes
       if (warehouseId) {
-        setIncomingTransfers(
-          res.items.filter(
-            (t) => t.destinationWarehouseId === warehouseId && t.status === "pending"
-          )
+        const incoming = res.items.filter(
+          (t) => t.destinationWarehouseId === warehouseId && t.status === "pending"
         );
+        setIncomingTransfers(incoming);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al cargar los traslados de dinero.");
+      setError(err instanceof Error ? err.message : "Error al cargar traslados.");
     } finally {
       setLoading(false);
     }
@@ -139,26 +147,12 @@ export function CashOutflowsPage() {
     }
   }, [activeTab, loadOutflows, loadTransfers]);
 
-  // Cargar siempre traslados entrantes para la alerta
-  useEffect(() => {
-    if (!token || !warehouseId) return;
-    fetchCashTransfers(token, {
-      warehouseId,
-      role: "destination",
-      status: "pending",
-      limit: 10,
-    })
-      .then((res) => {
-        setIncomingTransfers(res.items);
-      })
-      .catch((err) => console.error("Error al cargar traslados entrantes:", err));
-  }, [token, warehouseId]);
-
+  // Aprobar traslado entrante
   async function handleApproveTransfer(t: CashTransferItem) {
     if (!token) return;
     try {
       await approveCashTransfer(token, t.id);
-      setActionSuccess(`¡Traslado ${t.code} recibido y depositado en caja con éxito!`);
+      setActionSuccess(`Traslado ${t.code} recibido y sumado a la caja de la sede.`);
       void loadTransfers();
       setIncomingTransfers((prev) => prev.filter((item) => item.id !== t.id));
       window.setTimeout(() => setActionSuccess(null), 4000);
@@ -167,6 +161,7 @@ export function CashOutflowsPage() {
     }
   }
 
+  // Rechazar traslado
   async function handleRejectTransfer(t: CashTransferItem) {
     const reason = window.prompt("Indica el motivo del rechazo del dinero:");
     if (!reason || !reason.trim() || !token) return;
@@ -185,44 +180,47 @@ export function CashOutflowsPage() {
   const totalPages = Math.ceil(totalOutflows / limit) || 1;
 
   return (
-    <div className="inv-page">
+    <div className="fin-page">
       {/* Header */}
-      <div className="inv-page__header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem" }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <FileMinus size={28} color="#ef4444" />
-            <h1 className="inv-page__title">Salidas de Dinero y Traslados entre Sedes</h1>
+      <div className="fin-header">
+        <div className="fin-header__info">
+          <div className="fin-header__title-row">
+            <div className="fin-header__icon-badge fin-header__icon-badge--rose">
+              <FileMinus size={24} />
+            </div>
+            <div>
+              <h1 className="fin-header__title">Salidas de Dinero y Traslados entre Sedes</h1>
+              <p className="fin-header__subtitle">
+                Emisión de comprobantes de egreso con firma, gastos operativos y remesas de efectivo entre sucursales.
+              </p>
+            </div>
           </div>
-          <p className="inv-page__subtitle">
-            Emisión de comprobantes de egreso con firma, gastos operativos y remesas de efectivo entre sucursales.
-          </p>
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <div className="fin-header__actions">
           <button
             type="button"
-            className="inv-btn inv-btn--ghost"
+            className="fin-btn fin-btn--ghost"
             onClick={() => setOpenCreateTransfer(true)}
-            style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}
           >
             <ArrowLeftRight size={17} />
-            Trasladar Dinero
+            <span>Trasladar Dinero</span>
           </button>
           <button
             type="button"
-            className="inv-btn inv-btn--primary"
+            className="fin-btn fin-btn--primary"
             onClick={() => setOpenCreateOutflow(true)}
-            style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}
           >
             <PlusCircle size={17} />
-            Nuevo Comprobante de Egreso
+            <span>Nuevo Comprobante de Egreso</span>
           </button>
         </div>
       </div>
 
       {actionSuccess && (
-        <div style={{ padding: "0.75rem 1rem", background: "rgba(16, 185, 129, 0.15)", border: "1px solid #10b981", borderRadius: 8, color: "#10b981", fontWeight: 600, margin: "1rem 0" }}>
-          {actionSuccess}
+        <div className="fin-alert fin-alert--success">
+          <CheckCircle2 size={18} />
+          <div>{actionSuccess}</div>
         </div>
       )}
 
@@ -230,14 +228,15 @@ export function CashOutflowsPage() {
       {incomingTransfers.length > 0 && (
         <div
           style={{
-            background: "rgba(99, 102, 241, 0.1)",
-            border: "1.5px solid #6366f1",
-            borderRadius: 10,
-            padding: "1rem 1.25rem",
-            margin: "1rem 0 1.5rem",
+            background: "rgba(79, 70, 229, 0.05)",
+            border: "1.5px solid var(--fin-indigo-border)",
+            borderRadius: 14,
+            padding: "1.25rem 1.5rem",
+            marginBottom: "1.75rem",
+            boxShadow: "var(--fin-shadow-sm)",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "#818cf8", fontWeight: 700, fontSize: "1.05rem", marginBottom: "0.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "#4f46e5", fontWeight: 700, fontSize: "1.05rem", marginBottom: "0.85rem" }}>
             <Clock size={20} />
             <span>Tienes {incomingTransfers.length} traslado(s) de dinero entrante(s) pendiente(s) por recibir en esta sede</span>
           </div>
@@ -247,46 +246,45 @@ export function CashOutflowsPage() {
               <div
                 key={t.id}
                 style={{
-                  background: "var(--inv-bg-elevated)",
-                  borderRadius: 8,
-                  padding: "0.75rem 1rem",
+                  background: "#ffffff",
+                  borderRadius: 12,
+                  padding: "0.85rem 1.15rem",
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
                   flexWrap: "wrap",
                   gap: "0.75rem",
-                  border: "1px solid var(--inv-border)",
+                  border: "1px solid var(--border-color)",
+                  boxShadow: "var(--fin-shadow-sm)",
                 }}
               >
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    <strong style={{ color: "#6366f1" }}>{t.code}</strong>
-                    <span>· Enviado desde: <strong>{t.originWarehouseName}</strong></span>
+                    <span className="fin-badge fin-badge--teal">{t.code}</span>
+                    <span style={{ fontSize: "0.88rem" }}>· Enviado desde: <strong style={{ color: "#0f172a" }}>{t.originWarehouseName}</strong></span>
                   </div>
-                  <div style={{ fontSize: "0.85rem", color: "var(--inv-text-muted)", marginTop: "0.2rem" }}>
-                    Transportado por: <strong>{t.carrierName}</strong> {t.carrierDoc ? `(CC: ${t.carrierDoc})` : ""} · Motivo: {t.concept}
+                  <div style={{ fontSize: "0.82rem", color: "#64748b", marginTop: "0.25rem" }}>
+                    Transportado por: <strong style={{ color: "#334155" }}>{t.carrierName}</strong> {t.carrierDoc ? `(CC: ${t.carrierDoc})` : ""} · Motivo: {t.concept}
                   </div>
                 </div>
 
                 <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-                  <div style={{ fontSize: "1.3rem", fontWeight: 800, color: "#10b981" }}>
+                  <div style={{ fontSize: "1.35rem", fontWeight: 800, color: "#059669", fontFamily: "var(--font-display, inherit)" }}>
                     {formatMoney(t.amount)}
                   </div>
                   <div style={{ display: "flex", gap: "0.4rem" }}>
                     <button
                       type="button"
-                      className="inv-btn inv-btn--primary"
+                      className="fin-btn fin-btn--primary fin-btn--sm"
                       onClick={() => void handleApproveTransfer(t)}
-                      style={{ padding: "6px 12px", fontSize: "0.82rem", display: "flex", alignItems: "center", gap: 4 }}
                     >
                       <CheckCircle2 size={15} />
-                      Aprobar y Recibir en Caja
+                      <span>Aprobar y Recibir en Caja</span>
                     </button>
                     <button
                       type="button"
-                      className="inv-btn inv-btn--ghost"
+                      className="fin-btn fin-btn--danger fin-btn--sm"
                       onClick={() => void handleRejectTransfer(t)}
-                      style={{ padding: "6px 10px", fontSize: "0.82rem", color: "#ef4444" }}
                     >
                       Rechazar
                     </button>
@@ -299,186 +297,176 @@ export function CashOutflowsPage() {
       )}
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: "0.5rem", borderBottom: "1px solid var(--inv-border)", marginBottom: "1.5rem" }}>
-        <button
-          type="button"
-          onClick={() => setActiveTab("outflows")}
-          style={{
-            padding: "8px 16px",
-            background: "transparent",
-            border: "none",
-            borderBottom: activeTab === "outflows" ? "2px solid #ef4444" : "2px solid transparent",
-            color: activeTab === "outflows" ? "#ef4444" : "var(--inv-text-muted)",
-            fontWeight: 700,
-            cursor: "pointer",
-            fontSize: "0.95rem",
-          }}
-        >
-          Comprobantes de Egreso (Salidas)
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("transfers")}
-          style={{
-            padding: "8px 16px",
-            background: "transparent",
-            border: "none",
-            borderBottom: activeTab === "transfers" ? "2px solid #ef4444" : "2px solid transparent",
-            color: activeTab === "transfers" ? "#ef4444" : "var(--inv-text-muted)",
-            fontWeight: 700,
-            cursor: "pointer",
-            fontSize: "0.95rem",
-          }}
-        >
-          Traslados de Dinero entre Sedes {totalTransfers > 0 ? `(${totalTransfers})` : ""}
-        </button>
+      <div style={{ marginBottom: "1.5rem" }}>
+        <div className="fin-tabs">
+          <button
+            type="button"
+            className={`fin-tab ${activeTab === "outflows" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("outflows")}
+          >
+            <FileMinus size={16} />
+            <span>Comprobantes de Egreso (Salidas)</span>
+          </button>
+          <button
+            type="button"
+            className={`fin-tab ${activeTab === "transfers" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("transfers")}
+          >
+            <ArrowLeftRight size={16} />
+            <span>Traslados de Dinero entre Sedes</span>
+            {totalTransfers > 0 && <span className="fin-tab__badge">{totalTransfers}</span>}
+          </button>
+        </div>
       </div>
 
       {activeTab === "outflows" && (
         <>
           {/* KPI Summary */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              gap: "1rem",
-              marginBottom: "1.5rem",
-            }}
-          >
-            <div style={{ background: "var(--inv-bg-elevated)", padding: "1.25rem", borderRadius: 10, border: "1px solid var(--inv-border)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--inv-text-muted)", fontSize: "0.85rem" }}>
-                <span>Total Egresos Desembolsados</span>
-                <FileMinus size={18} color="#ef4444" />
+          <div className="fin-kpi-grid fin-kpi-grid--4">
+            <div className="fin-kpi-card fin-kpi-card--rose">
+              <div className="fin-kpi-top">
+                <span className="fin-kpi-label">Total Egresos Desembolsados</span>
+                <div className="fin-kpi-icon fin-kpi-icon--rose">
+                  <FileMinus size={18} />
+                </div>
               </div>
-              <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "#ef4444", marginTop: "0.5rem" }}>
+              <div className="fin-kpi-val fin-kpi-val--rose">
                 {formatMoney(totalOutflowsAmount)}
               </div>
-              <div style={{ fontSize: "0.8rem", color: "var(--inv-text-muted)", marginTop: "0.25rem" }}>
-                {totalOutflows} comprobantes emitidos
+              <div className="fin-kpi-sub">
+                {totalOutflows} comprobantes emitidos en el período
               </div>
             </div>
 
-            <div style={{ background: "var(--inv-bg-elevated)", padding: "1.25rem", borderRadius: 10, border: "1px solid var(--inv-border)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--inv-text-muted)", fontSize: "0.85rem" }}>
-                <span>Sede Seleccionada</span>
-                <Building2 size={18} color="#6366f1" />
+            <div className="fin-kpi-card fin-kpi-card--indigo">
+              <div className="fin-kpi-top">
+                <span className="fin-kpi-label">Sede de Operación</span>
+                <div className="fin-kpi-icon fin-kpi-icon--indigo">
+                  <Building2 size={18} />
+                </div>
               </div>
-              <div style={{ fontSize: "1.3rem", fontWeight: 700, marginTop: "0.5rem" }}>
+              <div className="fin-kpi-val fin-kpi-val--indigo" style={{ fontSize: "1.35rem" }}>
                 {selectedWarehouse ? (warehouses.find((w) => w.id === selectedWarehouse)?.name || "Sede") : "Todas las sedes"}
               </div>
-              <div style={{ fontSize: "0.8rem", color: "var(--inv-text-muted)", marginTop: "0.25rem" }}>
+              <div className="fin-kpi-sub">
                 Control de salidas y caja menor
               </div>
             </div>
           </div>
 
           {/* Filtros */}
-          <div
-            style={{
-              background: "var(--inv-bg-elevated)",
-              padding: "1rem",
-              borderRadius: 8,
-              marginBottom: "1rem",
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "1rem",
-              alignItems: "center",
-            }}
-          >
+          <div className="fin-filter-card">
             {/* Sede */}
-            <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", minWidth: 160 }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>SEDE</span>
-              <select
-                value={selectedWarehouse}
-                onChange={(e) => {
-                  setSelectedWarehouse(e.target.value);
-                  setWarehouseId(e.target.value);
-                  setOutflowsPage(1);
-                }}
-                disabled={!user?.hasAdminAccess && warehouses.length <= 1}
-                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
-              >
-                <option value="">Todas las sedes</option>
-                {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name} ({w.code})
-                  </option>
-                ))}
-              </select>
-            </label>
+            {isAllWarehouses ? (
+              <div className="fin-filter-field" style={{ minWidth: 180 }}>
+                <span>SEDE</span>
+                <select
+                  className="fin-select"
+                  value={selectedWarehouse}
+                  onChange={(e) => {
+                    setSelectedWarehouse(e.target.value);
+                    setOutflowsPage(1);
+                  }}
+                >
+                  <option value="">Todas las sedes</option>
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} ({w.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="fin-filter-field" style={{ minWidth: 180 }}>
+                <span>SEDE</span>
+                <div style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)", fontSize: "0.85rem", fontWeight: 600, color: "var(--inv-text-primary)" }}>
+                  {warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
+                </div>
+              </div>
+            )}
 
             {/* Medio de Pago */}
-            <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", minWidth: 140 }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>MEDIO DE PAGO</span>
+            <div className="fin-filter-field" style={{ minWidth: 150 }}>
+              <span>MEDIO DE PAGO</span>
               <select
+                className="fin-select"
                 value={paymentMethod}
                 onChange={(e) => {
                   setPaymentMethod(e.target.value);
                   setOutflowsPage(1);
                 }}
-                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
               >
                 <option value="">Todos los medios</option>
-                <option value="efectivo">Efectivo</option>
-                <option value="bancolombia">Bancolombia</option>
-                <option value="davivienda">Davivienda</option>
-                <option value="nequi">Nequi</option>
-                <option value="daviplata">Daviplata</option>
-                <option value="bold">Bold</option>
+                <option value="efectivo">Efectivo 💵</option>
+                <option value="bancolombia">Bancolombia 🟡</option>
+                <option value="davivienda">Davivienda 🔴</option>
+                <option value="nequi">Nequi 🟣</option>
+                <option value="daviplata">Daviplata 📱</option>
+                <option value="bold">Bold 🔵</option>
               </select>
-            </label>
+            </div>
 
             {/* Búsqueda */}
-            <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", flex: 1, minWidth: 200 }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>BUSCAR COMPROBANTE / BENEFICIARIO</span>
-              <div style={{ position: "relative" }}>
+            <div className="fin-filter-field" style={{ flex: 2, minWidth: 220 }}>
+              <span>BUSCAR COMPROBANTE / BENEFICIARIO</span>
+              <div className="fin-search-wrap">
+                <Search size={16} className="fin-search-wrap__icon" />
                 <input
+                  className="fin-input"
                   value={searchOutflows}
                   onChange={(e) => {
                     setSearchOutflows(e.target.value);
                     setOutflowsPage(1);
                   }}
                   placeholder="N° comprobante, persona, concepto..."
-                  style={{ width: "100%", padding: "6px 10px 6px 30px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
                 />
-                <Search size={15} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--inv-text-muted)" }} />
               </div>
-            </label>
+            </div>
 
             {/* Fechas */}
-            <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>DESDE</span>
+            <div className="fin-filter-field" style={{ minWidth: 140 }}>
+              <span>DESDE</span>
               <input
+                className="fin-input"
                 type="date"
                 value={dateFrom}
                 onChange={(e) => {
                   setDateFrom(e.target.value);
                   setOutflowsPage(1);
                 }}
-                style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
               />
-            </label>
+            </div>
 
-            <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>HASTA</span>
+            <div className="fin-filter-field" style={{ minWidth: 140 }}>
+              <span>HASTA</span>
               <input
+                className="fin-input"
                 type="date"
                 value={dateTo}
                 onChange={(e) => {
                   setDateTo(e.target.value);
                   setOutflowsPage(1);
                 }}
-                style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
               />
-            </label>
+            </div>
           </div>
 
-          {error && <div className="inv-form-error" style={{ marginBottom: "1rem" }}>{error}</div>}
+          {error && <div className="fin-alert fin-alert--danger">{error}</div>}
 
           {/* Tabla de Egresos */}
-          <div style={{ background: "var(--inv-bg-elevated)", borderRadius: 10, overflow: "hidden", border: "1px solid var(--inv-border)" }}>
-            <div style={{ overflowX: "auto" }}>
-              <table className="inv-table" style={{ width: "100%" }}>
+          <div className="fin-table-card">
+            <div className="fin-table-header">
+              <h3 className="fin-table-title">
+                <FileMinus size={18} color="#e11d48" />
+                <span>Comprobantes de Egreso Emitidos</span>
+              </h3>
+              <span className="fin-badge fin-badge--neutral">
+                {totalOutflows} registros encontrados
+              </span>
+            </div>
+
+            <div className="fin-table-wrap">
+              <table className="fin-table">
                 <thead>
                   <tr>
                     <th>Comprobante</th>
@@ -488,7 +476,7 @@ export function CashOutflowsPage() {
                     <th>Concepto</th>
                     <th>Proveedor</th>
                     <th>Medio</th>
-                    <th>Valor Salida</th>
+                    <th style={{ textAlign: "right" }}>Valor Salida</th>
                     <th>Registrado por</th>
                     <th style={{ textAlign: "right" }}>Acciones</th>
                   </tr>
@@ -496,32 +484,36 @@ export function CashOutflowsPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={10} style={{ textAlign: "center", padding: "2rem", color: "var(--inv-text-muted)" }}>
-                        Cargando egresos...
+                      <td colSpan={10} style={{ textAlign: "center", padding: "2.5rem", color: "#64748b" }}>
+                        <RefreshCw size={24} className="spin" style={{ margin: "0 auto 0.5rem" }} />
+                        <div>Cargando egresos…</div>
                       </td>
                     </tr>
                   ) : outflows.length === 0 ? (
                     <tr>
-                      <td colSpan={10} style={{ textAlign: "center", padding: "3rem 1rem", color: "var(--inv-text-muted)" }}>
-                        <Filter size={32} style={{ margin: "0 auto 0.75rem", opacity: 0.5 }} />
-                        <div>No se encontraron comprobantes de egreso con los filtros seleccionados.</div>
+                      <td colSpan={10} style={{ textAlign: "center", padding: "3rem 1rem", color: "#64748b" }}>
+                        <Filter size={32} style={{ margin: "0 auto 0.75rem", opacity: 0.4 }} />
+                        <div style={{ fontWeight: 600, color: "#1e293b" }}>No se encontraron comprobantes de egreso</div>
+                        <div style={{ fontSize: "0.82rem", marginTop: 4 }}>Ajusta los filtros de búsqueda o fecha.</div>
                       </td>
                     </tr>
                   ) : (
                     outflows.map((item) => (
                       <tr key={item.id}>
                         <td>
-                          <strong style={{ color: "#ef4444" }}>{item.voucherNumber}</strong>
+                          <span className="fin-badge fin-badge--danger" style={{ fontWeight: 800 }}>
+                            {item.voucherNumber}
+                          </span>
                         </td>
-                        <td style={{ fontSize: "0.82rem", color: "var(--inv-text-muted)" }}>
+                        <td style={{ fontSize: "0.82rem", color: "#64748b", whiteSpace: "nowrap" }}>
                           {formatDate(item.createdAt)}
                         </td>
                         <td>{item.warehouseName}</td>
                         <td>
                           <div>
-                            <strong>{item.beneficiaryName}</strong>
+                            <strong style={{ color: "#0f172a" }}>{item.beneficiaryName}</strong>
                             {item.beneficiaryDoc && (
-                              <div style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)" }}>
+                              <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
                                 CC: {item.beneficiaryDoc}
                               </div>
                             )}
@@ -534,26 +526,29 @@ export function CashOutflowsPage() {
                           {item.supplierName ? (
                             <span style={{ fontSize: "0.82rem" }}>{item.supplierName}</span>
                           ) : (
-                            <span style={{ color: "var(--inv-text-muted)", fontSize: "0.82rem" }}>—</span>
+                            <span style={{ color: "#94a3b8", fontSize: "0.82rem" }}>—</span>
                           )}
                         </td>
-                        <td style={{ textTransform: "capitalize" }}>{item.paymentMethod}</td>
-                        <td style={{ fontWeight: 700, color: "#ef4444" }}>
+                        <td>
+                          <span className="fin-badge fin-badge--neutral" style={{ textTransform: "capitalize" }}>
+                            {item.paymentMethod}
+                          </span>
+                        </td>
+                        <td className="fin-table-num" style={{ fontWeight: 800, color: "#e11d48" }}>
                           {formatMoney(item.amount)}
                         </td>
-                        <td style={{ fontSize: "0.82rem", color: "var(--inv-text-muted)" }}>
+                        <td style={{ fontSize: "0.82rem", color: "#64748b" }}>
                           {item.createdByName || "—"}
                         </td>
                         <td style={{ textAlign: "right" }}>
                           <button
                             type="button"
-                            className="inv-btn inv-btn--ghost"
-                            style={{ padding: "4px 8px", fontSize: "0.78rem", display: "inline-flex", alignItems: "center", gap: 3 }}
+                            className="fin-btn fin-btn--ghost fin-btn--sm"
                             onClick={() => setVoucherToPrint(item)}
                             title="Imprimir Voucher de Egreso"
                           >
                             <Printer size={14} />
-                            Voucher
+                            <span>Voucher</span>
                           </button>
                         </td>
                       </tr>
@@ -566,12 +561,13 @@ export function CashOutflowsPage() {
             {totalPages > 1 && (
               <div
                 style={{
-                  padding: "0.75rem 1rem",
+                  padding: "0.85rem 1.25rem",
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
-                  borderTop: "1px solid var(--inv-border)",
+                  borderTop: "1px solid var(--border-color)",
                   fontSize: "0.85rem",
+                  background: "#fcfdfe",
                 }}
               >
                 <span>
@@ -580,7 +576,7 @@ export function CashOutflowsPage() {
                 <div style={{ display: "flex", gap: "0.5rem" }}>
                   <button
                     type="button"
-                    className="inv-btn inv-btn--ghost"
+                    className="fin-btn fin-btn--ghost fin-btn--sm"
                     disabled={outflowsPage <= 1}
                     onClick={() => setOutflowsPage((p) => Math.max(1, p - 1))}
                   >
@@ -588,7 +584,7 @@ export function CashOutflowsPage() {
                   </button>
                   <button
                     type="button"
-                    className="inv-btn inv-btn--ghost"
+                    className="fin-btn fin-btn--ghost fin-btn--sm"
                     disabled={outflowsPage >= totalPages}
                     onClick={() => setOutflowsPage((p) => Math.min(totalPages, p + 1))}
                   >
@@ -604,14 +600,24 @@ export function CashOutflowsPage() {
       {activeTab === "transfers" && (
         <>
           {/* Tabla de Traslados de Dinero */}
-          <div style={{ background: "var(--inv-bg-elevated)", borderRadius: 10, overflow: "hidden", border: "1px solid var(--inv-border)" }}>
-            <div style={{ overflowX: "auto" }}>
-              <table className="inv-table" style={{ width: "100%" }}>
+          <div className="fin-table-card">
+            <div className="fin-table-header">
+              <h3 className="fin-table-title">
+                <ArrowLeftRight size={18} color="var(--accent)" />
+                <span>Historial de Remesas y Traslados de Dinero</span>
+              </h3>
+              <span className="fin-badge fin-badge--neutral">
+                {totalTransfers} traslados
+              </span>
+            </div>
+
+            <div className="fin-table-wrap">
+              <table className="fin-table">
                 <thead>
                   <tr>
                     <th>Código</th>
                     <th>Ruta (Sede Origen → Destino)</th>
-                    <th>Monto Trasladado</th>
+                    <th style={{ textAlign: "right" }}>Monto Trasladado</th>
                     <th>Transportador / Mensajero</th>
                     <th>Concepto</th>
                     <th>Medio</th>
@@ -624,38 +630,42 @@ export function CashOutflowsPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={10} style={{ textAlign: "center", padding: "2rem", color: "var(--inv-text-muted)" }}>
-                        Cargando traslados de dinero...
+                      <td colSpan={10} style={{ textAlign: "center", padding: "2.5rem", color: "#64748b" }}>
+                        <RefreshCw size={24} className="spin" style={{ margin: "0 auto 0.5rem" }} />
+                        <div>Cargando traslados de dinero…</div>
                       </td>
                     </tr>
                   ) : transfers.length === 0 ? (
                     <tr>
-                      <td colSpan={10} style={{ textAlign: "center", padding: "3rem 1rem", color: "var(--inv-text-muted)" }}>
-                        <ArrowLeftRight size={32} style={{ margin: "0 auto 0.75rem", opacity: 0.5 }} />
-                        <div>No se han registrado traslados de dinero entre sedes.</div>
+                      <td colSpan={10} style={{ textAlign: "center", padding: "3rem 1rem", color: "#64748b" }}>
+                        <ArrowLeftRight size={32} style={{ margin: "0 auto 0.75rem", opacity: 0.4 }} />
+                        <div style={{ fontWeight: 600, color: "#1e293b" }}>No se han registrado traslados de dinero entre sedes</div>
+                        <div style={{ fontSize: "0.82rem", marginTop: 4 }}>Usa el botón "Trasladar Dinero" para registrar una remesa.</div>
                       </td>
                     </tr>
                   ) : (
                     transfers.map((t) => (
                       <tr key={t.id}>
                         <td>
-                          <strong style={{ color: "#6366f1" }}>{t.code}</strong>
+                          <span className="fin-badge fin-badge--teal" style={{ fontWeight: 800 }}>
+                            {t.code}
+                          </span>
                         </td>
                         <td>
                           <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
                             <span>{t.originWarehouseName}</span>
-                            <ArrowRight size={13} color="var(--inv-text-muted)" />
-                            <strong>{t.destinationWarehouseName}</strong>
+                            <ArrowRight size={13} color="#94a3b8" />
+                            <strong style={{ color: "#0f172a" }}>{t.destinationWarehouseName}</strong>
                           </div>
                         </td>
-                        <td style={{ fontWeight: 800, color: "#10b981", fontSize: "0.95rem" }}>
+                        <td className="fin-table-num" style={{ fontWeight: 800, color: "#059669", fontSize: "0.95rem" }}>
                           {formatMoney(t.amount)}
                         </td>
                         <td>
                           <div>
-                            <strong>{t.carrierName}</strong>
+                            <strong style={{ color: "#0f172a" }}>{t.carrierName}</strong>
                             {t.carrierDoc && (
-                              <div style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)" }}>
+                              <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
                                 CC: {t.carrierDoc}
                               </div>
                             )}
@@ -664,45 +674,47 @@ export function CashOutflowsPage() {
                         <td style={{ maxWidth: 200, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={t.concept}>
                           {t.concept}
                         </td>
-                        <td style={{ textTransform: "capitalize" }}>{t.paymentMethod}</td>
+                        <td>
+                          <span className="fin-badge fin-badge--neutral" style={{ textTransform: "capitalize" }}>
+                            {t.paymentMethod}
+                          </span>
+                        </td>
                         <td>
                           {t.status === "pending" && (
-                            <span className="badge badge--warning" style={{ background: "rgba(245, 158, 11, 0.15)", color: "#f59e0b" }}>
+                            <span className="fin-badge fin-badge--warning">
                               En tránsito
                             </span>
                           )}
                           {t.status === "approved" && (
-                            <span className="badge badge--success" style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981" }}>
+                            <span className="fin-badge fin-badge--success">
                               Recibido en caja
                             </span>
                           )}
                           {t.status === "rejected" && (
-                            <span className="badge badge--neutral" style={{ background: "rgba(239, 68, 68, 0.15)", color: "#ef4444" }} title={t.rejectionReason || ""}>
+                            <span className="fin-badge fin-badge--danger" title={t.rejectionReason || ""}>
                               Rechazado
                             </span>
                           )}
                         </td>
-                        <td style={{ fontSize: "0.82rem", color: "var(--inv-text-muted)" }}>
+                        <td style={{ fontSize: "0.82rem", color: "#64748b", whiteSpace: "nowrap" }}>
                           {formatDate(t.createdAt)}
                         </td>
-                        <td style={{ fontSize: "0.82rem", color: "var(--inv-text-muted)" }}>
+                        <td style={{ fontSize: "0.82rem", color: "#64748b", whiteSpace: "nowrap" }}>
                           {t.approvedAt ? formatDate(t.approvedAt) : "—"}
                         </td>
                         <td style={{ textAlign: "right" }}>
                           {t.status === "pending" && t.destinationWarehouseId === warehouseId && (
-                            <div style={{ display: "inline-flex", gap: "0.3rem" }}>
+                            <div style={{ display: "inline-flex", gap: "0.35rem" }}>
                               <button
                                 type="button"
-                                className="inv-btn inv-btn--primary"
-                                style={{ padding: "4px 8px", fontSize: "0.78rem" }}
+                                className="fin-btn fin-btn--primary fin-btn--sm"
                                 onClick={() => void handleApproveTransfer(t)}
                               >
                                 Recibir
                               </button>
                               <button
                                 type="button"
-                                className="inv-btn inv-btn--ghost"
-                                style={{ padding: "4px 8px", fontSize: "0.78rem", color: "#ef4444" }}
+                                className="fin-btn fin-btn--danger fin-btn--sm"
                                 onClick={() => void handleRejectTransfer(t)}
                               >
                                 Rechazar

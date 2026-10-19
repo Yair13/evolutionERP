@@ -7,7 +7,7 @@ type WarehouseSelectProps = {
 };
 
 export function WarehouseSelect({ label = "Existencias en" }: WarehouseSelectProps) {
-  const { warehouses, warehouseId, setWarehouseId, loading, error } = useWarehouse();
+  const { warehouses, warehouseId, setWarehouseId, isAllWarehouses, sessionLabel, loading, error } = useWarehouse();
 
   if (loading) {
     return <span className="inv-wh-select inv-wh-select--loading">Cargando sedes…</span>;
@@ -17,6 +17,16 @@ export function WarehouseSelect({ label = "Existencias en" }: WarehouseSelectPro
   }
   if (warehouses.length === 0) {
     return <span className="inv-wh-select inv-wh-select--error">Sin sede asignada</span>;
+  }
+
+  if (!isAllWarehouses) {
+    return (
+      <div className="inv-wh-select inv-wh-select--locked">
+        <Building2 size={16} strokeWidth={2} aria-hidden />
+        <span className="inv-wh-select__label">{label}:</span>
+        <strong style={{ marginLeft: 6 }}>{sessionLabel}</strong>
+      </div>
+    );
   }
 
   return (

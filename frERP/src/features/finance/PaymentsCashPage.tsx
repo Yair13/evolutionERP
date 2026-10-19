@@ -2,7 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchPaymentsCashSummary, type PaymentsCashSummary } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
-import { PiggyBank, RefreshCw } from "lucide-react";
+import {
+  PiggyBank,
+  RefreshCw,
+  Wallet,
+  CreditCard,
+  CheckCircle2,
+  Receipt,
+} from "lucide-react";
 
 function formatMoney(n: number): string {
   return new Intl.NumberFormat("es-CO", {
@@ -19,66 +26,76 @@ function localTodayYmd(): string {
 
 const METHOD_STYLE: Record<
   string,
-  { bg: string; border: string; color: string; icon: string }
+  { bg: string; border: string; color: string; icon: string; brandColor: string }
 > = {
   efectivo: {
-    bg: "rgba(16, 185, 129, 0.08)",
-    border: "rgba(16, 185, 129, 0.25)",
-    color: "#10b981",
+    bg: "rgba(5, 150, 105, 0.05)",
+    border: "rgba(5, 150, 105, 0.22)",
+    color: "#059669",
+    brandColor: "#059669",
     icon: "💵",
   },
   bancolombia: {
-    bg: "rgba(245, 158, 11, 0.08)",
-    border: "rgba(245, 158, 11, 0.25)",
-    color: "#f59e0b",
+    bg: "rgba(217, 119, 6, 0.05)",
+    border: "rgba(217, 119, 6, 0.22)",
+    color: "#d97706",
+    brandColor: "#d97706",
     icon: "🟡",
   },
   davivienda: {
-    bg: "rgba(239, 68, 68, 0.08)",
-    border: "rgba(239, 68, 68, 0.25)",
-    color: "#ef4444",
+    bg: "rgba(225, 29, 72, 0.05)",
+    border: "rgba(225, 29, 72, 0.22)",
+    color: "#e11d48",
+    brandColor: "#e11d48",
     icon: "🔴",
   },
   nequi: {
-    bg: "rgba(168, 85, 247, 0.08)",
-    border: "rgba(168, 85, 247, 0.25)",
-    color: "#a855f7",
+    bg: "rgba(124, 58, 237, 0.05)",
+    border: "rgba(124, 58, 237, 0.22)",
+    color: "#7c3aed",
+    brandColor: "#7c3aed",
     icon: "🟣",
   },
   daviplata: {
-    bg: "rgba(244, 63, 94, 0.08)",
-    border: "rgba(244, 63, 94, 0.25)",
-    color: "#f43f5e",
+    bg: "rgba(225, 29, 72, 0.05)",
+    border: "rgba(225, 29, 72, 0.22)",
+    color: "#e11d48",
+    brandColor: "#e11d48",
     icon: "📱",
   },
   bold: {
-    bg: "rgba(59, 130, 246, 0.08)",
-    border: "rgba(59, 130, 246, 0.25)",
-    color: "#3b82f6",
+    bg: "rgba(2, 132, 199, 0.05)",
+    border: "rgba(2, 132, 199, 0.22)",
+    color: "#0284c7",
+    brandColor: "#0284c7",
     icon: "🔵",
   },
   addi: {
-    bg: "rgba(34, 197, 94, 0.08)",
-    border: "rgba(34, 197, 94, 0.25)",
-    color: "#22c55e",
+    bg: "rgba(13, 148, 136, 0.05)",
+    border: "rgba(13, 148, 136, 0.22)",
+    color: "#0d9488",
+    brandColor: "#0d9488",
     icon: "🟢",
   },
   sistecredito: {
-    bg: "rgba(14, 165, 233, 0.08)",
-    border: "rgba(14, 165, 233, 0.25)",
-    color: "#0ea5e9",
+    bg: "rgba(2, 132, 199, 0.05)",
+    border: "rgba(2, 132, 199, 0.22)",
+    color: "#0284c7",
+    brandColor: "#0284c7",
     icon: "💳",
   },
   saldo_a_favor: {
-    bg: "rgba(99, 102, 241, 0.08)",
-    border: "rgba(99, 102, 241, 0.25)",
-    color: "#6366f1",
+    bg: "rgba(79, 70, 229, 0.05)",
+    border: "rgba(79, 70, 229, 0.22)",
+    color: "#4f46e5",
+    brandColor: "#4f46e5",
     icon: "💰",
   },
   otro: {
-    bg: "rgba(255, 255, 255, 0.04)",
-    border: "rgba(255, 255, 255, 0.1)",
-    color: "var(--text-primary)",
+    bg: "rgba(100, 116, 139, 0.05)",
+    border: "rgba(100, 116, 139, 0.2)",
+    color: "#475569",
+    brandColor: "#475569",
     icon: "🪙",
   },
 };
@@ -92,6 +109,12 @@ export function PaymentsCashPage() {
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
     isAllWarehouses ? "" : warehouseId || ""
   );
+
+  useEffect(() => {
+    if (!isAllWarehouses && warehouseId) {
+      setSelectedWarehouseId(warehouseId);
+    }
+  }, [isAllWarehouses, warehouseId]);
   const [dateFrom, setDateFrom] = useState(localTodayYmd);
   const [dateTo, setDateTo] = useState(localTodayYmd);
   const [data, setData] = useState<PaymentsCashSummary | null>(null);
@@ -120,7 +143,7 @@ export function PaymentsCashPage() {
     void load();
   }, [load]);
 
-  // Atajos de fecha
+  // Atajos rápidos de fecha
   function setPeriod(type: "today" | "yesterday" | "month") {
     const today = new Date();
     const ymd = (d: Date) =>
@@ -143,58 +166,72 @@ export function PaymentsCashPage() {
     }
   }
 
+  // Cálculos derivados
+  const digitalCollected = data
+    ? data.methods
+        .filter((m) => m.method !== "efectivo")
+        .reduce((sum, m) => sum + m.totalAmount, 0)
+    : 0;
+
+  const totalTransactions = data
+    ? data.methods.reduce((sum, m) => sum + m.transactionCount, 0)
+    : 0;
+
   return (
-    <div className="container" style={{ paddingBottom: "3rem" }}>
+    <div className="fin-page">
       {/* Encabezado */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem", flexWrap: "wrap", gap: "1rem" }}>
-        <div>
-          <h1 style={{ fontSize: "1.6rem", fontWeight: 800, margin: "0 0 0.25rem 0", display: "flex", alignItems: "center", gap: "0.6rem" }}>
-            <PiggyBank size={28} className="text-primary" />
-            Caja y Medios de Pago · Arqueo
-          </h1>
-          <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.9rem" }}>
-            Control de ingresos recaudados por Efectivo, Bancos, Bold, Addi y billeteras digitales
-          </p>
+      <div className="fin-header">
+        <div className="fin-header__info">
+          <div className="fin-header__title-row">
+            <div className="fin-header__icon-badge">
+              <PiggyBank size={24} />
+            </div>
+            <div>
+              <h1 className="fin-header__title">Caja y Medios de Pago · Arqueo</h1>
+              <p className="fin-header__subtitle">
+                Arqueo consolidado de cobros, recaudos en efectivo, transferencias bancarias, datáfonos y créditos.
+              </p>
+            </div>
+          </div>
         </div>
 
-        {/* Atajos rápidos de fecha */}
-        <div style={{ display: "flex", gap: "0.5rem" }}>
-          <button
-            type="button"
-            className="inv-btn inv-btn--ghost"
-            style={{ fontSize: "0.8rem", padding: "5px 10px" }}
-            onClick={() => setPeriod("today")}
-          >
-            Hoy
-          </button>
-          <button
-            type="button"
-            className="inv-btn inv-btn--ghost"
-            style={{ fontSize: "0.8rem", padding: "5px 10px" }}
-            onClick={() => setPeriod("yesterday")}
-          >
-            Ayer
-          </button>
-          <button
-            type="button"
-            className="inv-btn inv-btn--ghost"
-            style={{ fontSize: "0.8rem", padding: "5px 10px" }}
-            onClick={() => setPeriod("month")}
-          >
-            Este Mes
-          </button>
+        {/* Atajos Rápidos de Período */}
+        <div className="fin-header__actions">
+          <div className="fin-period-group">
+            <button
+              type="button"
+              className="fin-period-btn"
+              onClick={() => setPeriod("today")}
+            >
+              Hoy
+            </button>
+            <button
+              type="button"
+              className="fin-period-btn"
+              onClick={() => setPeriod("yesterday")}
+            >
+              Ayer
+            </button>
+            <button
+              type="button"
+              className="fin-period-btn"
+              onClick={() => setPeriod("month")}
+            >
+              Este Mes
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Barra de Filtros */}
-      <div style={{ background: "var(--bg-card-subtle, rgba(255,255,255,0.03))", border: "1px solid var(--border-color, rgba(255,255,255,0.08))", borderRadius: 10, padding: "1rem", marginBottom: "1.25rem", display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "center" }}>
-        {canSeeAll && (
-          <label className="field" style={{ margin: 0, minWidth: 180 }}>
+      <div className="fin-filter-card">
+        {canSeeAll ? (
+          <div className="fin-filter-field" style={{ minWidth: 200 }}>
             <span>Sede</span>
             <select
+              className="fin-select"
               value={selectedWarehouseId}
               onChange={(e) => setSelectedWarehouseId(e.target.value)}
-              style={{ height: 38 }}
             >
               <option value="">Todas las Sedes</option>
               {warehouses.map((w) => (
@@ -203,231 +240,295 @@ export function PaymentsCashPage() {
                 </option>
               ))}
             </select>
-          </label>
+          </div>
+        ) : (
+          <div className="fin-filter-field" style={{ minWidth: 160 }}>
+            <span>SEDE</span>
+            <div style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)", fontSize: "0.85rem", fontWeight: 600, color: "var(--inv-text-primary)" }}>
+              {warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
+            </div>
+          </div>
         )}
 
-        <label className="field" style={{ margin: 0 }}>
+        <div className="fin-filter-field" style={{ minWidth: 150 }}>
           <span>Desde</span>
           <input
+            className="fin-input"
             type="date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
-            style={{ height: 38 }}
           />
-        </label>
+        </div>
 
-        <label className="field" style={{ margin: 0 }}>
+        <div className="fin-filter-field" style={{ minWidth: 150 }}>
           <span>Hasta</span>
           <input
+            className="fin-input"
             type="date"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
-            style={{ height: 38 }}
           />
-        </label>
+        </div>
 
-        <div style={{ alignSelf: "flex-end" }}>
+        <div className="fin-filter-field fin-filter-field--fixed">
           <button
             type="button"
-            className="inv-btn inv-btn--ghost"
-            style={{ height: 38, padding: "0 12px" }}
+            className="fin-btn fin-btn--ghost"
             onClick={() => void load()}
-            title="Refrescar"
+            title="Actualizar datos de caja"
+            disabled={loading}
           >
             <RefreshCw size={16} className={loading ? "spin" : ""} />
+            <span>Refrescar</span>
           </button>
         </div>
       </div>
 
-      {/* Gran Total Recaudado y Cuadre de Cierre de Caja en Efectivo */}
+      {/* KPI Summary Cards */}
       {data && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "1rem", marginBottom: "1.5rem" }}>
-          {/* Total Recaudado Global */}
-          <div style={{ background: "linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(16, 185, 129, 0.12) 100%)", border: "1px solid rgba(99, 102, 241, 0.3)", borderRadius: 12, padding: "1.25rem 1.5rem", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
-            <div>
-              <span style={{ fontSize: "0.85rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>
-                Total Recaudado en el Periodo
-              </span>
-              <div style={{ fontSize: "2rem", fontWeight: 900, color: "var(--text-primary)" }}>
-                {formatMoney(data.totalCollected)}
+        <div className="fin-kpi-grid fin-kpi-grid--4">
+          {/* 1. Total Recaudado Global */}
+          <div className="fin-kpi-card fin-kpi-card--emerald">
+            <div className="fin-kpi-top">
+              <span className="fin-kpi-label">Total Recaudado</span>
+              <div className="fin-kpi-icon fin-kpi-icon--emerald">
+                <Receipt size={18} />
               </div>
-              <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                {dateFrom === dateTo ? `Día: ${dateFrom}` : `Rango: ${dateFrom} a ${dateTo}`}
-              </span>
             </div>
-
-            <div style={{ textAlign: "right" }}>
-              <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Medios con movimiento:</span>
-              <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>
-                {data.methods.filter((m) => m.totalAmount > 0).length} de {data.methods.length}
-              </div>
+            <div className="fin-kpi-val fin-kpi-val--emerald">
+              {formatMoney(data.totalCollected)}
+            </div>
+            <div className="fin-kpi-sub">
+              {dateFrom === dateTo ? `Día: ${dateFrom}` : `${dateFrom} al ${dateTo}`}
             </div>
           </div>
 
-          {/* Cuadre de Efectivo para Cierre de Caja */}
-          <div style={{ background: "linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(16, 185, 129, 0.08) 100%)", border: "1px solid rgba(245, 158, 11, 0.35)", borderRadius: 12, padding: "1.25rem 1.5rem" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
-              <span style={{ fontSize: "0.85rem", color: "#f59e0b", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>
-                💵 Efectivo Neto para el Cierre de Caja
-              </span>
-              <span style={{ fontSize: "0.75rem", background: "rgba(245, 158, 11, 0.2)", color: "#fde68a", padding: "2px 8px", borderRadius: 4, fontWeight: 600 }}>
-                Cuadre en Caja
-              </span>
+          {/* 2. Efectivo Neto en Caja */}
+          <div className="fin-kpi-card fin-kpi-card--amber">
+            <div className="fin-kpi-top">
+              <span className="fin-kpi-label">Efectivo Físico en Caja</span>
+              <div className="fin-kpi-icon fin-kpi-icon--amber">
+                <Wallet size={18} />
+              </div>
             </div>
-
-            <div style={{ fontSize: "2rem", fontWeight: 900, color: "#10b981", marginBottom: "0.5rem" }}>
+            <div className="fin-kpi-val fin-kpi-val--amber">
               {formatMoney(data.netCashInDrawer ?? data.cashCollected ?? 0)}
             </div>
+            <div className="fin-kpi-sub">
+              Neto tras nómina y egresos
+            </div>
+          </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.5rem", fontSize: "0.78rem", borderTop: "1px dashed rgba(245, 158, 11, 0.25)", paddingTop: "0.5rem" }}>
-              <div>
-                <span style={{ color: "var(--text-muted)", display: "block" }}>Ingresos Efectivo:</span>
-                <strong style={{ color: "var(--text-primary)" }}>{formatMoney(data.cashCollected ?? 0)}</strong>
+          {/* 3. Medios Digitales y Bancos */}
+          <div className="fin-kpi-card fin-kpi-card--indigo">
+            <div className="fin-kpi-top">
+              <span className="fin-kpi-label">Bancos y Digitales</span>
+              <div className="fin-kpi-icon fin-kpi-icon--indigo">
+                <CreditCard size={18} />
               </div>
-              <div>
-                <span style={{ color: "var(--text-muted)", display: "block" }}>(-) Nómina Efectivo:</span>
-                <strong style={{ color: "#ef4444" }}>- {formatMoney(data.cashPayrollAmount ?? 0)}</strong>
+            </div>
+            <div className="fin-kpi-val fin-kpi-val--indigo">
+              {formatMoney(digitalCollected)}
+            </div>
+            <div className="fin-kpi-sub">
+              Billeteras, Bold, Addi y transferencias
+            </div>
+          </div>
+
+          {/* 4. Transacciones Realizadas */}
+          <div className="fin-kpi-card fin-kpi-card--teal">
+            <div className="fin-kpi-top">
+              <span className="fin-kpi-label">Movimientos y Medios</span>
+              <div className="fin-kpi-icon fin-kpi-icon--teal">
+                <CheckCircle2 size={18} />
               </div>
-              <div>
-                <span style={{ color: "var(--text-muted)", display: "block" }}>(-) Egresos / Vales:</span>
-                <strong style={{ color: "#ef4444" }}>- {formatMoney(data.cashOutflowsAmount ?? 0)}</strong>
-              </div>
+            </div>
+            <div className="fin-kpi-val fin-kpi-val--teal">
+              {totalTransactions}
+            </div>
+            <div className="fin-kpi-sub">
+              {data.methods.filter((m) => m.totalAmount > 0).length} de {data.methods.length} medios con recaudo
             </div>
           </div>
         </div>
       )}
 
-      {loading ? (
-        <div style={{ padding: "3rem", textAlign: "center", color: "var(--text-muted)" }}>
-          Cargando arqueo de caja…
+      {/* Alerta de Error */}
+      {error && (
+        <div className="fin-alert fin-alert--danger">
+          <strong>Error:</strong> {error}
         </div>
-      ) : error ? (
-        <div style={{ padding: "2rem", color: "#ef4444", textAlign: "center" }}>{error}</div>
+      )}
+
+      {/* Contenido Principal */}
+      {loading ? (
+        <div className="fin-empty">
+          <div className="fin-empty__icon">
+            <RefreshCw size={24} className="spin" />
+          </div>
+          <h3 className="fin-empty__title">Cargando arqueo de caja</h3>
+          <p className="fin-empty__desc">Consultando transacciones y recaudos del período seleccionado…</p>
+        </div>
       ) : data ? (
         <>
-          {/* Tarjetas por cada Medio de Pago */}
-          <h2 style={{ fontSize: "1.15rem", fontWeight: 700, margin: "0 0 0.85rem 0" }}>
-            Desglose por Método de Pago
-          </h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
+          {/* Desglose por Tarjetas de Medios de Pago */}
+          <div style={{ marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h2 style={{ fontSize: "1.15rem", fontWeight: 700, margin: 0, color: "#0f172a" }}>
+              Desglose por Medio de Pago
+            </h2>
+            <span style={{ fontSize: "0.82rem", color: "#64748b" }}>
+              Participación sobre el total recaudado ({formatMoney(data.totalCollected)})
+            </span>
+          </div>
+
+          <div className="fin-methods-grid">
             {data.methods.map((m) => {
               const style = METHOD_STYLE[m.method] || METHOD_STYLE.otro;
+              const percent = data.totalCollected > 0
+                ? Math.round((m.totalAmount / data.totalCollected) * 100)
+                : 0;
+
               return (
-                <div
-                  key={m.method}
-                  style={{
-                    background: style.bg,
-                    border: `1px solid ${style.border}`,
-                    borderRadius: 10,
-                    padding: "1rem",
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "space-between",
-                  }}
-                >
+                <div key={m.method} className="fin-method-card">
                   <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
-                      <span style={{ fontSize: "1rem", fontWeight: 700, color: style.color, display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                        <span>{style.icon}</span> {m.label}
-                      </span>
-                      <span style={{ fontSize: "0.75rem", background: "rgba(255,255,255,0.06)", padding: "2px 6px", borderRadius: 4 }}>
-                        {m.transactionCount} movs
+                    <div className="fin-method-card__top">
+                      <div className="fin-method-card__brand">
+                        <div className="fin-method-card__icon-wrap">
+                          <span>{style.icon}</span>
+                        </div>
+                        <span className="fin-method-card__name">{m.label}</span>
+                      </div>
+                      <span className="fin-method-card__count-badge">
+                        {m.transactionCount} {m.transactionCount === 1 ? "mov" : "movs"}
                       </span>
                     </div>
 
-                    <div style={{ fontSize: "1.45rem", fontWeight: 800, marginBottom: "0.6rem" }}>
+                    <div className="fin-method-card__amount" style={{ color: style.color }}>
                       {formatMoney(m.totalAmount)}
+                    </div>
+
+                    {/* Barra de progreso / participación */}
+                    <div className="fin-method-card__bar-wrap">
+                      <div
+                        className="fin-method-card__bar-fill"
+                        style={{
+                          width: `${percent}%`,
+                          backgroundColor: style.brandColor,
+                        }}
+                      />
+                    </div>
+                    <div className="fin-method-card__footer">
+                      <span>{percent}% del total</span>
+                      <span>{m.transactionCount} operaciones</span>
                     </div>
                   </div>
 
-                  {m.method === "efectivo" && (data.cashPayrollAmount || data.cashOutflowsAmount) ? (
-                    <div style={{ paddingTop: "0.6rem", borderTop: "1px dashed rgba(255,255,255,0.1)", fontSize: "0.75rem", display: "flex", flexDirection: "column", gap: 3 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text-muted)" }}>
-                        <span>Recaudo bruto:</span>
-                        <span>{formatMoney(m.totalAmount)}</span>
-                      </div>
-                      {Boolean(data.cashPayrollAmount) && (
-                        <div style={{ display: "flex", justifyContent: "space-between", color: "#ef4444" }}>
-                          <span>(-) Nómina pagada:</span>
-                          <span>- {formatMoney(data.cashPayrollAmount!)}</span>
+                  {/* Detalle interno */}
+                  <div style={{ marginTop: "0.85rem", paddingTop: "0.75rem", borderTop: "1px solid rgba(15, 23, 42, 0.07)", fontSize: "0.78rem" }}>
+                    {m.method === "efectivo" && (data.cashPayrollAmount || data.cashOutflowsAmount) ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", color: "#64748b" }}>
+                          <span>Recaudo bruto:</span>
+                          <span style={{ fontWeight: 600 }}>{formatMoney(m.totalAmount)}</span>
                         </div>
-                      )}
-                      {Boolean(data.cashOutflowsAmount) && (
-                        <div style={{ display: "flex", justifyContent: "space-between", color: "#ef4444" }}>
-                          <span>(-) Egresos caja:</span>
-                          <span>- {formatMoney(data.cashOutflowsAmount!)}</span>
+                        {Boolean(data.cashPayrollAmount) && (
+                          <div style={{ display: "flex", justifyContent: "space-between", color: "#e11d48" }}>
+                            <span>(-) Nómina en efectivo:</span>
+                            <span style={{ fontWeight: 600 }}>- {formatMoney(data.cashPayrollAmount!)}</span>
+                          </div>
+                        )}
+                        {Boolean(data.cashOutflowsAmount) && (
+                          <div style={{ display: "flex", justifyContent: "space-between", color: "#e11d48" }}>
+                            <span>(-) Egresos de caja:</span>
+                            <span style={{ fontWeight: 600 }}>- {formatMoney(data.cashOutflowsAmount!)}</span>
+                          </div>
+                        )}
+                        <div style={{ display: "flex", justifyContent: "space-between", color: "#059669", fontWeight: 700, borderTop: "1px dashed rgba(15, 23, 42, 0.1)", paddingTop: "0.35rem", marginTop: "0.2rem" }}>
+                          <span>Neto en Caja:</span>
+                          <span>{formatMoney(data.netCashInDrawer ?? m.totalAmount)}</span>
                         </div>
-                      )}
-                      <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, color: "#10b981", borderTop: "1px dashed rgba(255,255,255,0.1)", paddingTop: 3, marginTop: 2 }}>
-                        <span>Neto en Caja (Cierre):</span>
-                        <span>{formatMoney(data.netCashInDrawer ?? m.totalAmount)}</span>
                       </div>
-                    </div>
-                  ) : (
-                    <div style={{ paddingTop: "0.6rem", borderTop: "1px dashed rgba(255,255,255,0.1)", fontSize: "0.78rem", color: "var(--text-muted)", display: "flex", justifyContent: "space-between" }}>
-                      <span>Ventas directas: <strong>{formatMoney(m.salesAmount)}</strong></span>
-                      <span>Abonos: <strong style={{ color: "#10b981" }}>{formatMoney(m.creditsAmount)}</strong></span>
-                    </div>
-                  )}
+                    ) : (
+                      <div style={{ display: "flex", justifyContent: "space-between", color: "#64748b" }}>
+                        <span>Ventas: <strong style={{ color: "#0f172a" }}>{formatMoney(m.salesAmount)}</strong></span>
+                        <span>Abonos: <strong style={{ color: "#059669" }}>{formatMoney(m.creditsAmount)}</strong></span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })}
           </div>
 
-          {/* Tabla Comparativa de Medios de Pago */}
-          <div style={{ background: "var(--bg-card, rgba(255,255,255,0.02))", border: "1px solid var(--border-color, rgba(255,255,255,0.08))", borderRadius: 10, overflow: "hidden" }}>
-            <div style={{ padding: "1rem 1.25rem", borderBottom: "1px solid var(--border-color, rgba(255,255,255,0.08))", fontWeight: 700, fontSize: "0.95rem" }}>
-              Resumen Consolidado de Caja
+          {/* Tabla Consolidada de Caja */}
+          <div className="fin-table-card">
+            <div className="fin-table-header">
+              <h3 className="fin-table-title">
+                <Receipt size={18} color="var(--accent)" />
+                <span>Resumen Consolidado de Ingresos por Medio de Pago</span>
+              </h3>
+              <span className="fin-badge fin-badge--neutral">
+                {data.methods.length} canales configurados
+              </span>
             </div>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.88rem" }}>
-              <thead>
-                <tr style={{ background: "rgba(255,255,255,0.04)", textAlign: "left" }}>
-                  <th style={{ padding: "10px 14px" }}>Medio de Pago</th>
-                  <th style={{ padding: "10px 14px", textAlign: "right" }}>Ventas de Mostrador</th>
-                  <th style={{ padding: "10px 14px", textAlign: "right" }}>Abonos de Créditos</th>
-                  <th style={{ padding: "10px 14px", textAlign: "center" }}>Movimientos</th>
-                  <th style={{ padding: "10px 14px", textAlign: "right" }}>Total en Medio</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.methods.map((m) => (
-                  <tr key={m.method} style={{ borderTop: "1px solid var(--border-color, rgba(255,255,255,0.05))" }}>
-                    <td style={{ padding: "10px 14px", fontWeight: 600 }}>
-                      <span style={{ marginRight: 6 }}>{METHOD_STYLE[m.method]?.icon || "🪙"}</span>
-                      {m.label}
+
+            <div className="fin-table-wrap">
+              <table className="fin-table">
+                <thead>
+                  <tr>
+                    <th>Medio de Pago</th>
+                    <th style={{ textAlign: "right" }}>Ventas Mostrador</th>
+                    <th style={{ textAlign: "right" }}>Abonos de Cartera</th>
+                    <th style={{ textAlign: "center" }}>Movimientos</th>
+                    <th style={{ textAlign: "right" }}>Total Recaudado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.methods.map((m) => {
+                    const style = METHOD_STYLE[m.method] || METHOD_STYLE.otro;
+                    return (
+                      <tr key={m.method}>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                            <span>{style.icon}</span>
+                            <strong style={{ color: "#0f172a" }}>{m.label}</strong>
+                          </div>
+                        </td>
+                        <td className="fin-table-num">
+                          {formatMoney(m.salesAmount)}
+                        </td>
+                        <td className="fin-table-num" style={{ color: "#059669" }}>
+                          {formatMoney(m.creditsAmount)}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          <span className="fin-badge fin-badge--neutral">{m.transactionCount}</span>
+                        </td>
+                        <td className="fin-table-num" style={{ color: style.color, fontWeight: 800 }}>
+                          {formatMoney(m.totalAmount)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td>TOTAL CONSOLIDADO</td>
+                    <td className="fin-table-num">
+                      {formatMoney(data.methods.reduce((s, m) => s + m.salesAmount, 0))}
                     </td>
-                    <td style={{ padding: "10px 14px", textAlign: "right" }}>
-                      {formatMoney(m.salesAmount)}
+                    <td className="fin-table-num" style={{ color: "#059669" }}>
+                      {formatMoney(data.methods.reduce((s, m) => s + m.creditsAmount, 0))}
                     </td>
-                    <td style={{ padding: "10px 14px", textAlign: "right", color: "#10b981" }}>
-                      {formatMoney(m.creditsAmount)}
+                    <td style={{ textAlign: "center" }}>
+                      <span className="fin-badge fin-badge--teal">{totalTransactions}</span>
                     </td>
-                    <td style={{ padding: "10px 14px", textAlign: "center" }}>
-                      {m.transactionCount}
-                    </td>
-                    <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 800 }}>
-                      {formatMoney(m.totalAmount)}
+                    <td className="fin-table-num" style={{ color: "#059669", fontSize: "1.05rem" }}>
+                      {formatMoney(data.totalCollected)}
                     </td>
                   </tr>
-                ))}
-                {/* Total */}
-                <tr style={{ background: "rgba(255,255,255,0.06)", borderTop: "2px solid var(--border-color, rgba(255,255,255,0.15))", fontWeight: 800 }}>
-                  <td style={{ padding: "12px 14px" }}>TOTAL RECAUDADO</td>
-                  <td style={{ padding: "12px 14px", textAlign: "right" }}>
-                    {formatMoney(data.methods.reduce((s, m) => s + m.salesAmount, 0))}
-                  </td>
-                  <td style={{ padding: "12px 14px", textAlign: "right", color: "#10b981" }}>
-                    {formatMoney(data.methods.reduce((s, m) => s + m.creditsAmount, 0))}
-                  </td>
-                  <td style={{ padding: "12px 14px", textAlign: "center" }}>
-                    {data.methods.reduce((s, m) => s + m.transactionCount, 0)}
-                  </td>
-                  <td style={{ padding: "12px 14px", textAlign: "right", fontSize: "1.05rem", color: "#10b981" }}>
-                    {formatMoney(data.totalCollected)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                </tfoot>
+              </table>
+            </div>
           </div>
         </>
       ) : null}

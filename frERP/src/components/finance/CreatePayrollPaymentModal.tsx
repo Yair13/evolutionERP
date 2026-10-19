@@ -43,10 +43,12 @@ export function CreatePayrollPaymentModal({
   onClose,
   onSuccess,
 }: Props) {
-  const { warehouses, warehouseId } = useWarehouse();
+  const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
 
   const [employeeId, setEmployeeId] = useState(preselectedEmployeeId ?? (employees[0]?.id || ""));
-  const [selectedWarehouseId, setSelectedWarehouseId] = useState(warehouseId || (warehouses[0]?.id || ""));
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState(
+    isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || "")
+  );
   const [paymentDate, setPaymentDate] = useState(localTodayYmd);
 
   // Período
@@ -183,14 +185,14 @@ export function CreatePayrollPaymentModal({
     >
       <div
         style={{
-          background: "var(--bg-card, #1e293b)",
-          color: "var(--text-primary, #f8fafc)",
-          borderRadius: 12,
+          background: "#ffffff",
+          color: "#0f172a",
+          borderRadius: 16,
           maxWidth: 680,
           width: "100%",
           padding: "1.75rem",
-          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)",
-          border: "1px solid var(--border-color, rgba(255, 255, 255, 0.1))",
+          boxShadow: "0 20px 40px rgba(15, 23, 42, 0.2)",
+          border: "1px solid var(--border-color)",
           maxHeight: "92vh",
           overflowY: "auto",
         }}
@@ -198,35 +200,26 @@ export function CreatePayrollPaymentModal({
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
           <div>
-            <h2 style={{ fontSize: "1.25rem", fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <h2 style={{ fontSize: "1.25rem", fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: "0.5rem", color: "#0f172a" }}>
               <DollarSign className="text-primary" />
               Registrar Pago de Nómina
             </h2>
-            <p style={{ margin: "4px 0 0 0", color: "var(--text-muted)", fontSize: "0.85rem" }}>
+            <p style={{ margin: "4px 0 0 0", color: "#64748b", fontSize: "0.85rem" }}>
               Genera el voucher de pago y descuenta de caja si es en efectivo o adjunta comprobante si es transferencia
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer" }}
+            className="fin-btn fin-btn--ghost fin-btn--sm"
+            style={{ padding: 4 }}
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
         {error && (
-          <div
-            style={{
-              padding: "0.75rem 1rem",
-              background: "rgba(239, 68, 68, 0.15)",
-              border: "1px solid rgba(239, 68, 68, 0.3)",
-              color: "#fca5a5",
-              borderRadius: 8,
-              marginBottom: "1rem",
-              fontSize: "0.85rem",
-            }}
-          >
+          <div className="fin-alert fin-alert--danger" style={{ marginBottom: "1rem" }}>
             {error}
           </div>
         )}
@@ -251,17 +244,23 @@ export function CreatePayrollPaymentModal({
 
             <label className="field" style={{ margin: 0 }}>
               <span>Sede Pagadora *</span>
-              <select
-                required
-                value={selectedWarehouseId}
-                onChange={(e) => setSelectedWarehouseId(e.target.value)}
-              >
-                {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name} ({w.code})
-                  </option>
-                ))}
-              </select>
+              {isAllWarehouses ? (
+                <select
+                  required
+                  value={selectedWarehouseId}
+                  onChange={(e) => setSelectedWarehouseId(e.target.value)}
+                >
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} ({w.code})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-elevated)", fontWeight: 600, fontSize: "0.9rem" }}>
+                  {warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
+                </div>
+              )}
             </label>
           </div>
 
@@ -270,8 +269,8 @@ export function CreatePayrollPaymentModal({
             <div
               style={{
                 padding: "0.6rem 0.85rem",
-                background: "rgba(255, 255, 255, 0.03)",
-                border: "1px solid var(--border-color, rgba(255, 255, 255, 0.08))",
+                background: "#f8fafc",
+                border: "1px solid var(--border-color)",
                 borderRadius: 8,
                 fontSize: "0.8rem",
                 display: "flex",
@@ -295,13 +294,13 @@ export function CreatePayrollPaymentModal({
           {/* Período Liquidado */}
           <div
             style={{
-              padding: "0.85rem",
-              background: "rgba(255, 255, 255, 0.02)",
-              border: "1px solid var(--border-color, rgba(255, 255, 255, 0.08))",
-              borderRadius: 8,
+              padding: "1rem",
+              background: "#f8fafc",
+              border: "1px solid var(--border-color)",
+              borderRadius: 12,
             }}
           >
-            <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--text-muted)", display: "block", marginBottom: 8 }}>
+            <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "#475569", display: "block", marginBottom: 8 }}>
               Período y Fechas de Liquidación
             </span>
             <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr 1fr", gap: "0.5rem" }}>
@@ -348,13 +347,13 @@ export function CreatePayrollPaymentModal({
           {/* Desglose Salarial */}
           <div
             style={{
-              padding: "0.85rem",
-              background: "rgba(255, 255, 255, 0.03)",
-              border: "1px solid var(--border-color, rgba(255, 255, 255, 0.08))",
-              borderRadius: 8,
+              padding: "1rem",
+              background: "#f8fafc",
+              border: "1px solid var(--border-color)",
+              borderRadius: 12,
             }}
           >
-            <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--text-muted)", display: "block", marginBottom: 8 }}>
+            <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "#475569", display: "block", marginBottom: 8 }}>
               Cálculo de Liquidación Salarial
             </span>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem" }}>
@@ -467,15 +466,15 @@ export function CreatePayrollPaymentModal({
                   display: "flex",
                   alignItems: "flex-start",
                   gap: "0.75rem",
-                  padding: "0.75rem 1rem",
-                  background: "rgba(245, 158, 11, 0.12)",
-                  border: "1px solid rgba(245, 158, 11, 0.3)",
-                  borderRadius: 8,
+                  padding: "0.85rem 1rem",
+                  background: "var(--fin-amber-bg)",
+                  border: "1px solid var(--fin-amber-border)",
+                  borderRadius: 10,
                   fontSize: "0.82rem",
-                  color: "#fde68a",
+                  color: "#92400e",
                 }}
               >
-                <AlertTriangle size={20} className="text-amber-400 shrink-0" style={{ marginTop: 2 }} />
+                <AlertTriangle size={20} className="shrink-0" style={{ marginTop: 2, color: "#d97706" }} />
                 <div>
                   <strong>Descuento automático de caja:</strong> Como el pago es en <strong>Efectivo</strong>, este valor se descontará automáticamente del <strong>cierre y arqueo de caja</strong> de la sede pagadora seleccionada.
                 </div>
@@ -484,20 +483,20 @@ export function CreatePayrollPaymentModal({
               /* Soporte de transferencia bancaria enviado por Maicol */
               <div
                 style={{
-                  padding: "0.75rem",
-                  background: "rgba(14, 165, 233, 0.08)",
-                  border: "1px solid rgba(14, 165, 233, 0.2)",
-                  borderRadius: 8,
+                  padding: "0.85rem",
+                  background: "rgba(2, 132, 199, 0.05)",
+                  border: "1px solid var(--fin-cyan-border)",
+                  borderRadius: 10,
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: 6 }}>
-                  <CreditCard size={16} className="text-sky-400" />
-                  <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "#38bdf8" }}>
-                    Comprobante de Transferencia Bancaria (Maicol / Tesorería)
+                  <CreditCard size={16} color="var(--accent)" />
+                  <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "#0284c7" }}>
+                    Comprobante de Transferencia Bancaria (Tesorería)
                   </span>
                 </div>
-                <p style={{ margin: "0 0 8px 0", fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                  Sube la captura, foto o PDF del soporte bancario enviado por Maicol para respaldar la transacción.
+                <p style={{ margin: "0 0 8px 0", fontSize: "0.75rem", color: "#64748b" }}>
+                  Sube la captura, foto o PDF del soporte bancario para respaldar la transacción.
                 </p>
 
                 <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
@@ -507,12 +506,13 @@ export function CreatePayrollPaymentModal({
                       alignItems: "center",
                       gap: "0.4rem",
                       padding: "6px 12px",
-                      background: "rgba(255, 255, 255, 0.08)",
-                      border: "1px solid var(--border-color, rgba(255, 255, 255, 0.15))",
-                      borderRadius: 6,
+                      background: "#ffffff",
+                      border: "1px solid var(--border-color)",
+                      borderRadius: 8,
                       fontSize: "0.8rem",
                       cursor: "pointer",
                       fontWeight: 600,
+                      color: "#0f172a",
                     }}
                   >
                     <Upload size={14} /> Seleccionar Archivo
@@ -529,11 +529,11 @@ export function CreatePayrollPaymentModal({
                   </label>
 
                   {receiptFile ? (
-                    <span style={{ fontSize: "0.8rem", color: "#10b981", display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                    <span style={{ fontSize: "0.8rem", color: "#059669", display: "flex", alignItems: "center", gap: "0.3rem" }}>
                       <CheckCircle2 size={16} /> {receiptFile.name} ({(receiptFile.size / 1024).toFixed(0)} KB)
                     </span>
                   ) : (
-                    <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                    <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
                       Ningún archivo seleccionado todavía
                     </span>
                   )}

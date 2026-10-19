@@ -32,10 +32,18 @@ function formatMoney(n: number): string {
 }
 
 export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
-  const { token, user } = useAuth();
-  const { warehouses, warehouseId } = useWarehouse();
+  const { token } = useAuth();
+  const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
 
-  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(warehouseId || "");
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
+    isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || "")
+  );
+
+  useEffect(() => {
+    if (open) {
+      setSelectedWarehouseId(isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || ""));
+    }
+  }, [open, isAllWarehouses, warehouseId, warehouses]);
   const [targetAmountStr, setTargetAmountStr] = useState<string>("");
   const [initialPaymentStr, setInitialPaymentStr] = useState<string>("");
   const [paymentMethod, setPaymentMethod] = useState<string>("efectivo");
@@ -217,17 +225,24 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
           {/* Sede */}
           <label className="field">
             <span>Sede *</span>
-            <select
-              value={selectedWarehouseId}
-              onChange={(e) => setSelectedWarehouseId(e.target.value)}
-              disabled={submitting || (!user?.hasAdminAccess && warehouses.length <= 1)}
-            >
-              {warehouses.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name} ({w.code})
-                </option>
-              ))}
-            </select>
+            {isAllWarehouses ? (
+              <select
+                value={selectedWarehouseId}
+                onChange={(e) => setSelectedWarehouseId(e.target.value)}
+                disabled={submitting}
+                required
+              >
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} ({w.code})
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-elevated)", fontWeight: 600, fontSize: "0.9rem" }}>
+                {warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
+              </div>
+            )}
           </label>
 
           {/* Selección de Cliente */}

@@ -21,7 +21,7 @@ export function CreateEmployeeModal({
   onSuccess,
 }: Props) {
   const isEditing = Boolean(employeeToEdit);
-  const { warehouses } = useWarehouse();
+  const { warehouses, warehouseId: currentWarehouseId, isAllWarehouses } = useWarehouse();
 
   const [fullName, setFullName] = useState(employeeToEdit?.fullName ?? "");
   const [documentType, setDocumentType] = useState(employeeToEdit?.documentType ?? "CC");
@@ -29,7 +29,9 @@ export function CreateEmployeeModal({
   const [phone, setPhone] = useState(employeeToEdit?.phone ?? "");
   const [email, setEmail] = useState(employeeToEdit?.email ?? "");
   const [position, setPosition] = useState(employeeToEdit?.position ?? "");
-  const [warehouseId, setWarehouseId] = useState(employeeToEdit?.warehouseId ?? "");
+  const [warehouseId, setWarehouseId] = useState(
+    employeeToEdit?.warehouseId ?? (isAllWarehouses ? "" : (currentWarehouseId ?? ""))
+  );
   const [baseSalary, setBaseSalary] = useState(employeeToEdit?.baseSalary ? String(employeeToEdit.baseSalary) : "");
   const [paymentFrequency, setPaymentFrequency] = useState(employeeToEdit?.paymentFrequency ?? "quincenal");
   const [bankName, setBankName] = useState(employeeToEdit?.bankName ?? "");
@@ -121,45 +123,36 @@ export function CreateEmployeeModal({
     >
       <div
         style={{
-          background: "var(--bg-card, #1e293b)",
-          color: "var(--text-primary, #f8fafc)",
-          borderRadius: 12,
+          background: "#ffffff",
+          color: "#0f172a",
+          borderRadius: 16,
           maxWidth: 600,
           width: "100%",
           padding: "1.75rem",
-          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)",
-          border: "1px solid var(--border-color, rgba(255, 255, 255, 0.1))",
+          boxShadow: "0 20px 40px rgba(15, 23, 42, 0.2)",
+          border: "1px solid var(--border-color)",
           maxHeight: "90vh",
           overflowY: "auto",
         }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
-          <h2 style={{ fontSize: "1.25rem", fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <h2 style={{ fontSize: "1.25rem", fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: "0.5rem", color: "#0f172a" }}>
             {isEditing ? <UserCheck className="text-primary" /> : <UserPlus className="text-primary" />}
             {isEditing ? "Editar Colaborador / Empleado" : "Nuevo Colaborador / Empleado"}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer" }}
+            className="fin-btn fin-btn--ghost fin-btn--sm"
+            style={{ padding: 4 }}
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
         {error && (
-          <div
-            style={{
-              padding: "0.75rem 1rem",
-              background: "rgba(239, 68, 68, 0.15)",
-              border: "1px solid rgba(239, 68, 68, 0.3)",
-              color: "#fca5a5",
-              borderRadius: 8,
-              marginBottom: "1rem",
-              fontSize: "0.85rem",
-            }}
-          >
+          <div className="fin-alert fin-alert--danger" style={{ marginBottom: "1rem" }}>
             {error}
           </div>
         )}
@@ -217,14 +210,20 @@ export function CreateEmployeeModal({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
             <label className="field" style={{ margin: 0 }}>
               <span>Sede de Trabajo</span>
-              <select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
-                <option value="">Todas / Sin Sede Fija</option>
-                {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name} ({w.code})
-                  </option>
-                ))}
-              </select>
+              {isAllWarehouses ? (
+                <select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
+                  <option value="">Todas / Sin Sede Fija</option>
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} ({w.code})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-elevated)", fontWeight: 600, fontSize: "0.9rem" }}>
+                  {warehouses.find((w) => w.id === currentWarehouseId)?.name ?? "Sede actual"}
+                </div>
+              )}
             </label>
             <label className="field" style={{ margin: 0 }}>
               <span>Sueldo Base ($ COP)</span>
@@ -273,13 +272,13 @@ export function CreateEmployeeModal({
           {/* Datos Bancarios para Transferencia */}
           <div
             style={{
-              padding: "0.85rem",
-              background: "rgba(255, 255, 255, 0.03)",
-              border: "1px solid var(--border-color, rgba(255, 255, 255, 0.08))",
-              borderRadius: 8,
+              padding: "1rem",
+              background: "#f8fafc",
+              border: "1px solid var(--border-color)",
+              borderRadius: 12,
             }}
           >
-            <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--text-muted)", display: "block", marginBottom: 8 }}>
+            <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "#475569", display: "block", marginBottom: 8 }}>
               Datos Bancarios para Transferencias
             </span>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.5rem" }}>

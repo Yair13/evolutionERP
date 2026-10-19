@@ -74,7 +74,7 @@ export function InvScopeBar({
           <span className="inv-wh-select inv-wh-select--error">{error}</span>
         ) : warehouses.length === 0 && (!isAllWarehouses || isControlled) ? (
           <span className="inv-wh-select inv-wh-select--error">Sin sedes activas</span>
-        ) : isControlled ? (
+        ) : (isControlled && isAllWarehouses) ? (
           <label className="inv-wh-select inv-wh-select--scope">
             <Building2 size={16} strokeWidth={2} aria-hidden />
             <span className="inv-scope__text">

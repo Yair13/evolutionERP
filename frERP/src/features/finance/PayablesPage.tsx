@@ -24,6 +24,7 @@ import {
   Calendar,
   CreditCard,
   Filter,
+  RefreshCw,
 } from "lucide-react";
 
 function formatMoney(n: number): string {
@@ -44,13 +45,21 @@ function formatDate(iso: string | null): string {
 }
 
 export function PayablesPage() {
-  const { token, user } = useAuth();
-  const { warehouses, warehouseId, setWarehouseId } = useWarehouse();
+  const { token } = useAuth();
+  const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
 
   const [activeTab, setActiveTab] = useState<"payables" | "suppliers">("payables");
 
   // Filtros de Cuentas por Pagar
-  const [selectedWarehouse, setSelectedWarehouse] = useState<string>(warehouseId || "");
+  const [selectedWarehouse, setSelectedWarehouse] = useState<string>(
+    isAllWarehouses ? "" : (warehouseId || "")
+  );
+
+  useEffect(() => {
+    if (!isAllWarehouses && warehouseId) {
+      setSelectedWarehouse(warehouseId);
+    }
+  }, [isAllWarehouses, warehouseId]);
   const [selectedStatus, setSelectedStatus] = useState<string>("open");
   const [searchPayables, setSearchPayables] = useState("");
   const [dueDateFrom, setDueDateFrom] = useState("");
@@ -91,8 +100,9 @@ export function PayablesPage() {
     setLoading(true);
     setError(null);
     try {
+      const targetWh = isAllWarehouses ? (selectedWarehouse || null) : (warehouseId || null);
       const res = await fetchPayables(token, {
-        warehouseId: selectedWarehouse || null,
+        warehouseId: targetWh,
         status: selectedStatus === "all" ? null : (selectedStatus as PayableStatus),
         dueDateFrom: dueDateFrom || null,
         dueDateTo: dueDateTo || null,
@@ -108,7 +118,7 @@ export function PayablesPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, selectedWarehouse, selectedStatus, dueDateFrom, dueDateTo, searchPayables, payablesPage]);
+  }, [token, isAllWarehouses, warehouseId, selectedWarehouse, selectedStatus, dueDateFrom, dueDateTo, searchPayables, payablesPage]);
 
   // Cargar Proveedores
   const loadSuppliers = useCallback(async () => {
@@ -142,255 +152,264 @@ export function PayablesPage() {
   const totalPayablesPages = Math.ceil(totalPayables / limit) || 1;
 
   return (
-    <div className="inv-page">
+    <div className="fin-page">
       {/* Header */}
-      <div className="inv-page__header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem" }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <Truck size={28} color="#f59e0b" />
-            <h1 className="inv-page__title">Proveedores y Cuentas por Pagar</h1>
+      <div className="fin-header">
+        <div className="fin-header__info">
+          <div className="fin-header__title-row">
+            <div className="fin-header__icon-badge fin-header__icon-badge--amber">
+              <Truck size={24} />
+            </div>
+            <div>
+              <h1 className="fin-header__title">Proveedores y Cuentas por Pagar</h1>
+              <p className="fin-header__subtitle">
+                Gestión de proveedores, facturas de compra a crédito, programación de pagos y saldos a favor.
+              </p>
+            </div>
           </div>
-          <p className="inv-page__subtitle">
-            Gestión de proveedores, facturas de compra, comprobantes de egreso (salidas de caja) y saldo a favor.
-          </p>
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <div className="fin-header__actions">
           <button
             type="button"
-            className="inv-btn inv-btn--ghost"
+            className="fin-btn fin-btn--ghost"
             onClick={() => setOpenCreateSupplier(true)}
-            style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}
           >
             <PlusCircle size={17} />
-            Nuevo Proveedor
+            <span>Nuevo Proveedor</span>
           </button>
           <button
             type="button"
-            className="inv-btn inv-btn--primary"
+            className="fin-btn fin-btn--primary"
             onClick={() => setOpenCreatePayable(true)}
-            style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}
           >
             <PlusCircle size={17} />
-            Registrar Factura / Deuda
+            <span>Registrar Factura / Deuda</span>
           </button>
         </div>
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: "0.5rem", borderBottom: "1px solid var(--inv-border)", margin: "1rem 0" }}>
-        <button
-          type="button"
-          onClick={() => setActiveTab("payables")}
-          style={{
-            padding: "8px 16px",
-            background: "transparent",
-            border: "none",
-            borderBottom: activeTab === "payables" ? "2px solid #f59e0b" : "2px solid transparent",
-            color: activeTab === "payables" ? "#f59e0b" : "var(--inv-text-muted)",
-            fontWeight: 700,
-            cursor: "pointer",
-            fontSize: "0.95rem",
-          }}
-        >
-          Cuentas por Pagar (Facturas y Deudas)
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("suppliers")}
-          style={{
-            padding: "8px 16px",
-            background: "transparent",
-            border: "none",
-            borderBottom: activeTab === "suppliers" ? "2px solid #f59e0b" : "2px solid transparent",
-            color: activeTab === "suppliers" ? "#f59e0b" : "var(--inv-text-muted)",
-            fontWeight: 700,
-            cursor: "pointer",
-            fontSize: "0.95rem",
-          }}
-        >
-          Directorio de Proveedores {totalSuppliers > 0 ? `(${totalSuppliers})` : ""}
-        </button>
+      <div style={{ marginBottom: "1.5rem" }}>
+        <div className="fin-tabs">
+          <button
+            type="button"
+            className={`fin-tab ${activeTab === "payables" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("payables")}
+          >
+            <Truck size={16} />
+            <span>Cuentas por Pagar (Facturas y Deudas)</span>
+          </button>
+          <button
+            type="button"
+            className={`fin-tab ${activeTab === "suppliers" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("suppliers")}
+          >
+            <Building2 size={16} />
+            <span>Directorio de Proveedores</span>
+            {totalSuppliers > 0 && <span className="fin-tab__badge">{totalSuppliers}</span>}
+          </button>
+        </div>
       </div>
 
       {activeTab === "payables" && (
         <>
           {/* KPI Summary Cards */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              gap: "1rem",
-              marginBottom: "1.5rem",
-            }}
-          >
-            <div style={{ background: "var(--inv-bg-elevated)", padding: "1.25rem", borderRadius: 10, border: "1px solid var(--inv-border)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--inv-text-muted)", fontSize: "0.85rem" }}>
-                <span>Deuda Total Pendiente</span>
-                <Clock size={18} color="#f59e0b" />
+          <div className="fin-kpi-grid fin-kpi-grid--4">
+            <div className="fin-kpi-card fin-kpi-card--amber">
+              <div className="fin-kpi-top">
+                <span className="fin-kpi-label" style={{ color: "#d97706" }}>Deuda Total Pendiente</span>
+                <div className="fin-kpi-icon fin-kpi-icon--amber">
+                  <Clock size={18} />
+                </div>
               </div>
-              <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "#f59e0b", marginTop: "0.5rem" }}>
+              <div className="fin-kpi-val fin-kpi-val--amber">
                 {formatMoney(payablesSummary.totalBalance)}
               </div>
-              <div style={{ fontSize: "0.8rem", color: "var(--inv-text-muted)", marginTop: "0.25rem" }}>
+              <div className="fin-kpi-sub">
                 {payablesSummary.openCount} factura(s) por pagar
               </div>
             </div>
 
-            <div style={{ background: "var(--inv-bg-elevated)", padding: "1.25rem", borderRadius: 10, border: "1px solid var(--inv-border)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--inv-text-muted)", fontSize: "0.85rem" }}>
-                <span>Total Facturado a la Fecha</span>
-                <Truck size={18} color="#818cf8" />
+            <div className="fin-kpi-card fin-kpi-card--indigo">
+              <div className="fin-kpi-top">
+                <span className="fin-kpi-label">Total Facturado</span>
+                <div className="fin-kpi-icon fin-kpi-icon--indigo">
+                  <Truck size={18} />
+                </div>
               </div>
-              <div style={{ fontSize: "1.8rem", fontWeight: 700, marginTop: "0.5rem" }}>
+              <div className="fin-kpi-val fin-kpi-val--indigo">
                 {formatMoney(payablesSummary.totalBilled)}
               </div>
-              <div style={{ fontSize: "0.8rem", color: "var(--inv-text-muted)", marginTop: "0.25rem" }}>
+              <div className="fin-kpi-sub">
                 Valor acumulado de compras
               </div>
             </div>
 
-            <div style={{ background: "var(--inv-bg-elevated)", padding: "1.25rem", borderRadius: 10, border: "1px solid var(--inv-border)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--inv-text-muted)", fontSize: "0.85rem" }}>
-                <span>Total Pagado / Egresos</span>
-                <CheckCircle2 size={18} color="#10b981" />
+            <div className="fin-kpi-card fin-kpi-card--emerald">
+              <div className="fin-kpi-top">
+                <span className="fin-kpi-label" style={{ color: "#059669" }}>Total Pagado</span>
+                <div className="fin-kpi-icon fin-kpi-icon--emerald">
+                  <CheckCircle2 size={18} />
+                </div>
               </div>
-              <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "#10b981", marginTop: "0.5rem" }}>
+              <div className="fin-kpi-val fin-kpi-val--emerald">
                 {formatMoney(payablesSummary.totalPaid)}
               </div>
-              <div style={{ fontSize: "0.8rem", color: "var(--inv-text-muted)", marginTop: "0.25rem" }}>
+              <div className="fin-kpi-sub">
                 Salidas de dinero registradas
               </div>
             </div>
 
-            <div style={{ background: "var(--inv-bg-elevated)", padding: "1.25rem", borderRadius: 10, border: "1px solid var(--inv-border)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--inv-text-muted)", fontSize: "0.85rem" }}>
-                <span>Saldo a Favor en Proveedores</span>
-                <Wallet size={18} color="#10b981" />
+            <div className="fin-kpi-card fin-kpi-card--teal">
+              <div className="fin-kpi-top">
+                <span className="fin-kpi-label" style={{ color: "var(--accent)" }}>Saldo a Favor Empresa</span>
+                <div className="fin-kpi-icon fin-kpi-icon--teal">
+                  <Wallet size={18} />
+                </div>
               </div>
-              <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "#10b981", marginTop: "0.5rem" }}>
+              <div className="fin-kpi-val fin-kpi-val--teal">
                 {formatMoney(totalCompanyCreditWithSuppliers)}
               </div>
-              <div style={{ fontSize: "0.8rem", color: "var(--inv-text-muted)", marginTop: "0.25rem" }}>
+              <div className="fin-kpi-sub">
                 Excedentes listos para usar
               </div>
             </div>
           </div>
 
           {/* Filtros */}
-          <div
-            style={{
-              background: "var(--inv-bg-elevated)",
-              padding: "1rem",
-              borderRadius: 8,
-              marginBottom: "1rem",
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "1rem",
-              alignItems: "center",
-            }}
-          >
-            {/* Sede */}
-            <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", minWidth: 160 }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>SEDE / BODEGA</span>
-              <select
-                value={selectedWarehouse}
-                onChange={(e) => {
-                  setSelectedWarehouse(e.target.value);
-                  setWarehouseId(e.target.value);
-                  setPayablesPage(1);
-                }}
-                disabled={!user?.hasAdminAccess && warehouses.length <= 1}
-                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
-              >
-                <option value="">Todas las sedes</option>
-                {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name} ({w.code})
-                  </option>
-                ))}
-              </select>
-            </label>
+          <div className="fin-filter-card">
+            {isAllWarehouses ? (
+              <div className="fin-filter-field" style={{ minWidth: 170 }}>
+                <span>SEDE / BODEGA</span>
+                <select
+                  className="fin-select"
+                  value={selectedWarehouse}
+                  onChange={(e) => {
+                    setSelectedWarehouse(e.target.value);
+                    setPayablesPage(1);
+                  }}
+                >
+                  <option value="">Todas las sedes</option>
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} ({w.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="fin-filter-field" style={{ minWidth: 160 }}>
+                <span>SEDE ACTUAL</span>
+                <input
+                  className="fin-input"
+                  disabled
+                  value={warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
+                />
+              </div>
+            )}
 
             {/* Estado */}
-            <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", minWidth: 140 }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>ESTADO</span>
+            <div className="fin-filter-field" style={{ minWidth: 160 }}>
+              <span>ESTADO</span>
               <select
+                className="fin-select"
                 value={selectedStatus}
                 onChange={(e) => {
                   setSelectedStatus(e.target.value);
                   setPayablesPage(1);
                 }}
-                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
               >
                 <option value="open">Pendientes / Con Saldo</option>
                 <option value="paid">Pagadas al 100%</option>
                 <option value="all">Todas las Facturas</option>
               </select>
-            </label>
+            </div>
 
             {/* Búsqueda */}
-            <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", flex: 1, minWidth: 200 }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>BUSCAR FACTURA O PROVEEDOR</span>
-              <div style={{ position: "relative" }}>
+            <div className="fin-filter-field" style={{ flex: 2, minWidth: 220 }}>
+              <span>BUSCAR FACTURA O PROVEEDOR</span>
+              <div className="fin-search-wrap">
+                <Search size={16} className="fin-search-wrap__icon" />
                 <input
+                  className="fin-input"
                   value={searchPayables}
                   onChange={(e) => {
                     setSearchPayables(e.target.value);
                     setPayablesPage(1);
                   }}
                   placeholder="N° factura, proveedor, concepto..."
-                  style={{ width: "100%", padding: "6px 10px 6px 30px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
                 />
-                <Search size={15} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--inv-text-muted)" }} />
               </div>
-            </label>
+            </div>
 
-            {/* Vencimiento Desde */}
-            <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>VENCE DESDE</span>
+            {/* Vencimiento Desde / Hasta */}
+            <div className="fin-filter-field" style={{ minWidth: 130 }}>
+              <span>VENCE DESDE</span>
               <input
+                className="fin-input"
                 type="date"
                 value={dueDateFrom}
                 onChange={(e) => {
                   setDueDateFrom(e.target.value);
                   setPayablesPage(1);
                 }}
-                style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
               />
-            </label>
+            </div>
 
-            {/* Vencimiento Hasta */}
-            <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", fontWeight: 600 }}>VENCE HASTA</span>
+            <div className="fin-filter-field" style={{ minWidth: 130 }}>
+              <span>VENCE HASTA</span>
               <input
+                className="fin-input"
                 type="date"
                 value={dueDateTo}
                 onChange={(e) => {
                   setDueDateTo(e.target.value);
                   setPayablesPage(1);
                 }}
-                style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
               />
-            </label>
+            </div>
+
+            <div className="fin-filter-field fin-filter-field--fixed">
+              <button
+                type="button"
+                className="fin-btn fin-btn--ghost"
+                onClick={() => void loadPayables()}
+                title="Refrescar cuentas por pagar"
+                disabled={loading}
+              >
+                <RefreshCw size={16} className={loading ? "spin" : ""} />
+                <span>Refrescar</span>
+              </button>
+            </div>
           </div>
 
-          {error && <div className="inv-form-error" style={{ marginBottom: "1rem" }}>{error}</div>}
+          {error && <div className="fin-alert fin-alert--danger">{error}</div>}
 
           {/* Tabla Cuentas por Pagar */}
-          <div style={{ background: "var(--inv-bg-elevated)", borderRadius: 10, overflow: "hidden", border: "1px solid var(--inv-border)" }}>
-            <div style={{ overflowX: "auto" }}>
-              <table className="inv-table" style={{ width: "100%" }}>
+          <div className="fin-table-card">
+            <div className="fin-table-header">
+              <h3 className="fin-table-title">
+                <Truck size={18} color="var(--accent)" />
+                <span>Facturas y Deudas con Proveedores</span>
+              </h3>
+              <span className="fin-badge fin-badge--neutral">
+                {totalPayables} facturas
+              </span>
+            </div>
+
+            <div className="fin-table-wrap">
+              <table className="fin-table">
                 <thead>
                   <tr>
                     <th>Factura / N°</th>
                     <th>Proveedor</th>
                     <th>Sede</th>
                     <th>Concepto</th>
-                    <th>Total</th>
-                    <th>Pagado</th>
-                    <th>Saldo Pendiente</th>
-                    <th>Estado</th>
+                    <th style={{ textAlign: "right" }}>Total</th>
+                    <th style={{ textAlign: "right" }}>Pagado</th>
+                    <th style={{ textAlign: "right" }}>Saldo Pendiente</th>
+                    <th style={{ textAlign: "center" }}>Estado</th>
                     <th>Vencimiento</th>
                     <th style={{ textAlign: "right" }}>Acciones</th>
                   </tr>
@@ -398,30 +417,32 @@ export function PayablesPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={10} style={{ textAlign: "center", padding: "2rem", color: "var(--inv-text-muted)" }}>
-                        Cargando cuentas por pagar...
+                      <td colSpan={10} style={{ textAlign: "center", padding: "2.5rem", color: "#64748b" }}>
+                        <RefreshCw size={24} className="spin" style={{ margin: "0 auto 0.5rem" }} />
+                        <div>Cargando cuentas por pagar…</div>
                       </td>
                     </tr>
                   ) : payables.length === 0 ? (
                     <tr>
-                      <td colSpan={10} style={{ textAlign: "center", padding: "3rem 1rem", color: "var(--inv-text-muted)" }}>
-                        <Filter size={32} style={{ margin: "0 auto 0.75rem", opacity: 0.5 }} />
-                        <div>No se encontraron cuentas por pagar con los filtros seleccionados.</div>
+                      <td colSpan={10} style={{ textAlign: "center", padding: "3rem 1rem", color: "#64748b" }}>
+                        <Filter size={32} style={{ margin: "0 auto 0.75rem", opacity: 0.4 }} />
+                        <div style={{ fontWeight: 600, color: "#1e293b" }}>No se encontraron cuentas por pagar</div>
+                        <div style={{ fontSize: "0.82rem", marginTop: 4 }}>Ajusta los filtros de búsqueda o registra una factura nueva.</div>
                       </td>
                     </tr>
                   ) : (
                     payables.map((item) => (
                       <tr key={item.id}>
                         <td>
-                          <strong>{item.billNumber || "S/N"}</strong>
-                          <div style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)" }}>
+                          <strong style={{ color: "#0f172a" }}>{item.billNumber || "S/N"}</strong>
+                          <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
                             {formatDate(item.issueDate || item.createdAt)}
                           </div>
                         </td>
                         <td>
                           <div>
-                            <strong>{item.supplierName}</strong>
-                            <div style={{ fontSize: "0.78rem", color: "var(--inv-text-muted)" }}>
+                            <strong style={{ color: "#0f172a" }}>{item.supplierName}</strong>
+                            <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
                               NIT: {item.supplierTaxId || "—"}
                             </div>
                           </div>
@@ -430,36 +451,34 @@ export function PayablesPage() {
                         <td style={{ maxWidth: 200, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={item.description || ""}>
                           {item.description || "—"}
                         </td>
-                        <td style={{ fontWeight: 600 }}>{formatMoney(item.totalAmount)}</td>
-                        <td style={{ fontWeight: 600, color: "#10b981" }}>{formatMoney(item.paidAmount)}</td>
-                        <td style={{ fontWeight: 700, color: item.balanceAmount === 0 ? "#10b981" : "#f59e0b" }}>
-                          {formatMoney(item.balanceAmount)}
+                        <td className="fin-table-num">{formatMoney(item.totalAmount)}</td>
+                        <td className="fin-table-num" style={{ color: "#059669" }}>{formatMoney(item.paidAmount)}</td>
+                        <td className="fin-table-num">
+                          <strong style={{ color: item.balanceAmount === 0 ? "#059669" : "#d97706", fontSize: "0.95rem" }}>
+                            {formatMoney(item.balanceAmount)}
+                          </strong>
                         </td>
-                        <td>
-                          {item.status === "open" && (
-                            <span className="badge badge--warning" style={{ background: "rgba(245, 158, 11, 0.15)", color: "#f59e0b" }}>
-                              Pendiente
-                            </span>
-                          )}
-                          {item.status === "partial" && (
-                            <span className="badge badge--primary" style={{ background: "rgba(99, 102, 241, 0.15)", color: "#818cf8" }}>
-                              Abonado
-                            </span>
-                          )}
-                          {item.status === "paid" && (
-                            <span className="badge badge--success" style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981" }}>
-                              Pagada
-                            </span>
-                          )}
+                        <td style={{ textAlign: "center" }}>
+                          <span
+                            className={`fin-badge ${
+                              item.status === "paid"
+                                ? "fin-badge--success"
+                                : item.status === "partial"
+                                ? "fin-badge--info"
+                                : "fin-badge--warning"
+                            }`}
+                          >
+                            {item.status === "open" ? "Pendiente" : item.status === "partial" ? "Abonado" : "Pagada"}
+                          </span>
                         </td>
                         <td>
                           {item.dueDate ? (
-                            <div style={{ fontSize: "0.82rem", display: "flex", alignItems: "center", gap: "0.3rem" }}>
-                              <Calendar size={13} color="var(--inv-text-muted)" />
+                            <div style={{ fontSize: "0.82rem", display: "flex", alignItems: "center", gap: "0.3rem", color: "#64748b" }}>
+                              <Calendar size={13} />
                               {item.dueDate}
                             </div>
                           ) : (
-                            <span style={{ color: "var(--inv-text-muted)", fontSize: "0.82rem" }}>—</span>
+                            <span style={{ color: "#94a3b8", fontSize: "0.82rem" }}>—</span>
                           )}
                         </td>
                         <td style={{ textAlign: "right" }}>
@@ -467,24 +486,22 @@ export function PayablesPage() {
                             {item.status !== "paid" && item.status !== "cancelled" && (
                               <button
                                 type="button"
-                                className="inv-btn inv-btn--primary"
-                                style={{ padding: "4px 8px", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: 3 }}
+                                className="fin-btn fin-btn--primary fin-btn--sm"
                                 onClick={() => setSelectedForPayment(item)}
                                 title="Registrar egreso / pagar"
                               >
                                 <Wallet size={14} />
-                                Pagar
+                                <span>Pagar</span>
                               </button>
                             )}
                             <button
                               type="button"
-                              className="inv-btn inv-btn--ghost"
-                              style={{ padding: "4px 8px", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: 3 }}
+                              className="fin-btn fin-btn--ghost fin-btn--sm"
                               onClick={() => setSelectedDetailId(item.id)}
                               title="Ver detalle"
                             >
                               <Eye size={14} />
-                              Detalle
+                              <span>Detalle</span>
                             </button>
                           </div>
                         </td>
@@ -498,12 +515,13 @@ export function PayablesPage() {
             {totalPayablesPages > 1 && (
               <div
                 style={{
-                  padding: "0.75rem 1rem",
+                  padding: "0.85rem 1.25rem",
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
-                  borderTop: "1px solid var(--inv-border)",
+                  borderTop: "1px solid var(--border-color)",
                   fontSize: "0.85rem",
+                  background: "#fcfdfe",
                 }}
               >
                 <span>
@@ -512,7 +530,7 @@ export function PayablesPage() {
                 <div style={{ display: "flex", gap: "0.5rem" }}>
                   <button
                     type="button"
-                    className="inv-btn inv-btn--ghost"
+                    className="fin-btn fin-btn--ghost fin-btn--sm"
                     disabled={payablesPage <= 1}
                     onClick={() => setPayablesPage((p) => Math.max(1, p - 1))}
                   >
@@ -520,7 +538,7 @@ export function PayablesPage() {
                   </button>
                   <button
                     type="button"
-                    className="inv-btn inv-btn--ghost"
+                    className="fin-btn fin-btn--ghost fin-btn--sm"
                     disabled={payablesPage >= totalPayablesPages}
                     onClick={() => setPayablesPage((p) => Math.min(totalPayablesPages, p + 1))}
                   >
@@ -536,40 +554,29 @@ export function PayablesPage() {
       {activeTab === "suppliers" && (
         <>
           {/* Directorio de Proveedores */}
-          <div
-            style={{
-              background: "var(--inv-bg-elevated)",
-              padding: "1rem",
-              borderRadius: 8,
-              marginBottom: "1rem",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: "1rem",
-            }}
-          >
-            <div style={{ position: "relative", minWidth: 280, flex: 1 }}>
-              <input
-                value={searchSuppliers}
-                onChange={(e) => {
-                  setSearchSuppliers(e.target.value);
-                  setSuppliersPage(1);
-                }}
-                placeholder="Buscar proveedor por nombre, NIT, teléfono..."
-                style={{ width: "100%", padding: "8px 10px 8px 32px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
-              />
-              <Search size={16} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--inv-text-muted)" }} />
+          <div className="fin-filter-card" style={{ justifyContent: "space-between" }}>
+            <div className="fin-filter-field" style={{ flex: 1, minWidth: 280 }}>
+              <div className="fin-search-wrap">
+                <Search size={16} className="fin-search-wrap__icon" />
+                <input
+                  className="fin-input"
+                  value={searchSuppliers}
+                  onChange={(e) => {
+                    setSearchSuppliers(e.target.value);
+                    setSuppliersPage(1);
+                  }}
+                  placeholder="Buscar proveedor por nombre, NIT, teléfono..."
+                />
+              </div>
             </div>
 
             <button
               type="button"
-              className="inv-btn inv-btn--primary"
+              className="fin-btn fin-btn--primary"
               onClick={() => setOpenCreateSupplier(true)}
-              style={{ display: "flex", alignItems: "center", gap: 4 }}
             >
               <PlusCircle size={16} />
-              Crear Proveedor
+              <span>Crear Proveedor</span>
             </button>
           </div>
 
@@ -577,49 +584,41 @@ export function PayablesPage() {
             style={{
               display: "grid",
               gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-              gap: "1rem",
+              gap: "1.15rem",
             }}
           >
             {suppliers.map((s) => (
               <div
                 key={s.id}
-                style={{
-                  background: "var(--inv-bg-elevated)",
-                  borderRadius: 10,
-                  padding: "1.2rem",
-                  border: "1px solid var(--inv-border)",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  gap: "0.75rem",
-                }}
+                className="fin-kpi-card"
+                style={{ padding: "1.25rem", gap: "0.75rem" }}
               >
                 <div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                      <Building2 size={20} color="#6366f1" />
-                      <strong style={{ fontSize: "1.05rem" }}>{s.name}</strong>
+                      <Building2 size={20} color="var(--accent)" />
+                      <strong style={{ fontSize: "1.05rem", color: "#0f172a" }}>{s.name}</strong>
                     </div>
                     {s.creditBalance > 0 && (
-                      <span className="badge badge--success" style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981", fontSize: "0.75rem" }}>
+                      <span className="fin-badge fin-badge--success">
                         💰 Saldo a favor
                       </span>
                     )}
                   </div>
 
-                  <div style={{ fontSize: "0.85rem", color: "var(--inv-text-muted)", marginTop: "0.4rem" }}>
-                    NIT: <strong>{s.taxId || "—"}</strong> · Tel: <strong>{s.phone || "—"}</strong>
+                  <div style={{ fontSize: "0.82rem", color: "#64748b", marginTop: "0.45rem" }}>
+                    NIT: <strong style={{ color: "#334155" }}>{s.taxId || "—"}</strong> · Tel: <strong style={{ color: "#334155" }}>{s.phone || "—"}</strong>
                   </div>
 
                   {s.email && (
-                    <div style={{ fontSize: "0.82rem", color: "var(--inv-text-muted)", marginTop: "0.2rem" }}>
+                    <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "0.2rem" }}>
                       Email: {s.email}
                     </div>
                   )}
 
                   {s.bankName && (
-                    <div style={{ marginTop: "0.5rem", padding: "0.5rem 0.75rem", background: "var(--inv-bg-field)", borderRadius: 6, fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                      <CreditCard size={14} color="#818cf8" />
+                    <div style={{ marginTop: "0.6rem", padding: "0.5rem 0.75rem", background: "#f8fafc", borderRadius: 8, fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "0.45rem", border: "1px solid var(--border-color)" }}>
+                      <CreditCard size={14} color="var(--accent)" />
                       <span>
                         {s.bankName} ({s.bankAccountType || "Cta"}): <strong>{s.bankAccountNumber}</strong>
                       </span>
@@ -630,7 +629,7 @@ export function PayablesPage() {
                 <div
                   style={{
                     paddingTop: "0.75rem",
-                    borderTop: "1px solid var(--inv-border)",
+                    borderTop: "1px solid var(--border-color)",
                     display: "flex",
                     justifyContent: "space-between",
                     alignItems: "center",
@@ -638,15 +637,15 @@ export function PayablesPage() {
                   }}
                 >
                   <div>
-                    <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", display: "block" }}>Deuda Actual:</span>
-                    <strong style={{ color: s.totalDebt > 0 ? "#f59e0b" : "var(--inv-text-muted)" }}>
+                    <span style={{ fontSize: "0.74rem", color: "#64748b", display: "block" }}>Deuda Actual:</span>
+                    <strong style={{ color: s.totalDebt > 0 ? "#d97706" : "#64748b", fontSize: "1rem" }}>
                       {formatMoney(s.totalDebt)}
                     </strong>
                   </div>
 
                   <div style={{ textAlign: "right" }}>
-                    <span style={{ fontSize: "0.75rem", color: "var(--inv-text-muted)", display: "block" }}>Saldo a favor empresa:</span>
-                    <strong style={{ color: s.creditBalance > 0 ? "#10b981" : "var(--inv-text-muted)" }}>
+                    <span style={{ fontSize: "0.74rem", color: "#64748b", display: "block" }}>Saldo a favor empresa:</span>
+                    <strong style={{ color: s.creditBalance > 0 ? "#059669" : "#64748b", fontSize: "1rem" }}>
                       {formatMoney(s.creditBalance)}
                     </strong>
                   </div>

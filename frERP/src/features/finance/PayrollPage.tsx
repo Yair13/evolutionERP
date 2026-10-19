@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   RefreshCw,
   Edit2,
+  Wallet,
 } from "lucide-react";
 import {
   fetchEmployees,
@@ -55,6 +56,12 @@ export function PayrollPage() {
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
     isAllWarehouses ? "" : warehouseId || ""
   );
+
+  useEffect(() => {
+    if (!isAllWarehouses && warehouseId) {
+      setSelectedWarehouseId(warehouseId);
+    }
+  }, [isAllWarehouses, warehouseId]);
   const [dateFrom, setDateFrom] = useState(() => localMonthRange().from);
   const [dateTo, setDateTo] = useState(() => localMonthRange().to);
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>("");
@@ -135,234 +142,156 @@ export function PayrollPage() {
   }
 
   return (
-    <div className="container" style={{ paddingBottom: "3rem" }}>
+    <div className="fin-page">
       {/* Encabezado */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "1.25rem",
-          flexWrap: "wrap",
-          gap: "1rem",
-        }}
-      >
-        <div>
-          <h1
-            style={{
-              fontSize: "1.6rem",
-              fontWeight: 800,
-              margin: "0 0 0.25rem 0",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.6rem",
-            }}
-          >
-            <Users size={28} className="text-primary" />
-            Nómina y Colaboradores
-          </h1>
-          <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.9rem" }}>
-            Liquidación de nómina con vouchers impresos, descuento de cierres en efectivo y control de transferencias
-          </p>
+      <div className="fin-header">
+        <div className="fin-header__info">
+          <div className="fin-header__title-row">
+            <div className="fin-header__icon-badge fin-header__icon-badge--emerald">
+              <Users size={24} />
+            </div>
+            <div>
+              <h1 className="fin-header__title">Nómina y Colaboradores</h1>
+              <p className="fin-header__subtitle">
+                Liquidación de nómina con vouchers impresos, descuento automático de cierres en efectivo y control de transferencias.
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <div className="fin-header__actions">
           <button
             type="button"
-            className="inv-btn inv-btn--ghost"
+            className="fin-btn fin-btn--ghost"
             onClick={() => {
               setEmployeeToEdit(null);
               setShowCreateEmployee(true);
             }}
-            style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
           >
-            <Plus size={16} /> Nuevo Colaborador
+            <Plus size={16} />
+            <span>Nuevo Colaborador</span>
           </button>
           <button
             type="button"
-            className="inv-btn inv-btn--primary"
+            className="fin-btn fin-btn--primary"
             onClick={() => {
               setPreselectedEmployeeId(undefined);
               setShowCreatePayment(true);
             }}
-            style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
           >
-            <DollarSign size={16} /> Registrar Pago de Nómina
+            <DollarSign size={16} />
+            <span>Registrar Pago de Nómina</span>
           </button>
         </div>
       </div>
 
       {/* Tarjetas Métricas de Resumen */}
       {summary && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: "1rem",
-            marginBottom: "1.5rem",
-          }}
-        >
+        <div className="fin-kpi-grid fin-kpi-grid--4">
           {/* Total Pagado */}
-          <div
-            style={{
-              background: "linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(59, 130, 246, 0.08) 100%)",
-              border: "1px solid rgba(99, 102, 241, 0.3)",
-              borderRadius: 10,
-              padding: "1rem 1.25rem",
-            }}
-          >
-            <span style={{ fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700, color: "var(--text-muted)" }}>
-              Total Nómina Liquidada
-            </span>
-            <div style={{ fontSize: "1.6rem", fontWeight: 900, color: "var(--text-primary)", margin: "4px 0" }}>
+          <div className="fin-kpi-card fin-kpi-card--indigo">
+            <div className="fin-kpi-top">
+              <span className="fin-kpi-label">Total Nómina Liquidada</span>
+              <div className="fin-kpi-icon fin-kpi-icon--indigo">
+                <DollarSign size={18} />
+              </div>
+            </div>
+            <div className="fin-kpi-val fin-kpi-val--indigo">
               {formatMoney(summary.totalPaid)}
             </div>
-            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-              {summary.paymentCount} comprobantes emitidos
-            </span>
+            <div className="fin-kpi-sub">
+              {summary.paymentCount} comprobantes emitidos en el período
+            </div>
           </div>
 
           {/* Pagado en Efectivo */}
-          <div
-            style={{
-              background: "rgba(245, 158, 11, 0.08)",
-              border: "1px solid rgba(245, 158, 11, 0.25)",
-              borderRadius: 10,
-              padding: "1rem 1.25rem",
-            }}
-          >
-            <span style={{ fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700, color: "#f59e0b" }}>
-              💵 Efectivo (Caja de Sede)
-            </span>
-            <div style={{ fontSize: "1.6rem", fontWeight: 900, color: "#f59e0b", margin: "4px 0" }}>
+          <div className="fin-kpi-card fin-kpi-card--amber">
+            <div className="fin-kpi-top">
+              <span className="fin-kpi-label" style={{ color: "#d97706" }}>💵 Efectivo (Caja de Sede)</span>
+              <div className="fin-kpi-icon fin-kpi-icon--amber">
+                <Wallet size={18} />
+              </div>
+            </div>
+            <div className="fin-kpi-val fin-kpi-val--amber">
               {formatMoney(summary.cashTotal)}
             </div>
-            <span style={{ fontSize: "0.75rem", color: "#fde68a" }}>
+            <div className="fin-kpi-sub" style={{ color: "#d97706", fontWeight: 600 }}>
               ✓ Descontado del valor del cierre
-            </span>
+            </div>
           </div>
 
           {/* Pagado por Transferencias */}
-          <div
-            style={{
-              background: "rgba(14, 165, 233, 0.08)",
-              border: "1px solid rgba(14, 165, 233, 0.25)",
-              borderRadius: 10,
-              padding: "1rem 1.25rem",
-            }}
-          >
-            <span style={{ fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700, color: "#38bdf8" }}>
-              🏦 Bancos / Transferencias
-            </span>
-            <div style={{ fontSize: "1.6rem", fontWeight: 900, color: "#38bdf8", margin: "4px 0" }}>
+          <div className="fin-kpi-card fin-kpi-card--teal">
+            <div className="fin-kpi-top">
+              <span className="fin-kpi-label" style={{ color: "var(--accent)" }}>🏦 Bancos / Digitales</span>
+              <div className="fin-kpi-icon fin-kpi-icon--teal">
+                <CreditCard size={18} />
+              </div>
+            </div>
+            <div className="fin-kpi-val fin-kpi-val--teal">
               {formatMoney(summary.transferTotal)}
             </div>
-            <span style={{ fontSize: "0.75rem", color: "#bae6fd" }}>
+            <div className="fin-kpi-sub">
               Bancolombia, Nequi, Davivienda...
-            </span>
+            </div>
           </div>
 
           {/* Colaboradores */}
-          <div
-            style={{
-              background: "rgba(16, 185, 129, 0.08)",
-              border: "1px solid rgba(16, 185, 129, 0.25)",
-              borderRadius: 10,
-              padding: "1rem 1.25rem",
-            }}
-          >
-            <span style={{ fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700, color: "#10b981" }}>
-              Colaboradores Pagados
-            </span>
-            <div style={{ fontSize: "1.6rem", fontWeight: 900, color: "#10b981", margin: "4px 0" }}>
+          <div className="fin-kpi-card fin-kpi-card--emerald">
+            <div className="fin-kpi-top">
+              <span className="fin-kpi-label" style={{ color: "#059669" }}>Colaboradores Pagados</span>
+              <div className="fin-kpi-icon fin-kpi-icon--emerald">
+                <Users size={18} />
+              </div>
+            </div>
+            <div className="fin-kpi-val fin-kpi-val--emerald">
               {summary.employeesCount} de {employees.length}
             </div>
-            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+            <div className="fin-kpi-sub">
               {employees.filter((e) => e.isActive).length} activos registrados
-            </span>
+            </div>
           </div>
         </div>
       )}
 
       {/* Pestañas de Navegación */}
-      <div
-        style={{
-          display: "flex",
-          borderBottom: "1px solid var(--border-color, rgba(255, 255, 255, 0.1))",
-          marginBottom: "1.25rem",
-          gap: "1rem",
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => setActiveTab("payments")}
-          style={{
-            padding: "0.6rem 1rem",
-            background: "transparent",
-            border: "none",
-            borderBottom: activeTab === "payments" ? "3px solid #0284c7" : "3px solid transparent",
-            color: activeTab === "payments" ? "#0284c7" : "var(--text-muted)",
-            fontWeight: activeTab === "payments" ? 700 : 500,
-            cursor: "pointer",
-            fontSize: "0.95rem",
-            display: "flex",
-            alignItems: "center",
-            gap: "0.4rem",
-          }}
-        >
-          <FileText size={18} /> Comprobantes de Pago y Vouchers ({payments.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("employees")}
-          style={{
-            padding: "0.6rem 1rem",
-            background: "transparent",
-            border: "none",
-            borderBottom: activeTab === "employees" ? "3px solid #0284c7" : "3px solid transparent",
-            color: activeTab === "employees" ? "#0284c7" : "var(--text-muted)",
-            fontWeight: activeTab === "employees" ? 700 : 500,
-            cursor: "pointer",
-            fontSize: "0.95rem",
-            display: "flex",
-            alignItems: "center",
-            gap: "0.4rem",
-          }}
-        >
-          <Users size={18} /> Colaboradores ({employees.length})
-        </button>
+      <div style={{ marginBottom: "1.5rem" }}>
+        <div className="fin-tabs">
+          <button
+            type="button"
+            className={`fin-tab ${activeTab === "payments" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("payments")}
+          >
+            <FileText size={16} />
+            <span>Comprobantes de Pago y Vouchers</span>
+            {payments.length > 0 && <span className="fin-tab__badge">{payments.length}</span>}
+          </button>
+          <button
+            type="button"
+            className={`fin-tab ${activeTab === "employees" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("employees")}
+          >
+            <Users size={16} />
+            <span>Directorio de Colaboradores</span>
+            {employees.length > 0 && <span className="fin-tab__badge">{employees.length}</span>}
+          </button>
+        </div>
       </div>
 
-      {error && (
-        <div style={{ padding: "1rem", background: "rgba(239, 68, 68, 0.15)", color: "#fca5a5", borderRadius: 8, marginBottom: "1rem" }}>
-          {error}
-        </div>
-      )}
+      {error && <div className="fin-alert fin-alert--danger">{error}</div>}
 
       {/* ─── PESTAÑA 1: PAGOS DE NÓMINA ─────────────────────────────────────────── */}
       {activeTab === "payments" && (
         <>
           {/* Barra de Filtros */}
-          <div
-            style={{
-              background: "var(--bg-card-subtle, rgba(255,255,255,0.03))",
-              border: "1px solid var(--border-color, rgba(255,255,255,0.08))",
-              borderRadius: 10,
-              padding: "0.85rem 1rem",
-              marginBottom: "1.25rem",
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "0.75rem",
-              alignItems: "center",
-            }}
-          >
-            {canSeeAll && (
-              <label className="field" style={{ margin: 0, minWidth: 160 }}>
-                <span>Sede</span>
+          <div className="fin-filter-card">
+            {canSeeAll ? (
+              <div className="fin-filter-field" style={{ minWidth: 170 }}>
+                <span>SEDE</span>
                 <select
+                  className="fin-select"
                   value={selectedWarehouseId}
                   onChange={(e) => setSelectedWarehouseId(e.target.value)}
-                  style={{ height: 38 }}
                 >
                   <option value="">Todas las Sedes</option>
                   {warehouses.map((w) => (
@@ -371,15 +300,22 @@ export function PayrollPage() {
                     </option>
                   ))}
                 </select>
-              </label>
+              </div>
+            ) : (
+              <div className="fin-filter-field" style={{ minWidth: 160 }}>
+                <span>SEDE</span>
+                <div style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)", fontSize: "0.85rem", fontWeight: 600, color: "var(--inv-text-primary)" }}>
+                  {warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
+                </div>
+              </div>
             )}
 
-            <label className="field" style={{ margin: 0 }}>
-              <span>Medio Pago</span>
+            <div className="fin-filter-field" style={{ minWidth: 150 }}>
+              <span>MEDIO DE PAGO</span>
               <select
+                className="fin-select"
                 value={paymentMethodFilter}
                 onChange={(e) => setPaymentMethodFilter(e.target.value)}
-                style={{ height: 38 }}
               >
                 <option value="">Todos los Medios</option>
                 <option value="efectivo">💵 Efectivo (Caja)</option>
@@ -388,263 +324,223 @@ export function PayrollPage() {
                 <option value="nequi">🟣 Nequi</option>
                 <option value="daviplata">📱 Daviplata</option>
               </select>
-            </label>
+            </div>
 
-            <label className="field" style={{ margin: 0 }}>
-              <span>Desde</span>
+            <div className="fin-filter-field" style={{ minWidth: 130 }}>
+              <span>DESDE</span>
               <input
+                className="fin-input"
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                style={{ height: 38 }}
               />
-            </label>
+            </div>
 
-            <label className="field" style={{ margin: 0 }}>
-              <span>Hasta</span>
+            <div className="fin-filter-field" style={{ minWidth: 130 }}>
+              <span>HASTA</span>
               <input
+                className="fin-input"
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                style={{ height: 38 }}
               />
-            </label>
-
-            <div style={{ display: "flex", gap: "0.3rem", alignSelf: "flex-end" }}>
-              <button
-                type="button"
-                className="inv-btn inv-btn--ghost"
-                style={{ height: 38, fontSize: "0.8rem", padding: "0 8px" }}
-                onClick={() => setPeriodPreset("today")}
-              >
-                Hoy
-              </button>
-              <button
-                type="button"
-                className="inv-btn inv-btn--ghost"
-                style={{ height: 38, fontSize: "0.8rem", padding: "0 8px" }}
-                onClick={() => setPeriodPreset("month")}
-              >
-                Mes
-              </button>
-              <button
-                type="button"
-                className="inv-btn inv-btn--ghost"
-                style={{ height: 38, fontSize: "0.8rem", padding: "0 8px" }}
-                onClick={() => setPeriodPreset("all")}
-              >
-                Todo
-              </button>
             </div>
 
-            <label className="field" style={{ margin: 0, flex: 1, minWidth: 200 }}>
-              <span>Buscar</span>
-              <div style={{ position: "relative" }}>
+            <div className="fin-filter-field fin-filter-field--fixed">
+              <div className="fin-period-group">
+                <button
+                  type="button"
+                  className="fin-period-btn"
+                  onClick={() => setPeriodPreset("today")}
+                >
+                  Hoy
+                </button>
+                <button
+                  type="button"
+                  className="fin-period-btn"
+                  onClick={() => setPeriodPreset("month")}
+                >
+                  Mes
+                </button>
+                <button
+                  type="button"
+                  className="fin-period-btn"
+                  onClick={() => setPeriodPreset("all")}
+                >
+                  Todo
+                </button>
+              </div>
+            </div>
+
+            <div className="fin-filter-field" style={{ flex: 2, minWidth: 200 }}>
+              <span>BUSCAR COMPROBANTE</span>
+              <div className="fin-search-wrap">
+                <Search size={16} className="fin-search-wrap__icon" />
                 <input
+                  className="fin-input"
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Voucher, colaborador, cédula o ref..."
-                  style={{ height: 38, paddingLeft: 30 }}
                 />
-                <Search size={14} style={{ position: "absolute", left: 10, top: 12, color: "var(--text-muted)" }} />
               </div>
-            </label>
+            </div>
 
-            <div style={{ alignSelf: "flex-end" }}>
+            <div className="fin-filter-field fin-filter-field--fixed">
               <button
                 type="button"
-                className="inv-btn inv-btn--ghost"
-                style={{ height: 38, padding: "0 12px" }}
+                className="fin-btn fin-btn--ghost"
                 onClick={() => void loadData()}
-                title="Refrescar"
+                title="Refrescar nómina"
+                disabled={loading}
               >
                 <RefreshCw size={16} className={loading ? "spin" : ""} />
+                <span>Refrescar</span>
               </button>
             </div>
           </div>
 
           {/* Tabla de Pagos de Nómina */}
           {loading ? (
-            <div style={{ padding: "3rem", textAlign: "center", color: "var(--text-muted)" }}>
-              Cargando historial de nómina…
+            <div className="fin-empty">
+              <RefreshCw size={24} className="spin" />
+              <h3 className="fin-empty__title">Cargando historial de nómina</h3>
             </div>
           ) : payments.length === 0 ? (
-            <div
-              style={{
-                padding: "3rem",
-                textAlign: "center",
-                background: "var(--bg-card, #1e293b)",
-                borderRadius: 10,
-                border: "1px dashed var(--border-color, rgba(255, 255, 255, 0.1))",
-              }}
-            >
-              <DollarSign size={40} className="text-muted" style={{ margin: "0 auto 0.75rem auto", opacity: 0.5 }} />
-              <p style={{ margin: 0, fontWeight: 600 }}>No se encontraron comprobantes de pago de nómina</p>
-              <p style={{ margin: "4px 0 1rem 0", fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                Ajusta los filtros o registra el primer pago a un colaborador.
-              </p>
+            <div className="fin-empty">
+              <DollarSign size={32} />
+              <h3 className="fin-empty__title">No se encontraron pagos de nómina</h3>
+              <p className="fin-empty__desc">Ajusta los filtros o registra el primer pago a un colaborador.</p>
               <button
                 type="button"
-                className="inv-btn inv-btn--primary"
+                className="fin-btn fin-btn--primary"
                 onClick={() => setShowCreatePayment(true)}
+                style={{ marginTop: "0.5rem" }}
               >
-                <DollarSign size={16} /> Registrar Pago de Nómina
+                <DollarSign size={16} />
+                <span>Registrar Pago de Nómina</span>
               </button>
             </div>
           ) : (
-            <div
-              style={{
-                background: "var(--bg-card, #1e293b)",
-                border: "1px solid var(--border-color, rgba(255, 255, 255, 0.1))",
-                borderRadius: 10,
-                overflowX: "auto",
-              }}
-            >
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
-                <thead>
-                  <tr style={{ borderBottom: "1px solid var(--border-color, rgba(255, 255, 255, 0.1))", textAlign: "left", background: "rgba(255, 255, 255, 0.02)" }}>
-                    <th style={{ padding: "10px 14px" }}>Voucher #</th>
-                    <th style={{ padding: "10px 14px" }}>Fecha</th>
-                    <th style={{ padding: "10px 14px" }}>Colaborador</th>
-                    <th style={{ padding: "10px 14px" }}>Sede</th>
-                    <th style={{ padding: "10px 14px" }}>Período</th>
-                    <th style={{ padding: "10px 14px", textAlign: "right" }}>Neto Pagado</th>
-                    <th style={{ padding: "10px 14px" }}>Forma de Pago</th>
-                    <th style={{ padding: "10px 14px", textAlign: "center" }}>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {payments.map((p) => {
-                    const isCash = p.paymentMethod.toLowerCase() === "efectivo";
-                    const hasReceipt = Boolean(p.transferReceiptUrl);
+            <div className="fin-table-card">
+              <div className="fin-table-header">
+                <h3 className="fin-table-title">
+                  <FileText size={18} color="var(--accent)" />
+                  <span>Comprobantes de Nómina Emitidos</span>
+                </h3>
+                <span className="fin-badge fin-badge--neutral">
+                  {payments.length} comprobantes
+                </span>
+              </div>
 
-                    return (
-                      <tr
-                        key={p.id}
-                        style={{
-                          borderBottom: "1px solid var(--border-color, rgba(255, 255, 255, 0.05))",
-                        }}
-                      >
-                        <td style={{ padding: "10px 14px" }}>
-                          <button
-                            type="button"
-                            onClick={() => setViewingVoucher(p)}
-                            style={{
-                              background: "transparent",
-                              border: "none",
-                              color: "#38bdf8",
-                              fontWeight: 700,
-                              cursor: "pointer",
-                              padding: 0,
-                              textAlign: "left",
-                            }}
-                          >
-                            {p.voucherNumber}
-                          </button>
-                        </td>
-                        <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
-                          {p.paymentDate}
-                        </td>
-                        <td style={{ padding: "10px 14px" }}>
-                          <div style={{ fontWeight: 600 }}>{p.employeeName}</div>
-                          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                            {p.employeeDocType ?? "CC"} {p.employeeDocNumber} · {p.employeePosition}
-                          </div>
-                        </td>
-                        <td style={{ padding: "10px 14px" }}>
-                          <span style={{ fontSize: "0.8rem", background: "rgba(255,255,255,0.06)", padding: "2px 6px", borderRadius: 4 }}>
-                            {p.warehouseCode ?? "MAIN"}
-                          </span>
-                        </td>
-                        <td style={{ padding: "10px 14px" }}>
-                          <div style={{ fontWeight: 600 }}>{p.periodConcept}</div>
-                          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                            {p.periodStart} al {p.periodEnd}
-                          </div>
-                        </td>
-                        <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 800, fontSize: "0.95rem" }}>
-                          {formatMoney(p.netAmount)}
-                        </td>
-                        <td style={{ padding: "10px 14px" }}>
-                          {isCash ? (
-                            <span
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "0.3rem",
-                                padding: "3px 8px",
-                                borderRadius: 6,
-                                fontSize: "0.75rem",
-                                fontWeight: 700,
-                                background: "rgba(245, 158, 11, 0.12)",
-                                color: "#f59e0b",
-                                border: "1px solid rgba(245, 158, 11, 0.25)",
-                              }}
-                              title="Descontado del cierre de caja"
-                            >
-                              💵 Efectivo (Caja)
-                            </span>
-                          ) : (
-                            <span
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "0.3rem",
-                                padding: "3px 8px",
-                                borderRadius: 6,
-                                fontSize: "0.75rem",
-                                fontWeight: 700,
-                                background: "rgba(14, 165, 233, 0.12)",
-                                color: "#38bdf8",
-                                border: "1px solid rgba(14, 165, 233, 0.25)",
-                              }}
-                            >
-                              🏦 {p.paymentMethod.toUpperCase()}
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ padding: "10px 14px", textAlign: "center" }}>
-                          <div style={{ display: "inline-flex", gap: "0.4rem" }}>
-                            {/* Botón Imprimir Voucher */}
+              <div className="fin-table-wrap">
+                <table className="fin-table">
+                  <thead>
+                    <tr>
+                      <th>Voucher #</th>
+                      <th>Fecha</th>
+                      <th>Colaborador</th>
+                      <th>Sede</th>
+                      <th>Período</th>
+                      <th style={{ textAlign: "right" }}>Neto Pagado</th>
+                      <th>Forma de Pago</th>
+                      <th style={{ textAlign: "center" }}>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payments.map((p) => {
+                      const isCash = p.paymentMethod.toLowerCase() === "efectivo";
+                      const hasReceipt = Boolean(p.transferReceiptUrl);
+
+                      return (
+                        <tr key={p.id}>
+                          <td>
                             <button
                               type="button"
-                              className="inv-btn inv-btn--ghost"
-                              style={{ padding: "4px 8px", fontSize: "0.75rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
                               onClick={() => setViewingVoucher(p)}
-                              title="Ver e imprimir voucher de nómina"
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "var(--accent)",
+                                fontWeight: 800,
+                                cursor: "pointer",
+                                padding: 0,
+                                textAlign: "left",
+                              }}
                             >
-                              <Printer size={14} /> Voucher
+                              {p.voucherNumber}
                             </button>
-
-                            {/* Botón Soporte Bancario */}
-                            {!isCash && (
+                          </td>
+                          <td style={{ whiteSpace: "nowrap", color: "#64748b" }}>
+                            {p.paymentDate}
+                          </td>
+                          <td>
+                            <div style={{ fontWeight: 700, color: "#0f172a" }}>{p.employeeName}</div>
+                            <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                              {p.employeeDocType ?? "CC"} {p.employeeDocNumber} · {p.employeePosition}
+                            </div>
+                          </td>
+                          <td>
+                            <span className="fin-badge fin-badge--neutral">
+                              {p.warehouseCode ?? "MAIN"}
+                            </span>
+                          </td>
+                          <td>
+                            <div style={{ fontWeight: 600 }}>{p.periodConcept}</div>
+                            <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                              {p.periodStart} al {p.periodEnd}
+                            </div>
+                          </td>
+                          <td className="fin-table-num" style={{ fontWeight: 800, fontSize: "0.95rem", color: "#0f172a" }}>
+                            {formatMoney(p.netAmount)}
+                          </td>
+                          <td>
+                            {isCash ? (
+                              <span
+                                className="fin-badge fin-badge--warning"
+                                title="Descontado del cierre de caja"
+                              >
+                                💵 Efectivo (Caja)
+                              </span>
+                            ) : (
+                              <span className="fin-badge fin-badge--info">
+                                🏦 {p.paymentMethod.toUpperCase()}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            <div style={{ display: "inline-flex", gap: "0.35rem" }}>
+                              {/* Botón Imprimir Voucher */}
                               <button
                                 type="button"
-                                className="inv-btn inv-btn--ghost"
-                                style={{
-                                  padding: "4px 8px",
-                                  fontSize: "0.75rem",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "0.3rem",
-                                  color: hasReceipt ? "#10b981" : "#f59e0b",
-                                  borderColor: hasReceipt ? "rgba(16, 185, 129, 0.3)" : "rgba(245, 158, 11, 0.3)",
-                                }}
-                                onClick={() => setViewingReceipt(p)}
-                                title={hasReceipt ? "Ver soporte de transferencia de Maicol" : "Subir soporte bancario de Maicol"}
+                                className="fin-btn fin-btn--ghost fin-btn--sm"
+                                onClick={() => setViewingVoucher(p)}
+                                title="Ver e imprimir voucher de nómina"
                               >
-                                {hasReceipt ? <CheckCircle2 size={14} /> : <CreditCard size={14} />}
-                                {hasReceipt ? "Soporte" : "Adjuntar"}
+                                <Printer size={14} />
+                                <span>Voucher</span>
                               </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+
+                              {/* Botón Soporte Bancario */}
+                              {!isCash && (
+                                <button
+                                  type="button"
+                                  className={`fin-btn fin-btn--sm ${hasReceipt ? "fin-btn--ghost" : "fin-btn--primary"}`}
+                                  onClick={() => setViewingReceipt(p)}
+                                  title={hasReceipt ? "Ver soporte de transferencia" : "Subir soporte bancario"}
+                                >
+                                  {hasReceipt ? <CheckCircle2 size={14} /> : <CreditCard size={14} />}
+                                  <span>{hasReceipt ? "Soporte" : "Adjuntar"}</span>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </>
@@ -654,26 +550,14 @@ export function PayrollPage() {
       {activeTab === "employees" && (
         <>
           {/* Barra de Filtros de Colaboradores */}
-          <div
-            style={{
-              background: "var(--bg-card-subtle, rgba(255,255,255,0.03))",
-              border: "1px solid var(--border-color, rgba(255,255,255,0.08))",
-              borderRadius: 10,
-              padding: "0.85rem 1rem",
-              marginBottom: "1.25rem",
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "0.75rem",
-              alignItems: "center",
-            }}
-          >
-            {canSeeAll && (
-              <label className="field" style={{ margin: 0, minWidth: 160 }}>
-                <span>Sede</span>
+          <div className="fin-filter-card" style={{ justifyContent: "space-between" }}>
+            {canSeeAll ? (
+              <div className="fin-filter-field" style={{ minWidth: 170 }}>
+                <span>SEDE</span>
                 <select
+                  className="fin-select"
                   value={selectedWarehouseId}
                   onChange={(e) => setSelectedWarehouseId(e.target.value)}
-                  style={{ height: 38 }}
                 >
                   <option value="">Todas las Sedes</option>
                   {warehouses.map((w) => (
@@ -682,175 +566,178 @@ export function PayrollPage() {
                     </option>
                   ))}
                 </select>
-              </label>
+              </div>
+            ) : (
+              <div className="fin-filter-field" style={{ minWidth: 160 }}>
+                <span>SEDE</span>
+                <div style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)", fontSize: "0.85rem", fontWeight: 600, color: "var(--inv-text-primary)" }}>
+                  {warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
+                </div>
+              </div>
             )}
 
-            <label className="field" style={{ margin: 0, flex: 1, minWidth: 200 }}>
-              <span>Buscar Colaborador</span>
-              <div style={{ position: "relative" }}>
+            <div className="fin-filter-field" style={{ flex: 2, minWidth: 220 }}>
+              <span>BUSCAR COLABORADOR</span>
+              <div className="fin-search-wrap">
+                <Search size={16} className="fin-search-wrap__icon" />
                 <input
+                  className="fin-input"
                   type="text"
                   value={employeeSearch}
                   onChange={(e) => setEmployeeSearch(e.target.value)}
                   placeholder="Nombre, cédula, cargo o código..."
-                  style={{ height: 38, paddingLeft: 30 }}
                 />
-                <Search size={14} style={{ position: "absolute", left: 10, top: 12, color: "var(--text-muted)" }} />
               </div>
-            </label>
+            </div>
 
             <button
               type="button"
-              className="inv-btn inv-btn--primary"
-              style={{ height: 38, alignSelf: "flex-end", display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
+              className="fin-btn fin-btn--primary"
               onClick={() => {
                 setEmployeeToEdit(null);
                 setShowCreateEmployee(true);
               }}
             >
-              <Plus size={16} /> Crear Colaborador
+              <Plus size={16} />
+              <span>Crear Colaborador</span>
             </button>
           </div>
 
           {/* Tabla de Colaboradores */}
           {employees.length === 0 ? (
-            <div
-              style={{
-                padding: "3rem",
-                textAlign: "center",
-                background: "var(--bg-card, #1e293b)",
-                borderRadius: 10,
-                border: "1px dashed var(--border-color, rgba(255, 255, 255, 0.1))",
-              }}
-            >
-              <Users size={40} className="text-muted" style={{ margin: "0 auto 0.75rem auto", opacity: 0.5 }} />
-              <p style={{ margin: 0, fontWeight: 600 }}>No hay colaboradores registrados</p>
-              <p style={{ margin: "4px 0 1rem 0", fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                Registra los colaboradores de la empresa para liquidar sus nóminas.
-              </p>
+            <div className="fin-empty">
+              <Users size={32} />
+              <h3 className="fin-empty__title">No hay colaboradores registrados</h3>
+              <p className="fin-empty__desc">Registra los colaboradores de la empresa para liquidar sus nóminas.</p>
               <button
                 type="button"
-                className="inv-btn inv-btn--primary"
+                className="fin-btn fin-btn--primary"
                 onClick={() => {
                   setEmployeeToEdit(null);
                   setShowCreateEmployee(true);
                 }}
+                style={{ marginTop: "0.5rem" }}
               >
-                <Plus size={16} /> Registrar Colaborador
+                <Plus size={16} />
+                <span>Registrar Colaborador</span>
               </button>
             </div>
           ) : (
-            <div
-              style={{
-                background: "var(--bg-card, #1e293b)",
-                border: "1px solid var(--border-color, rgba(255, 255, 255, 0.1))",
-                borderRadius: 10,
-                overflowX: "auto",
-              }}
-            >
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
-                <thead>
-                  <tr style={{ borderBottom: "1px solid var(--border-color, rgba(255, 255, 255, 0.1))", textAlign: "left", background: "rgba(255, 255, 255, 0.02)" }}>
-                    <th style={{ padding: "10px 14px" }}>Código</th>
-                    <th style={{ padding: "10px 14px" }}>Colaborador</th>
-                    <th style={{ padding: "10px 14px" }}>Cargo</th>
-                    <th style={{ padding: "10px 14px" }}>Sede Asignada</th>
-                    <th style={{ padding: "10px 14px", textAlign: "right" }}>Sueldo Base</th>
-                    <th style={{ padding: "10px 14px" }}>Periodicidad</th>
-                    <th style={{ padding: "10px 14px" }}>Cuenta Bancaria</th>
-                    <th style={{ padding: "10px 14px" }}>Estado</th>
-                    <th style={{ padding: "10px 14px", textAlign: "center" }}>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {employees.map((emp) => (
-                    <tr
-                      key={emp.id}
-                      style={{
-                        borderBottom: "1px solid var(--border-color, rgba(255, 255, 255, 0.05))",
-                        opacity: emp.isActive ? 1 : 0.6,
-                      }}
-                    >
-                      <td style={{ padding: "10px 14px", fontWeight: 700, color: "#38bdf8" }}>
-                        {emp.code}
-                      </td>
-                      <td style={{ padding: "10px 14px" }}>
-                        <div style={{ fontWeight: 600 }}>{emp.fullName}</div>
-                        <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                          {emp.documentType} {emp.documentNumber} {emp.phone && `· ${emp.phone}`}
-                        </div>
-                      </td>
-                      <td style={{ padding: "10px 14px" }}>{emp.position}</td>
-                      <td style={{ padding: "10px 14px" }}>
-                        {emp.warehouseName ? (
-                          <span style={{ fontSize: "0.8rem", background: "rgba(255,255,255,0.06)", padding: "2px 6px", borderRadius: 4 }}>
-                            {emp.warehouseName} ({emp.warehouseCode})
+            <div className="fin-table-card">
+              <div className="fin-table-header">
+                <h3 className="fin-table-title">
+                  <Users size={18} color="var(--accent)" />
+                  <span>Equipo y Colaboradores</span>
+                </h3>
+                <span className="fin-badge fin-badge--neutral">
+                  {employees.length} registros
+                </span>
+              </div>
+
+              <div className="fin-table-wrap">
+                <table className="fin-table">
+                  <thead>
+                    <tr>
+                      <th>Código</th>
+                      <th>Colaborador</th>
+                      <th>Cargo</th>
+                      <th>Sede Asignada</th>
+                      <th style={{ textAlign: "right" }}>Sueldo Base</th>
+                      <th>Periodicidad</th>
+                      <th>Cuenta Bancaria</th>
+                      <th>Estado</th>
+                      <th style={{ textAlign: "center" }}>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employees.map((emp) => (
+                      <tr
+                        key={emp.id}
+                        style={{ opacity: emp.isActive ? 1 : 0.6 }}
+                      >
+                        <td>
+                          <span className="fin-badge fin-badge--teal" style={{ fontWeight: 800 }}>
+                            {emp.code}
                           </span>
-                        ) : (
-                          <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>Sin sede fija</span>
-                        )}
-                      </td>
-                      <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 700 }}>
-                        {formatMoney(emp.baseSalary)}
-                      </td>
-                      <td style={{ padding: "10px 14px", textTransform: "capitalize" }}>
-                        {emp.paymentFrequency}
-                      </td>
-                      <td style={{ padding: "10px 14px" }}>
-                        {emp.bankName ? (
-                          <div style={{ fontSize: "0.8rem" }}>
-                            <div><strong>{emp.bankName}</strong> ({emp.bankAccountType ?? "Cta"})</div>
-                            <div style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>{emp.bankAccountNumber ?? "—"}</div>
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 700, color: "#0f172a" }}>{emp.fullName}</div>
+                          <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                            {emp.documentType} {emp.documentNumber} {emp.phone && `· ${emp.phone}`}
                           </div>
-                        ) : (
-                          <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>Efectivo</span>
-                        )}
-                      </td>
-                      <td style={{ padding: "10px 14px" }}>
-                        {emp.isActive ? (
-                          <span style={{ color: "#10b981", fontSize: "0.75rem", fontWeight: 700, background: "rgba(16, 185, 129, 0.1)", padding: "2px 6px", borderRadius: 4 }}>
-                            Activo
-                          </span>
-                        ) : (
-                          <span style={{ color: "#94a3b8", fontSize: "0.75rem", background: "rgba(255, 255, 255, 0.05)", padding: "2px 6px", borderRadius: 4 }}>
-                            Inactivo
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ padding: "10px 14px", textAlign: "center" }}>
-                        <div style={{ display: "inline-flex", gap: "0.4rem" }}>
-                          <button
-                            type="button"
-                            className="inv-btn inv-btn--ghost"
-                            style={{ padding: "4px 8px", fontSize: "0.75rem", display: "inline-flex", alignItems: "center", gap: "0.2rem" }}
-                            onClick={() => {
-                              setEmployeeToEdit(emp);
-                              setShowCreateEmployee(true);
-                            }}
-                            title="Editar Colaborador"
-                          >
-                            <Edit2 size={13} /> Editar
-                          </button>
-                          {emp.isActive && (
+                        </td>
+                        <td>{emp.position}</td>
+                        <td>
+                          {emp.warehouseName ? (
+                            <span className="fin-badge fin-badge--neutral">
+                              {emp.warehouseName} ({emp.warehouseCode})
+                            </span>
+                          ) : (
+                            <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>Sin sede fija</span>
+                          )}
+                        </td>
+                        <td className="fin-table-num" style={{ fontWeight: 700 }}>
+                          {formatMoney(emp.baseSalary)}
+                        </td>
+                        <td style={{ textTransform: "capitalize" }}>
+                          {emp.paymentFrequency}
+                        </td>
+                        <td>
+                          {emp.bankName ? (
+                            <div style={{ fontSize: "0.8rem" }}>
+                              <strong style={{ color: "#0f172a" }}>{emp.bankName}</strong> ({emp.bankAccountType ?? "Cta"})
+                              <div style={{ color: "#64748b", fontSize: "0.75rem" }}>{emp.bankAccountNumber ?? "—"}</div>
+                            </div>
+                          ) : (
+                            <span style={{ color: "#64748b", fontSize: "0.8rem" }}>Efectivo</span>
+                          )}
+                        </td>
+                        <td>
+                          {emp.isActive ? (
+                            <span className="fin-badge fin-badge--success">
+                              Activo
+                            </span>
+                          ) : (
+                            <span className="fin-badge fin-badge--neutral">
+                              Inactivo
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          <div style={{ display: "inline-flex", gap: "0.35rem" }}>
                             <button
                               type="button"
-                              className="inv-btn inv-btn--primary"
-                              style={{ padding: "4px 8px", fontSize: "0.75rem", display: "inline-flex", alignItems: "center", gap: "0.2rem" }}
+                              className="fin-btn fin-btn--ghost fin-btn--sm"
                               onClick={() => {
-                                setPreselectedEmployeeId(emp.id);
-                                setShowCreatePayment(true);
+                                setEmployeeToEdit(emp);
+                                setShowCreateEmployee(true);
                               }}
-                              title="Pagar nómina a este colaborador"
+                              title="Editar Colaborador"
                             >
-                              <DollarSign size={13} /> Pagar
+                              <Edit2 size={13} />
+                              <span>Editar</span>
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                            {emp.isActive && (
+                              <button
+                                type="button"
+                                className="fin-btn fin-btn--primary fin-btn--sm"
+                                onClick={() => {
+                                  setPreselectedEmployeeId(emp.id);
+                                  setShowCreatePayment(true);
+                                }}
+                                title="Pagar nómina a este colaborador"
+                              >
+                                <DollarSign size={13} />
+                                <span>Pagar</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </>
@@ -886,7 +773,6 @@ export function PayrollPage() {
             setShowCreatePayment(false);
             setPreselectedEmployeeId(undefined);
             void loadData();
-            // Abrir automáticamente el voucher para imprimir
             setViewingVoucher(newPayment);
           }}
         />

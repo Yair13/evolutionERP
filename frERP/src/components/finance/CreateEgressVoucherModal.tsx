@@ -20,10 +20,18 @@ const BANK_PAYMENT_METHODS = [
 ] as const;
 
 export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
-  const { token, user } = useAuth();
-  const { warehouses, warehouseId } = useWarehouse();
+  const { token } = useAuth();
+  const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
 
-  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(warehouseId || "");
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
+    isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || "")
+  );
+
+  useEffect(() => {
+    if (open) {
+      setSelectedWarehouseId(isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || ""));
+    }
+  }, [open, isAllWarehouses, warehouseId, warehouses]);
   const [concept, setConcept] = useState("");
   const [beneficiaryName, setBeneficiaryName] = useState("");
   const [beneficiaryDoc, setBeneficiaryDoc] = useState("");
@@ -169,17 +177,24 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
           {/* Sede de origen del dinero */}
           <label className="field">
             <span>Sede de donde sale el dinero *</span>
-            <select
-              value={selectedWarehouseId}
-              onChange={(e) => setSelectedWarehouseId(e.target.value)}
-              disabled={submitting || (!user?.hasAdminAccess && warehouses.length <= 1)}
-            >
-              {warehouses.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name} ({w.code}) {w.is_factory ? "— Fábrica / Bodega" : ""}
-                </option>
-              ))}
-            </select>
+            {isAllWarehouses ? (
+              <select
+                value={selectedWarehouseId}
+                onChange={(e) => setSelectedWarehouseId(e.target.value)}
+                disabled={submitting}
+                required
+              >
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} ({w.code}) {w.is_factory ? "— Fábrica / Bodega" : ""}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-elevated)", fontWeight: 600, fontSize: "0.9rem" }}>
+                {warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
+              </div>
+            )}
           </label>
 
           {/* Advertencia / Regla de salida bancaria */}
