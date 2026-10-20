@@ -410,7 +410,7 @@ export async function getDailyClosureData(
       rp.receipt_url AS "receiptUrl",
       rp.receipt_filename AS "receiptFilename",
       rp.created_at AS "createdAt",
-      c.name AS "customerName"
+      c.display_name AS "customerName"
     FROM receivable_payments rp
     LEFT JOIN customers c ON c.id = rp.customer_id
     WHERE rp.warehouse_id = $1::uuid
@@ -446,7 +446,7 @@ export async function getDailyClosureData(
       lp.receipt_url AS "receiptUrl",
       lp.receipt_filename AS "receiptFilename",
       lp.created_at AS "createdAt",
-      c.name AS "customerName"
+      c.display_name AS "customerName"
     FROM layaway_payments lp
     LEFT JOIN layaways l ON l.id = lp.layaway_id
     LEFT JOIN customers c ON c.id = l.customer_id

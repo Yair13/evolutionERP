@@ -1052,11 +1052,11 @@ export async function listDocuments(
   let dateFilter = "";
   if (opts?.dateFrom) {
     params.push(opts.dateFrom);
-    dateFilter += ` AND COALESCE(d.completed_at, d.created_at)::date >= $${params.length}::date`;
+    dateFilter += ` AND (COALESCE(d.completed_at, d.created_at) AT TIME ZONE 'America/Bogota')::date >= $${params.length}::date`;
   }
   if (opts?.dateTo) {
     params.push(opts.dateTo);
-    dateFilter += ` AND COALESCE(d.completed_at, d.created_at)::date <= $${params.length}::date`;
+    dateFilter += ` AND (COALESCE(d.completed_at, d.created_at) AT TIME ZONE 'America/Bogota')::date <= $${params.length}::date`;
   }
 
   const countSql = `

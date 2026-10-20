@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   CheckCircle2,
   AlertTriangle,
@@ -59,18 +59,32 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
   const { token, user } = useAuth();
   const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
   const location = useLocation();
+  const navigate = useNavigate();
   const canSeeAll = isAllWarehouses;
 
-  const initialTab = defaultTab || (location.pathname.includes("cierre-general") ? "general" : "current");
-  const [activeTab, setActiveTab] = useState<"current" | "history" | "general">(initialTab);
+  const isGeneralRoute = location.pathname.includes("cierre-general");
+  const [activeTab, setActiveTab] = useState<"current" | "history" | "general">(
+    defaultTab ?? (isGeneralRoute ? "general" : "current")
+  );
 
   useEffect(() => {
     if (defaultTab) {
       setActiveTab(defaultTab);
     } else if (location.pathname.includes("cierre-general")) {
       setActiveTab("general");
+    } else {
+      setActiveTab("current");
     }
   }, [defaultTab, location.pathname]);
+
+  function handleTabChange(tab: "current" | "history" | "general") {
+    setActiveTab(tab);
+    if (tab === "general" && !location.pathname.includes("cierre-general")) {
+      navigate("/app/finanzas/cierre-general");
+    } else if (tab !== "general" && location.pathname.includes("cierre-general")) {
+      navigate("/app/finanzas/cierre-diario");
+    }
+  }
 
   // Filtros principales Cierre Diario
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
@@ -103,6 +117,12 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
   const [generalWarehouseId, setGeneralWarehouseId] = useState<string>(
     isAllWarehouses ? "" : (warehouseId || "")
   );
+
+  useEffect(() => {
+    if (!isAllWarehouses && warehouseId) {
+      setGeneralWarehouseId(warehouseId);
+    }
+  }, [isAllWarehouses, warehouseId]);
   const [generalDateFrom, setGeneralDateFrom] = useState(localFirstDayOfMonth);
   const [generalDateTo, setGeneralDateTo] = useState(localTodayYmd);
   const [generalWorksheet, setGeneralWorksheet] = useState<GeneralClosureWorksheet | null>(null);
@@ -308,9 +328,13 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
               <ShieldCheck size={24} />
             </div>
             <div>
-              <h1 className="fin-header__title">Cierre Diario y Arqueo Consolidado</h1>
+              <h1 className="fin-header__title">
+                {activeTab === "general" ? "Cierre Contable General (Rango)" : "Cierre Diario y Arqueo"}
+              </h1>
               <p className="fin-header__subtitle">
-                Cuadre de caja acumulativo día a día, auditoría de soportes bancarios y liquidación contable.
+                {activeTab === "general"
+                  ? "Liquidación contable por rango de fechas (semanal, quincenal o mensual), fondo en sede y retiro de utilidades."
+                  : "Cuadre de caja acumulativo día a día, auditoría de soportes bancarios y acta de cierre diario."}
               </p>
             </div>
           </div>
@@ -322,7 +346,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
             <button
               type="button"
               className={`fin-tab ${activeTab === "current" ? "is-active" : ""}`}
-              onClick={() => setActiveTab("current")}
+              onClick={() => handleTabChange("current")}
             >
               <FileText size={16} />
               <span>Cierre del Día</span>
@@ -330,7 +354,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
             <button
               type="button"
               className={`fin-tab ${activeTab === "history" ? "is-active" : ""}`}
-              onClick={() => setActiveTab("history")}
+              onClick={() => handleTabChange("history")}
             >
               <History size={16} />
               <span>Historial Diario</span>
@@ -338,7 +362,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
             <button
               type="button"
               className={`fin-tab ${activeTab === "general" ? "is-active" : ""}`}
-              onClick={() => setActiveTab("general")}
+              onClick={() => handleTabChange("general")}
             >
               <ShieldCheck size={16} />
               <span>Cierre Contable General</span>
@@ -350,7 +374,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
       {/* Barra de Filtros */}
       {activeTab === "general" ? (
         <div className="fin-filter-card">
-          {canSeeAll && (
+          {canSeeAll ? (
             <div className="fin-filter-field" style={{ minWidth: 220 }}>
               <span>Sede de Cierre General</span>
               <select
@@ -365,6 +389,13 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                   </option>
                 ))}
               </select>
+            </div>
+          ) : (
+            <div className="fin-filter-field" style={{ minWidth: 160 }}>
+              <span>SEDE</span>
+              <div style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)", fontSize: "0.85rem", fontWeight: 600, color: "var(--inv-text-primary)" }}>
+                {warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
+              </div>
             </div>
           )}
 
