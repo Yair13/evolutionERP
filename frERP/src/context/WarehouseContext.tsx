@@ -17,7 +17,10 @@ const ALL_SENTINEL = "__all__";
 const UNRESTRICTED_ROLES = new Set(["super_admin", "secretaria"]);
 
 type WarehouseContextValue = {
+  /** Todas las sedes activas de la empresa (para traslados, búsquedas, nombres). */
   warehouses: WarehouseOption[];
+  /** Sedes a las que el usuario actual tiene permiso de operar / seleccionar como sesión. */
+  assignedWarehouses: WarehouseOption[];
   /** null = sesión "Sede Administrativa" (solo admin/secretaria) o aún sin seleccionar. */
   warehouseId: string | null;
   /** true cuando la sesión está en la Sede Administrativa (vista general de empresa). */
@@ -60,6 +63,14 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
       (user?.hasAdminAccess ?? (user?.roles ?? []).some((r) => UNRESTRICTED_ROLES.has(r)))
   );
 
+  const assignedWarehouses = useMemo(() => {
+    if (canViewAllWarehouses || user?.warehouseIds === null || user?.warehouseIds === undefined) {
+      return warehouses;
+    }
+    const allowed = new Set(user.warehouseIds);
+    return warehouses.filter((w) => allowed.has(w.id));
+  }, [warehouses, canViewAllWarehouses, user?.warehouseIds]);
+
   const reload = useCallback(async () => {
     if (!token) {
       setWarehouses([]);
@@ -75,19 +86,24 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
       const active = data.items.filter((w) => w.is_active);
       setWarehouses(active);
 
+      const assigned =
+        canViewAllWarehouses || user?.warehouseIds === null || user?.warehouseIds === undefined
+          ? active
+          : active.filter((w) => new Set(user.warehouseIds).has(w.id));
+
       setWarehouseIdState(() => {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored === ALL_SENTINEL && canViewAllWarehouses) {
           setAllMode(true);
           return null;
         }
-        if (stored && stored !== ALL_SENTINEL && active.some((w) => w.id === stored)) {
+        if (stored && stored !== ALL_SENTINEL && assigned.some((w) => w.id === stored)) {
           setAllMode(false);
           return stored;
         }
         // Usuario normal con una sola sede asignada: entrar directo a esa sede
-        if (!canViewAllWarehouses && active.length === 1) {
-          const onlyId = active[0]!.id;
+        if (!canViewAllWarehouses && assigned.length === 1) {
+          const onlyId = assigned[0]!.id;
           localStorage.setItem(STORAGE_KEY, onlyId);
           setAllMode(false);
           return onlyId;
@@ -102,7 +118,7 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [token, canViewAllWarehouses]);
+  }, [token, canViewAllWarehouses, user?.warehouseIds]);
 
   useEffect(() => {
     void reload();
@@ -111,8 +127,8 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
   // Si pierde permiso de "Sede Administrativa", salir de allMode
   useEffect(() => {
     if (!canViewAllWarehouses && allMode) {
-      if (warehouses.length === 1) {
-        const first = warehouses[0]!.id;
+      if (assignedWarehouses.length === 1) {
+        const first = assignedWarehouses[0]!.id;
         localStorage.setItem(STORAGE_KEY, first);
         setWarehouseIdState(first);
       } else {
@@ -121,7 +137,7 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
       }
       setAllMode(false);
     }
-  }, [canViewAllWarehouses, allMode, warehouses]);
+  }, [canViewAllWarehouses, allMode, assignedWarehouses]);
 
   const setWarehouseId = useCallback(
     (id: string | null) => {
@@ -132,16 +148,19 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
         setWarehouseIdState(null);
         return;
       }
+      if (!canViewAllWarehouses && !assignedWarehouses.some((w) => w.id === id)) {
+        return;
+      }
       localStorage.setItem(STORAGE_KEY, id);
       setAllMode(false);
       setWarehouseIdState(id);
     },
-    [canViewAllWarehouses]
+    [canViewAllWarehouses, assignedWarehouses]
   );
 
   const isAllWarehouses = canViewAllWarehouses && allMode;
   const hasSelectedScope = Boolean(
-    isAllWarehouses || (warehouseId && warehouses.some((w) => w.id === warehouseId))
+    isAllWarehouses || (warehouseId && assignedWarehouses.some((w) => w.id === warehouseId))
   );
 
   const sessionLabel = useMemo(() => {
@@ -154,6 +173,7 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       warehouses,
+      assignedWarehouses,
       warehouseId: isAllWarehouses ? null : warehouseId,
       isAllWarehouses,
       hasSelectedScope,
@@ -166,6 +186,7 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
     }),
     [
       warehouses,
+      assignedWarehouses,
       warehouseId,
       isAllWarehouses,
       hasSelectedScope,

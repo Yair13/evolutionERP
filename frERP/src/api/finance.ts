@@ -156,6 +156,22 @@ export async function fetchReceivableDetail(token: string, id: string) {
   return apiGet<{ item: ReceivableDetail }>(`/finance/receivables/${id}`, token);
 }
 
+export async function createReceivable(
+  token: string,
+  data: {
+    warehouseId: string;
+    customerId: string;
+    invoiceNumber: string;
+    totalAmount: number;
+    balanceAmount?: number | null;
+    dueDate?: string | null;
+    issueDate?: string | null;
+    notes?: string | null;
+  }
+) {
+  return apiPost<{ item: ReceivableDetail }>("/finance/receivables", data, token);
+}
+
 export async function addReceivablePayment(
   token: string,
   id: string,

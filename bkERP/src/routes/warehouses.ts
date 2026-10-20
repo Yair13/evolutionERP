@@ -131,37 +131,19 @@ export function createWarehousesRouter(): Router {
     }
   });
 
-  r.get("/", requireAuth, async (req, res, next) => {
+  r.get("/", requireAuth, async (_req, res, next) => {
     const pool = getPool();
     if (!pool) {
       res.status(503).json({ error: "database_not_configured" });
       return;
     }
 
-    const auth = req.auth!;
     try {
-      if (auth.warehouseIds === null) {
-        const { rows } = await pool.query(
-          `SELECT id::text, code, name, is_active, is_factory, created_at
-           FROM warehouses
-           WHERE is_active = true
-           ORDER BY name`
-        );
-        res.json({ items: rows });
-        return;
-      }
-
-      if (auth.warehouseIds.length === 0) {
-        res.json({ items: [] });
-        return;
-      }
-
       const { rows } = await pool.query(
         `SELECT id::text, code, name, is_active, is_factory, created_at
          FROM warehouses
-         WHERE is_active = true AND id = ANY($1::uuid[])
-         ORDER BY name`,
-        [auth.warehouseIds]
+         WHERE is_active = true
+         ORDER BY name`
       );
       res.json({ items: rows });
     } catch (err) {

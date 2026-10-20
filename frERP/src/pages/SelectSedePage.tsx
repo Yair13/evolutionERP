@@ -17,7 +17,7 @@ import { useWarehouse } from "../context/WarehouseContext.js";
 export function SelectSedePage() {
   const { token, user, logout } = useAuth();
   const {
-    warehouses,
+    assignedWarehouses,
     warehouseId,
     isAllWarehouses,
     hasSelectedScope,
@@ -33,7 +33,7 @@ export function SelectSedePage() {
   if (!token) return <Navigate to="/login" replace />;
 
   // Si es un usuario normal con una única sede asignada, omitir pantalla intermedia y entrar directo
-  if (!loading && !canViewAllWarehouses && warehouses.length === 1) {
+  if (!loading && !canViewAllWarehouses && assignedWarehouses.length === 1) {
     return <Navigate to="/app" replace />;
   }
 
@@ -152,7 +152,7 @@ export function SelectSedePage() {
                 <span>{canViewAllWarehouses ? "Sedes operativas" : "Tus sedes asignadas"}</span>
               </h2>
 
-              {warehouses.length === 0 ? (
+              {assignedWarehouses.length === 0 ? (
                 <div className="sede-picker__empty">
                   <p>
                     {canViewAllWarehouses
@@ -162,7 +162,7 @@ export function SelectSedePage() {
                 </div>
               ) : (
                 <div className="sede-picker__grid">
-                  {warehouses.map((w) => {
+                  {assignedWarehouses.map((w) => {
                     const isFactory = w.is_factory === true;
                     const isCurrent = !isAllWarehouses && warehouseId === w.id;
                     return (

@@ -133,6 +133,12 @@ export function ReceivableDetailModal({
             </div>
 
             {/* Productos de la venta */}
+            {!detail.documentId && (
+              <div style={{ background: "rgba(99, 102, 241, 0.08)", border: "1px dashed rgba(99, 102, 241, 0.3)", borderRadius: 8, padding: "0.65rem 0.85rem", marginBottom: "1rem", fontSize: "0.83rem", color: "var(--text-muted)" }}>
+                ℹ️ <strong style={{ color: "var(--text-primary)" }}>Saldo Inicial / Factura Anterior:</strong> Registrada como deuda previa a la puesta en marcha del ERP (sin afectación de inventario físico).
+              </div>
+            )}
+
             {detail.documentLines && detail.documentLines.length > 0 && (
               <div style={{ marginBottom: "1rem" }}>
                 <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.9rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>

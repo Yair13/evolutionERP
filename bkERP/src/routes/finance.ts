@@ -11,6 +11,7 @@ import {
   getReceivableDetail,
   getReceivablesByWarehouseReport,
   listAccountsReceivable,
+  createManualReceivable,
 } from "../services/finance/receivables.js";
 import {
   addLayawayPayment,
@@ -137,6 +138,97 @@ export function createFinanceRouter(): Router {
     } catch (err: any) {
       if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
         res.status(err.statusCode || 400).json({ error: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  /**
+   * Crear manualmente una cuenta por cobrar (saldo inicial / factura previa).
+   */
+  r.post("/receivables", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const warehouseId =
+      typeof req.body?.warehouseId === "string" && isUuid(req.body.warehouseId)
+        ? req.body.warehouseId
+        : null;
+    if (!warehouseId) {
+      res.status(400).json({ error: "warehouse_id_required" });
+      return;
+    }
+
+    const auth = req.auth!;
+    if (!auth.hasAdminAccess && (!auth.warehouseIds || !auth.warehouseIds.includes(warehouseId))) {
+      res.status(403).json({ error: "warehouse_forbidden" });
+      return;
+    }
+
+    const customerId =
+      typeof req.body?.customerId === "string" && isUuid(req.body.customerId)
+        ? req.body.customerId
+        : null;
+    if (!customerId) {
+      res.status(400).json({ error: "customer_id_required" });
+      return;
+    }
+
+    const invoiceNumber =
+      typeof req.body?.invoiceNumber === "string" && req.body.invoiceNumber.trim()
+        ? req.body.invoiceNumber.trim()
+        : null;
+    if (!invoiceNumber) {
+      res.status(400).json({ error: "invoice_number_required" });
+      return;
+    }
+
+    const totalAmount = Number(req.body?.totalAmount);
+    if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+      res.status(400).json({ error: "invalid_total_amount" });
+      return;
+    }
+
+    const balanceAmount =
+      req.body?.balanceAmount !== undefined &&
+      req.body?.balanceAmount !== null &&
+      req.body?.balanceAmount !== ""
+        ? Number(req.body.balanceAmount)
+        : totalAmount;
+    if (!Number.isFinite(balanceAmount) || balanceAmount < 0 || balanceAmount > totalAmount) {
+      res.status(400).json({ error: "invalid_balance_amount" });
+      return;
+    }
+
+    const dueDate = typeof req.body?.dueDate === "string" ? req.body.dueDate.trim() || null : null;
+    const issueDate =
+      typeof req.body?.issueDate === "string" ? req.body.issueDate.trim() || null : null;
+    const notes = typeof req.body?.notes === "string" ? req.body.notes.trim() || null : null;
+
+    try {
+      const result = await createManualReceivable(pool, {
+        warehouseId,
+        customerId,
+        invoiceNumber,
+        totalAmount,
+        balanceAmount,
+        dueDate,
+        issueDate,
+        notes,
+        userId: auth.userId,
+      });
+      res.status(201).json({ item: result });
+    } catch (err: any) {
+      if (err.code === "customer_not_found") {
+        res.status(404).json({ error: "customer_not_found" });
+        return;
+      }
+      if (err.code === "warehouse_not_found") {
+        res.status(404).json({ error: "warehouse_not_found" });
         return;
       }
       next(err);

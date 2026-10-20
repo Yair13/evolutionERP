@@ -237,6 +237,126 @@ export async function recordCreditFromExitDocument(
   return { receivableId, balanceAmount };
 }
 
+export interface CreateManualReceivableInput {
+  warehouseId: string;
+  customerId: string;
+  invoiceNumber: string;
+  totalAmount: number;
+  balanceAmount?: number | null;
+  dueDate?: string | null;
+  issueDate?: string | null;
+  notes?: string | null;
+  userId?: string | null;
+}
+
+/**
+ * Crea manualmente una cuenta por cobrar (para saldos iniciales de clientes o facturas previas
+ * generadas antes de la puesta en marcha de Evolution ERP, sin alterar inventario físico).
+ */
+export async function createManualReceivable(
+  pool: pg.Pool,
+  input: CreateManualReceivableInput
+): Promise<ReceivableDetail> {
+  const {
+    warehouseId,
+    customerId,
+    invoiceNumber,
+    totalAmount,
+    dueDate,
+    issueDate,
+    notes,
+    userId,
+  } = input;
+
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+    throw Object.assign(new Error("invalid_total_amount"), { code: "invalid_total_amount" });
+  }
+
+  const rawBalance = input.balanceAmount != null ? Number(input.balanceAmount) : totalAmount;
+  if (!Number.isFinite(rawBalance) || rawBalance < 0 || rawBalance > totalAmount) {
+    throw Object.assign(new Error("invalid_balance_amount"), { code: "invalid_balance_amount" });
+  }
+
+  const balanceAmount = Math.round(rawBalance * 100) / 100;
+  const initialPayment = Math.round((totalAmount - balanceAmount) * 100) / 100;
+  const paidAmount = initialPayment;
+
+  const status: ReceivableStatus =
+    balanceAmount === 0 ? "paid" : initialPayment > 0 ? "partial" : "open";
+  const paidAt = balanceAmount === 0 ? new Date() : null;
+
+  // Si se especifica fecha de emisión anterior, se asigna como created_at para conservar trazabilidad
+  const createdAtValue =
+    issueDate && /^\d{4}-\d{2}-\d{2}/.test(issueDate)
+      ? `${issueDate}T12:00:00Z`
+      : new Date().toISOString();
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Verificar cliente
+    const { rows: custRows } = await client.query<{ id: string }>(
+      `SELECT id FROM customers WHERE id = $1::uuid`,
+      [customerId]
+    );
+    if (custRows.length === 0) {
+      throw Object.assign(new Error("customer_not_found"), { code: "customer_not_found" });
+    }
+
+    // Verificar sede
+    const { rows: whRows } = await client.query<{ id: string }>(
+      `SELECT id FROM warehouses WHERE id = $1::uuid`,
+      [warehouseId]
+    );
+    if (whRows.length === 0) {
+      throw Object.assign(new Error("warehouse_not_found"), { code: "warehouse_not_found" });
+    }
+
+    const { rows: arRows } = await client.query<{ id: string }>(
+      `
+      INSERT INTO accounts_receivable (
+        document_id, invoice_number, warehouse_id, customer_id,
+        total_amount, initial_payment, paid_amount, balance_amount,
+        status, due_date, notes, created_by, created_at, paid_at
+      )
+      VALUES (NULL, $1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11::uuid, $12::timestamptz, $13)
+      RETURNING id::text
+      `,
+      [
+        invoiceNumber.trim(),
+        warehouseId,
+        customerId,
+        totalAmount,
+        initialPayment,
+        paidAmount,
+        balanceAmount,
+        status,
+        dueDate ? dueDate.trim() : null,
+        notes?.trim() || null,
+        userId || null,
+        createdAtValue,
+        paidAt,
+      ]
+    );
+
+    const receivableId = arRows[0]!.id;
+
+    await client.query("COMMIT");
+
+    const detail = await getReceivableDetail(pool, receivableId);
+    if (!detail) {
+      throw new Error("receivable_not_found_after_create");
+    }
+    return detail;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 /**
  * Consulta la lista de cuentas por cobrar con filtros y totales.
  */

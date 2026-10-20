@@ -2393,7 +2393,13 @@ button.inv-pos__pick-media--expand:focus-visible {
     grid-column: 1 / -1;
   }
 
-  .inv-cart__price-edit--compact .inv-cart__price-label input {
+  .inv-cart__price-edit--compact .inv-cart__price-input-wrap {
+    width: 100%;
+    max-width: none;
+    min-height: 34px;
+  }
+
+  .inv-cart__price-edit--compact .inv-cart__price-input-wrap input {
     width: 100%;
     max-width: none;
     min-height: 34px;
@@ -2560,50 +2566,115 @@ button.inv-pos__pick-media--expand:focus-visible {
 .inv-cart__price-label {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
+  cursor: pointer;
 }
 
 .inv-cart__price-edit--compact .inv-cart__price-label {
   flex-direction: row;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .inv-cart__price-label-short {
   flex-shrink: 0;
-  font-size: 9px;
+  font-size: 10px;
+  font-weight: 700;
   letter-spacing: 0.02em;
+  color: var(--text-secondary, #475569);
+  white-space: nowrap;
+}
+
+.inv-cart__price-input-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface, #ffffff);
+  border: 1.5px solid var(--border, #cbd5e1);
+  border-radius: 8px;
+  padding: 0 6px;
+  cursor: text;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.inv-cart__price-input-wrap:hover {
+  border-color: var(--primary, #0284c7);
+  background: var(--surface-hover, #f8fafc);
+}
+
+.inv-cart__price-input-wrap:focus-within {
+  border-color: var(--primary, #0284c7);
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2);
+  background: #ffffff;
+}
+
+.inv-cart__price-currency {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted, #64748b);
+  margin-right: 2px;
+  user-select: none;
+}
+
+.inv-cart__price-input-wrap input {
+  border: none;
+  background: transparent;
+  padding: 4px 2px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary, #0f172a);
+  outline: none;
+  text-align: right;
+  width: 5.75rem;
+  min-height: 28px;
 }
 
 .inv-cart__price-label input {
-  width: 100%;
-  max-width: 9.5rem;
-  min-height: 32px;
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  font-family: inherit;
 }
 
-.inv-cart__price-edit--compact .inv-cart__price-label input {
-  width: 7.25rem;
-  max-width: none;
-  min-height: 30px;
-  padding: 4px 6px;
-  font-size: 12px;
-  text-align: right;
+.inv-cart__price-pencil {
+  color: var(--muted, #94a3b8);
+  margin-left: 4px;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, color 0.15s ease;
 }
 
-.inv-cart__price-label input.is-warning {
+.inv-cart__price-input-wrap:hover .inv-cart__price-pencil,
+.inv-cart__price-input-wrap:focus-within .inv-cart__price-pencil {
+  color: var(--primary, #0284c7);
+  opacity: 1;
+}
+
+.inv-cart__price-input-wrap.is-warning {
   border-color: #f59e0b;
   background: rgba(254, 243, 199, 0.45);
+}
+
+.inv-cart__price-input-wrap.is-modified {
+  border-color: #0284c7;
+  background: rgba(2, 132, 199, 0.06);
+}
+
+.inv-cart__price-custom-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #0369a1;
+  background: #e0f2fe;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-top: 1px;
+  align-self: flex-start;
+  white-space: nowrap;
 }
 
 .inv-cart__price-warning {
@@ -6057,7 +6128,13 @@ button.inv-pos__pick-media--expand:focus-visible {
     width: 100%;
   }
 
-  .inv-cart__price-edit--compact .inv-cart__price-label input {
+  .inv-cart__price-edit--compact .inv-cart__price-input-wrap {
+    width: 100%;
+    max-width: none;
+    min-height: 40px;
+  }
+
+  .inv-cart__price-edit--compact .inv-cart__price-input-wrap input {
     width: 100%;
     max-width: none;
     min-height: 40px;

@@ -13,6 +13,7 @@ import { useWarehouse } from "../../context/WarehouseContext.js";
 import { formatBogotaDate } from "../../lib/dateUtils.js";
 import { AddPaymentModal } from "../../components/finance/AddPaymentModal.js";
 import { ReceivableDetailModal } from "../../components/finance/ReceivableDetailModal.js";
+import { CreateReceivableModal } from "../../components/finance/CreateReceivableModal.js";
 import {
   Building2,
   Clock,
@@ -23,6 +24,7 @@ import {
   Wallet,
   ArrowDownRight,
   TrendingUp,
+  PlusCircle,
 } from "lucide-react";
 
 function formatMoney(n: number): string {
@@ -84,6 +86,7 @@ export function ReceivablesPage() {
   const [reportLoading, setReportLoading] = useState(false);
 
   // Modales
+  const [openCreateReceivable, setOpenCreateReceivable] = useState(false);
   const [activeReceivableForPayment, setActiveReceivableForPayment] = useState<ReceivableSummaryItem | null>(null);
   const [activeReceivableDetailId, setActiveReceivableDetailId] = useState<string | null>(null);
 
@@ -194,8 +197,18 @@ export function ReceivablesPage() {
           </div>
         </div>
 
-        {/* Pestañas de navegación */}
-        <div className="fin-header__actions">
+        {/* Pestañas de navegación y acciones */}
+        <div className="fin-header__actions" style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="fin-btn fin-btn--primary"
+            onClick={() => setOpenCreateReceivable(true)}
+            style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
+          >
+            <PlusCircle size={17} />
+            <span>+ Saldo Inicial / Factura Anterior</span>
+          </button>
+
           <div className="fin-tabs">
             <button
               type="button"
@@ -834,6 +847,17 @@ export function ReceivablesPage() {
           ) : null}
         </div>
       )}
+
+      {/* Modal para Registrar Saldo Inicial / Factura Anterior */}
+      <CreateReceivableModal
+        open={openCreateReceivable}
+        onClose={() => setOpenCreateReceivable(false)}
+        onSuccess={() => {
+          void loadCredits();
+          if (selectedCustId) void loadCustomerProfile(selectedCustId);
+          if (activeTab === "report") void loadReport();
+        }}
+      />
 
       {/* Modal para Registrar Abono */}
       {activeReceivableForPayment && (
