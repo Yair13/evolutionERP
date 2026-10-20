@@ -25,9 +25,9 @@ type Props = {
 
 function BarcodeSvg({
   value,
-  height = 115,
-  fontSize = 14,
-  widthFactor = 2.8,
+  height = 140,
+  fontSize = 15,
+  widthFactor = 2.7,
   className,
   style,
 }: {
@@ -70,10 +70,10 @@ function BarcodeSvg({
       style={{
         display: "block",
         margin: "0 auto",
-        width: "100%",
+        width: "90mm",
+        height: "30mm",
         maxWidth: "92mm",
         maxHeight: "32mm",
-        height: "auto",
         background: "#ffffff",
         ...style,
       }}
@@ -178,7 +178,7 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
             height: orientation === "vertical" ? "98mm" : "68mm",
             minHeight: orientation === "vertical" ? "98mm" : "68mm",
             maxHeight: orientation === "vertical" ? "98mm" : "68mm",
-            padding: orientation === "vertical" ? "5mm 4mm" : "4mm 6mm",
+            padding: orientation === "vertical" ? "4mm 4mm" : "3mm 5mm",
             display: "flex",
             flexDirection: "column",
             justifyContent: "space-between",
@@ -196,8 +196,8 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
               alignItems: "center",
               width: "100%",
               borderBottom: "2px solid #0d9488",
-              paddingBottom: "3px",
-              marginBottom: "3px",
+              paddingBottom: "2mm",
+              marginBottom: "2.5mm",
               flexShrink: 0,
             }}
           >
@@ -214,13 +214,13 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
               Fecha: {dateLabel}
             </div>
           </header>
-          <div className="inv-barcode-sheet__body" style={{ flexShrink: 0, margin: "2px 0 4px" }}>
+          <div className="inv-barcode-sheet__body" style={{ flexShrink: 0, margin: "2mm 0 2mm" }}>
             <p
               className="inv-barcode-sheet__name"
               style={{
                 fontSize: "20px",
                 fontWeight: 900,
-                margin: "0 0 3px",
+                margin: "0 0 2mm",
                 color: "#0f172a",
                 lineHeight: 1.15,
                 textTransform: "uppercase",
@@ -235,33 +235,39 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                fontSize: "12.5px",
+                fontSize: "12px",
                 color: "#475569",
                 lineHeight: 1.25,
+                whiteSpace: "nowrap",
               }}
             >
-              <span>Ref: <strong style={{ color: "#0f172a" }}>{sheet.referenceCode || "—"}</strong></span>
-              <span>Orden Prod: <strong style={{ color: "#0f172a" }}>{orderCode}</strong></span>
+              <span>REF: <strong style={{ color: "#0f172a", fontSize: "13px" }}>{sheet.referenceCode || "—"}</strong></span>
+              <span>OP: <strong style={{ color: "#0f172a", fontSize: "13px" }}>{orderCode}</strong></span>
             </div>
           </div>
           <div
             className="inv-barcode-sheet__code"
             style={{
-              flex: 1,
+              height: orientation === "vertical" ? "26mm" : "32mm",
+              marginTop: "3mm",
               display: "flex",
               flexDirection: "column",
               justifyContent: "flex-end",
               alignItems: "center",
               width: "100%",
-              minHeight: orientation === "vertical" ? "32mm" : "28mm",
-              marginTop: "auto",
             }}
           >
             <BarcodeSvg
               value={sheet.barcode}
-              height={orientation === "vertical" ? 90 : 115}
-              fontSize={14}
-              widthFactor={orientation === "vertical" ? 2.4 : 2.8}
+              height={orientation === "vertical" ? 100 : 140}
+              fontSize={15}
+              widthFactor={orientation === "vertical" ? 2.3 : 2.7}
+              style={{
+                width: orientation === "vertical" ? "62mm" : "90mm",
+                height: orientation === "vertical" ? "24mm" : "30mm",
+                maxWidth: orientation === "vertical" ? "62mm" : "92mm",
+                maxHeight: orientation === "vertical" ? "26mm" : "32mm",
+              }}
             />
           </div>
         </article>
@@ -389,16 +395,21 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
                   {firstPreviewItem.name}
                 </strong>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#475569", marginTop: 4 }}>
-                  <span>Ref: <b style={{ color: "#0f172a" }}>{firstPreviewItem.referenceCode || "—"}</b></span>
+                  <span>REF: <b style={{ color: "#0f172a" }}>{firstPreviewItem.referenceCode || "—"}</b></span>
                   <span>OP: <b style={{ color: "#0f172a" }}>{orderCode}</b></span>
                 </div>
               </div>
               <div style={{ textAlign: "center", marginTop: "auto" }}>
                 <BarcodeSvg
                   value={firstPreviewItem.barcode}
-                  height={orientation === "vertical" ? 65 : 75}
-                  fontSize={13}
-                  widthFactor={orientation === "vertical" ? 2.0 : 2.4}
+                  height={orientation === "vertical" ? 90 : 120}
+                  fontSize={14}
+                  widthFactor={orientation === "vertical" ? 2.2 : 2.5}
+                  style={{
+                    width: "100%",
+                    height: orientation === "vertical" ? "70px" : "85px",
+                    maxHeight: "95px",
+                  }}
                 />
               </div>
             </div>
