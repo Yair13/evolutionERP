@@ -33,10 +33,22 @@ const BARCODE_PRINT = {
 };
 
 export function printBarcodeLabelSheet() {
+  let pageStyle = document.getElementById("inv-print-page-size");
+  if (!pageStyle) {
+    pageStyle = document.createElement("style");
+    pageStyle.id = "inv-print-page-size";
+    document.head.appendChild(pageStyle);
+  }
+  pageStyle.textContent = "@page { size: 100mm 70mm; margin: 0; }";
+
+  document.body.classList.remove("inv-print-invoice");
   document.body.classList.add("inv-print-barcode-label");
   window.addEventListener(
     "afterprint",
-    () => document.body.classList.remove("inv-print-barcode-label"),
+    () => {
+      document.body.classList.remove("inv-print-barcode-label");
+      document.getElementById("inv-print-page-size")?.remove();
+    },
     { once: true }
   );
   window.print();

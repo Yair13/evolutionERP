@@ -1,5 +1,5 @@
 import JsBarcode from "jsbarcode";
-import { Printer, Tag, X } from "lucide-react";
+import { Compass, Printer, Tag, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { markLabelsPrinted } from "../../api/inventory.js";
@@ -23,42 +23,57 @@ type Props = {
   onPrinted: (updated: InventoryDocumentDetail) => void;
 };
 
-function BarcodeCanvas({ value }: { value: string }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+function BarcodeSvg({
+  value,
+  height = 50,
+  fontSize = 13,
+  className,
+  style,
+}: {
+  value: string;
+  height?: number;
+  fontSize?: number;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
 
   useEffect(() => {
-    if (!canvasRef.current || !value) return;
+    if (!svgRef.current || !value) return;
     try {
-      JsBarcode(canvasRef.current, value, {
+      JsBarcode(svgRef.current, value, {
         format: "CODE128",
-        width: 2,
-        height: 48,
+        width: 2.2,
+        height,
         displayValue: true,
         font: "monospace",
-        fontSize: 13,
+        fontSize,
         fontOptions: "bold",
         textMargin: 3,
-        margin: 4,
+        margin: 2,
         background: "#ffffff",
         lineColor: "#000000",
       });
     } catch (e) {
       console.error("Barcode render error:", e);
     }
-  }, [value]);
+  }, [value, height, fontSize]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="inv-barcode-sheet__canvas"
+    <svg
+      ref={svgRef}
+      role="img"
+      aria-label={`Código ${value}`}
+      className={className}
       style={{
         display: "block",
         margin: "0 auto",
-        maxWidth: "100%",
-        maxHeight: "24mm",
+        maxWidth: "92mm",
+        maxHeight: "26mm",
+        width: "auto",
         height: "auto",
         background: "#ffffff",
-        imageRendering: "pixelated",
+        ...style,
       }}
     />
   );
@@ -68,9 +83,14 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
   const [portalReady, setPortalReady] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [orientation, setOrientation] = useState<"horizontal" | "vertical">("horizontal");
 
   useEffect(() => {
     setPortalReady(true);
+    return () => {
+      document.body.classList.remove("inv-print-barcode-label");
+      document.getElementById("inv-print-page-size")?.remove();
+    };
   }, []);
 
   const orderCode = doc.productionOrderCode || doc.invoiceNumber || "—";
@@ -99,11 +119,22 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
     setPrinting(true);
     setError(null);
 
+    // Inyectar tamaño de página exacto para que el diálogo del navegador no use Carta ni rote incorrectamente
+    let pageStyle = document.getElementById("inv-print-page-size");
+    if (!pageStyle) {
+      pageStyle = document.createElement("style");
+      pageStyle.id = "inv-print-page-size";
+      document.head.appendChild(pageStyle);
+    }
+    const pageSize = orientation === "vertical" ? "70mm 100mm" : "100mm 70mm";
+    pageStyle.textContent = `@page { size: ${pageSize}; margin: 0; }`;
+
     document.body.classList.remove("inv-print-invoice");
     document.body.classList.add("inv-print-barcode-label");
 
     const clear = () => {
       document.body.classList.remove("inv-print-barcode-label");
+      document.getElementById("inv-print-page-size")?.remove();
     };
 
     const finish = async () => {
@@ -130,10 +161,16 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
     }))
   );
 
+  const firstPreviewItem = labelItems[0];
+
   const printSheet = (
     <div className="inv-barcode-print-container" id="inv-barcode-label-print">
       {sheets.map((sheet) => (
-        <article key={sheet.key} className="inv-barcode-sheet" aria-label="Etiqueta adhesiva">
+        <article
+          key={sheet.key}
+          className={`inv-barcode-sheet ${orientation === "vertical" ? "inv-barcode-sheet--vertical" : ""}`}
+          aria-label="Etiqueta adhesiva"
+        >
           <header
             className="inv-barcode-sheet__brand"
             style={{
@@ -162,7 +199,7 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
           <div className="inv-barcode-sheet__body" style={{ marginBottom: "4px" }}>
             <p
               className="inv-barcode-sheet__name"
-              style={{ fontSize: "13px", fontWeight: 800, margin: "0 0 2px", color: "#0f172a", lineHeight: 1.15 }}
+              style={{ fontSize: "14px", fontWeight: 800, margin: "0 0 2px", color: "#0f172a", lineHeight: 1.15 }}
             >
               {sheet.name}
             </p>
@@ -187,7 +224,11 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
             </p>
           </div>
           <div className="inv-barcode-sheet__code" style={{ textAlign: "center" }}>
-            <BarcodeCanvas value={sheet.barcode} />
+            <BarcodeSvg
+              value={sheet.barcode}
+              height={orientation === "vertical" ? 44 : 52}
+              fontSize={13}
+            />
           </div>
         </article>
       ))}
@@ -200,7 +241,7 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
         className="inv-modal"
         role="dialog"
         aria-labelledby="op-labels-title"
-        style={{ width: "min(520px, calc(100vw - 32px))", maxHeight: "90vh", overflow: "auto" }}
+        style={{ width: "min(560px, calc(100vw - 32px))", maxHeight: "92vh", overflow: "auto" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
@@ -224,6 +265,131 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
           </p>
         ) : null}
 
+        {/* Selector de orientación */}
+        <div
+          style={{
+            marginTop: 14,
+            padding: "10px 14px",
+            borderRadius: 10,
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600 }}>
+            <Compass size={16} strokeWidth={2} aria-hidden />
+            <span>Orientación de etiqueta:</span>
+          </div>
+          <div style={{ display: "flex", gap: 12 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="label-orientation"
+                value="horizontal"
+                checked={orientation === "horizontal"}
+                onChange={() => setOrientation("horizontal")}
+              />
+              Horizontal (100 × 70 mm)
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="label-orientation"
+                value="vertical"
+                checked={orientation === "vertical"}
+                onChange={() => setOrientation("vertical")}
+              />
+              Vertical (70 × 100 mm)
+            </label>
+          </div>
+        </div>
+
+        {/* Vista previa en pantalla */}
+        {firstPreviewItem ? (
+          <div style={{ marginTop: 14 }}>
+            <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase" }}>
+              Vista previa · {orientation === "horizontal" ? "10 × 7 cm (Horizontal)" : "7 × 10 cm (Vertical)"}
+            </p>
+            <div
+              style={{
+                width: orientation === "horizontal" ? "320px" : "240px",
+                maxWidth: "100%",
+                padding: "12px 14px",
+                border: "1px solid #cbd5e1",
+                borderRadius: "10px",
+                background: "#ffffff",
+                boxShadow: "0 4px 12px rgba(15, 23, 42, 0.06)",
+                margin: "0 auto",
+                boxSizing: "border-box",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  borderBottom: "1.5px solid #0d9488",
+                  paddingBottom: 4,
+                  marginBottom: 6,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <img src={LOGO_SRC} alt="" width={26} height={26} style={{ objectFit: "contain" }} />
+                  <div>
+                    <strong style={{ fontSize: 12, color: "#0f766e", display: "block", lineHeight: 1.1 }}>Evolution</strong>
+                    <span style={{ fontSize: 8, color: "#64748b", textTransform: "uppercase" }}>Colchones S.A.S</span>
+                  </div>
+                </div>
+                <span style={{ fontSize: 9.5, color: "#475569", fontWeight: "bold" }}>Fecha: {dateLabel}</span>
+              </div>
+              <div style={{ marginBottom: 6 }}>
+                <strong style={{ display: "block", fontSize: 13, color: "#0f172a", lineHeight: 1.2 }}>
+                  {firstPreviewItem.name}
+                </strong>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#475569", marginTop: 2 }}>
+                  <span>Ref: {firstPreviewItem.referenceCode || "—"}</span>
+                </div>
+                <p style={{ margin: "2px 0 0", fontSize: 10.5, fontWeight: "bold", color: "#0f172a" }}>
+                  Orden Prod: {orderCode}
+                </p>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <BarcodeSvg
+                  value={firstPreviewItem.barcode}
+                  height={orientation === "vertical" ? 42 : 46}
+                  fontSize={12}
+                />
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Guía para el diálogo de impresión de Chrome */}
+        <div
+          style={{
+            marginTop: 14,
+            padding: "10px 12px",
+            borderRadius: 8,
+            background: "rgba(13, 148, 136, 0.08)",
+            border: "1px solid rgba(13, 148, 136, 0.25)",
+            fontSize: 12,
+            color: "#0f766e",
+            lineHeight: 1.45,
+          }}
+        >
+          <strong>Ajustes al presionar Imprimir (diálogo de Chrome):</strong>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 6, marginTop: 4 }}>
+            <span>• <b>Destino:</b> Tu térmica</span>
+            <span>• <b>Diseño:</b> {orientation === "horizontal" ? "Horizontal" : "Vertical"}</span>
+            <span>• <b>Márgenes:</b> Ninguno</span>
+            <span>• <b>Escala:</b> 100%</span>
+          </div>
+        </div>
+
         {labelItems.length === 0 ? (
           <p style={{ marginTop: 14, color: "var(--muted)", fontSize: 13 }}>
             Esta orden no tiene productos con código de barras. No hay etiquetas para imprimir.
@@ -237,8 +403,8 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
                   display: "flex",
                   justifyContent: "space-between",
                   gap: 12,
-                  padding: "10px 12px",
-                  borderRadius: 10,
+                  padding: "8px 12px",
+                  borderRadius: 8,
                   border: "1px solid var(--border)",
                   background: "var(--surface)",
                 }}

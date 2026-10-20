@@ -4431,6 +4431,22 @@ button.inv-pos__pick-media--expand:focus-visible {
   z-index: -1;
 }
 
+#inv-egress-voucher-print {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 100mm;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.inv-voucher-sheet {
+  box-sizing: border-box;
+  font-family: system-ui, "Segoe UI", -apple-system, sans-serif;
+  color: #000;
+  background: #fff;
+}
+
 /* Hoja de etiqueta (pantalla mock + impresión) */
 .inv-barcode-sheet {
   box-sizing: border-box;
@@ -6460,6 +6476,13 @@ button.inv-pos__pick-media--expand:focus-visible {
     print-color-adjust: exact;
   }
 
+  body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet.inv-barcode-sheet--vertical {
+    width: 70mm !important;
+    height: 98mm !important;
+    max-height: 98mm !important;
+    padding: 4mm 4mm !important;
+  }
+
   body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet:last-child {
     page-break-after: auto !important;
     break-after: auto !important;
@@ -6473,49 +6496,107 @@ button.inv-pos__pick-media--expand:focus-visible {
   }
 
   body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet__logo {
-    width: 9.5mm !important;
-    height: 9.5mm !important;
+    width: 10.5mm !important;
+    height: 10.5mm !important;
   }
 
   body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet__brand-text strong {
-    font-size: 11pt !important;
+    font-size: 12pt !important;
   }
 
   body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet__brand-text span {
-    font-size: 7.5pt !important;
+    font-size: 8pt !important;
   }
 
   body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet__name {
-    font-size: 11pt !important;
+    font-size: 14pt !important;
+    font-weight: 800 !important;
     line-height: 1.15 !important;
     -webkit-line-clamp: 2 !important;
   }
 
   body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet__ref {
-    font-size: 9.5pt !important;
+    font-size: 10.5pt !important;
+    font-weight: 600 !important;
   }
 
   body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet__op {
-    font-size: 9.5pt !important;
+    font-size: 10.5pt !important;
+    font-weight: 700 !important;
   }
 
   body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet__price {
-    font-size: 9.5pt !important;
+    font-size: 10.5pt !important;
     margin-top: 1mm !important;
   }
 
   body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet__code canvas,
   body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet__code svg {
     max-width: 90mm !important;
-    max-height: 23mm !important;
+    max-height: 26mm !important;
     width: auto !important;
     height: auto !important;
     margin: 0 auto !important;
   }
 
+  body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet.inv-barcode-sheet--vertical .inv-barcode-sheet__code canvas,
+  body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet.inv-barcode-sheet--vertical .inv-barcode-sheet__code svg {
+    max-width: 62mm !important;
+    max-height: 24mm !important;
+  }
+
   body.inv-print-barcode-label #inv-barcode-label-print .inv-barcode-sheet__digits {
-    font-size: 9pt !important;
+    font-size: 10pt !important;
     letter-spacing: 0.1em !important;
+  }
+
+  @page inv-voucher-label-page {
+    size: 100mm 70mm;
+    margin: 0;
+  }
+
+  body.inv-print-egress-voucher {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    page: inv-voucher-label-page;
+  }
+
+  body.inv-print-egress-voucher > *:not(#inv-egress-voucher-print) {
+    display: none !important;
+  }
+
+  body.inv-print-egress-voucher #inv-egress-voucher-print {
+    display: block !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    z-index: auto !important;
+    page: inv-voucher-label-page;
+  }
+
+  body.inv-print-egress-voucher #inv-egress-voucher-print .inv-voucher-sheet {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    width: 100mm !important;
+    height: 68mm !important;
+    max-height: 68mm !important;
+    padding: 2.5mm 3.5mm !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    background: #fff !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    page: inv-voucher-label-page;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   /* Comprobante — solo la mitad superior de la hoja carta */
