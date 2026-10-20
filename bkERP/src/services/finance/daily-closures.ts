@@ -288,7 +288,7 @@ async function getReceiptAuditItemsBetween(
       co.receipt_filename AS "receiptFilename",
       COALESCE(co.receipt_urls, '[]'::jsonb) AS "receiptUrls",
       co.created_at AS "createdAt",
-      co.reason
+      co.concept AS "reason"
     FROM cash_outflows co
     WHERE co.warehouse_id = $1::uuid
       ${fromTime ? `AND co.created_at > '${fromTime}'::timestamptz` : ""}
