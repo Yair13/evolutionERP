@@ -391,12 +391,19 @@ export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
                     disabled={initialNum <= 0}
                     style={{ width: "100%", boxSizing: "border-box" }}
                   >
-                    {PAYMENT_METHODS.map((m) => (
+                    {PAYMENT_METHODS.filter(
+                      (m) => isAllWarehouses || m.value === "efectivo" || m.value === "saldo_a_favor"
+                    ).map((m) => (
                       <option key={m.value} value={m.value}>
                         {m.label}
                       </option>
                     ))}
                   </select>
+                  {!isAllWarehouses && (
+                    <small style={{ color: "#b45309", fontSize: "0.74rem" }}>
+                      Sede física: solo efectivo
+                    </small>
+                  )}
                 </label>
               </div>
 

@@ -93,11 +93,14 @@ export function CreatePayrollPaymentModal({
         setSelectedWarehouseId(emp.warehouseId);
       }
 
-      if (emp.bankName && emp.bankName.toLowerCase() !== "efectivo") {
+      // Sedes físicas: solo efectivo. La cuenta del empleado solo se usa desde la Sede Administrativa.
+      if (isAllWarehouses && emp.bankName && emp.bankName.toLowerCase() !== "efectivo") {
         setPaymentMethod(emp.bankName.toLowerCase().includes("nequi") ? "nequi" : emp.bankName.toLowerCase().includes("davivienda") ? "davivienda" : "bancolombia");
+      } else if (!isAllWarehouses) {
+        setPaymentMethod("efectivo");
       }
     }
-  }, [employeeId, employees]);
+  }, [employeeId, employees, isAllWarehouses]);
 
   const numBase = parseFloat(baseSalary.replace(/[^0-9.]/g, "")) || 0;
   const numBonuses = parseFloat(bonuses.replace(/[^0-9.]/g, "")) || 0;
@@ -234,7 +237,7 @@ export function CreatePayrollPaymentModal({
 
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           {/* Selección de Colaborador y Sede */}
-          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: "0.75rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)", gap: "0.75rem" }}>
             <label className="field" style={{ margin: 0 }}>
               <span>Colaborador / Empleado *</span>
               <select
@@ -311,7 +314,7 @@ export function CreatePayrollPaymentModal({
             <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "#475569", display: "block", marginBottom: 8 }}>
               Período y Fechas de Liquidación
             </span>
-            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr 1fr", gap: "0.5rem" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "0.5rem" }}>
               <label className="field" style={{ margin: 0 }}>
                 <span>Concepto Período</span>
                 <input
@@ -364,7 +367,7 @@ export function CreatePayrollPaymentModal({
             <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "#475569", display: "block", marginBottom: 8 }}>
               Cálculo de Liquidación Salarial
             </span>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "0.75rem", alignItems: "end" }}>
               <label className="field" style={{ margin: 0 }}>
                 <span>Sueldo Base ($ COP)</span>
                 <input
@@ -443,15 +446,24 @@ export function CreatePayrollPaymentModal({
             <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "0.75rem", marginBottom: "0.75rem" }}>
               <label className="field" style={{ margin: 0 }}>
                 <span>Forma de Pago</span>
-                <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+                <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} disabled={!isAllWarehouses}>
                   <option value="efectivo">💵 Efectivo (Caja de Sede)</option>
-                  <option value="bancolombia">🟡 Bancolombia (Transferencia)</option>
-                  <option value="davivienda">🔴 Davivienda (Transferencia)</option>
-                  <option value="nequi">🟣 Nequi (Transferencia)</option>
-                  <option value="daviplata">📱 Daviplata (Transferencia)</option>
-                  <option value="bold">🔵 Bold</option>
-                  <option value="transferencia">🏦 Otra Transferencia Bancaria</option>
+                  {isAllWarehouses && (
+                    <>
+                      <option value="bancolombia">🟡 Bancolombia (Transferencia)</option>
+                      <option value="davivienda">🔴 Davivienda (Transferencia)</option>
+                      <option value="nequi">🟣 Nequi (Transferencia)</option>
+                      <option value="daviplata">📱 Daviplata (Transferencia)</option>
+                      <option value="bold">🔵 Bold</option>
+                      <option value="transferencia">🏦 Otra Transferencia Bancaria</option>
+                    </>
+                  )}
                 </select>
+                {!isAllWarehouses && (
+                  <small style={{ color: "#b45309", fontSize: "0.74rem" }}>
+                    Sede física: nómina solo en efectivo. Pagos por cuenta desde la Sede Administrativa.
+                  </small>
+                )}
               </label>
 
               {!isCash && (

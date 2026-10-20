@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { assertOutflowPaymentMethodAllowed } from "../../lib/outflow-policy.js";
 
 export interface CashOutflowItem {
   id: string;
@@ -122,6 +123,8 @@ export async function createCashOutflow(
     receiptUrl?: string | null;
     receiptUrls?: string[] | null;
     receiptFilename?: string | null;
+    /** true si la operación se hace desde la Sede Administrativa (permite pagar con cuentas). */
+    fromAdminSession?: boolean;
   }
 ): Promise<CashOutflowItem> {
   const {
@@ -139,6 +142,7 @@ export async function createCashOutflow(
     receiptUrl,
     receiptUrls,
     receiptFilename,
+    fromAdminSession,
   } = params;
 
   if (amount <= 0) {
@@ -157,9 +161,9 @@ export async function createCashOutflow(
   try {
     await client.query("BEGIN");
 
-    // Verificar si la sede es la Bodega Principal
-    const { rows: whRows } = await client.query<{ is_main: boolean; code: string; name: string }>(
-      `SELECT COALESCE(is_main, false) AS is_main, code, name FROM warehouses WHERE id = $1::uuid`,
+    // Verificar que la sede exista
+    const { rows: whRows } = await client.query<{ code: string; name: string }>(
+      `SELECT code, name FROM warehouses WHERE id = $1::uuid`,
       [warehouseId]
     );
 
@@ -167,19 +171,8 @@ export async function createCashOutflow(
       throw Object.assign(new Error("warehouse_not_found"), { code: "warehouse_not_found" });
     }
 
-    const wh = whRows[0];
-    const isMainWarehouse = wh.is_main === true || wh.code === "MAIN" || wh.name.toLowerCase().includes("principal");
-
-    // REGLA: Los pagos con cuentas bancarias solo están permitidos desde la bodega principal (administrada por secretaría)
-    if (!isMainWarehouse && paymentMethod !== "efectivo") {
-      throw Object.assign(
-        new Error("bank_account_restricted_to_main_warehouse"),
-        {
-          code: "bank_account_restricted_to_main_warehouse",
-          message: "Las salidas de dinero o pagos mediante cuentas bancarias solo pueden realizarse desde la Bodega Principal. En esta sede solo se permite salida en Efectivo.",
-        }
-      );
-    }
+    // REGLA: Las sedes físicas solo sacan dinero en efectivo; las cuentas solo desde la Sede Administrativa
+    assertOutflowPaymentMethodAllowed(paymentMethod, fromAdminSession === true);
 
     const voucherNumber = await nextOutflowVoucherNumber(client, warehouseId);
 
@@ -492,6 +485,8 @@ export async function createCashTransfer(
     senderReceiptUrl?: string | null;
     senderReceiptUrls?: string[] | null;
     senderReceiptFilename?: string | null;
+    /** true si la operación se hace desde la Sede Administrativa (permite traslado bancario). */
+    fromAdminSession?: boolean;
   }
 ): Promise<CashTransferItem> {
   const {
@@ -506,6 +501,7 @@ export async function createCashTransfer(
     senderReceiptUrl,
     senderReceiptUrls,
     senderReceiptFilename,
+    fromAdminSession,
   } = params;
 
   if (amount <= 0) {
@@ -535,8 +531,8 @@ export async function createCashTransfer(
     await client.query("BEGIN");
 
     // Verificar sedes
-    const { rows: origWh } = await client.query<{ name: string; is_main: boolean; code: string }>(
-      `SELECT name, COALESCE(is_main, false) AS is_main, code FROM warehouses WHERE id = $1::uuid`,
+    const { rows: origWh } = await client.query<{ name: string; code: string }>(
+      `SELECT name, code FROM warehouses WHERE id = $1::uuid`,
       [originWarehouseId]
     );
     const { rows: destWh } = await client.query<{ name: string }>(
@@ -548,16 +544,8 @@ export async function createCashTransfer(
       throw Object.assign(new Error("warehouse_not_found"), { code: "warehouse_not_found" });
     }
 
-    const isMainOrigin = origWh[0].is_main || origWh[0].code === "MAIN" || origWh[0].name.toLowerCase().includes("principal");
-    if (!isMainOrigin && paymentMethod !== "efectivo") {
-      throw Object.assign(
-        new Error("bank_account_restricted_to_main_warehouse"),
-        {
-          code: "bank_account_restricted_to_main_warehouse",
-          message: "Los traslados bancarios solo pueden originarse desde la Bodega Principal.",
-        }
-      );
-    }
+    // REGLA: desde sedes físicas el traslado solo es en efectivo; bancario solo desde la Sede Administrativa
+    assertOutflowPaymentMethodAllowed(paymentMethod, fromAdminSession === true);
 
     const code = await nextTransferCode(client, originWarehouseId);
 

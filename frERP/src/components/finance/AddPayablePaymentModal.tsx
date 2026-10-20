@@ -46,7 +46,7 @@ export function AddPayablePaymentModal({
   onSuccess,
 }: Props) {
   const { token } = useAuth();
-  const { warehouseId } = useWarehouse();
+  const { warehouseId, isAllWarehouses } = useWarehouse();
   const targetWh = warehouseId || payable?.warehouseId;
 
   const [amountStr, setAmountStr] = useState<string>("");
@@ -322,12 +322,19 @@ export function AddPayablePaymentModal({
               <label className="field">
                 <span>Medio de pago *</span>
                 <select value={method} onChange={(e) => setMethod(e.target.value)}>
-                  {PAYMENT_METHODS.map((m) => (
+                  {PAYMENT_METHODS.filter(
+                    (m) => isAllWarehouses || m.value === "efectivo" || m.value === "saldo_a_favor"
+                  ).map((m) => (
                     <option key={m.value} value={m.value}>
                       {m.label}
                     </option>
                   ))}
                 </select>
+                {!isAllWarehouses && (
+                  <small style={{ color: "#b45309", fontSize: "0.74rem" }}>
+                    Sede física: solo pagos en efectivo. Pagos por cuentas desde la Sede Administrativa.
+                  </small>
+                )}
               </label>
 
               <label className="field">

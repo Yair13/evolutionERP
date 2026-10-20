@@ -3,6 +3,7 @@ import { getTodayBogotaYmd, getFirstDayOfMonthBogotaYmd, addDaysYmd } from "../l
 import { getPool } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { isUuid } from "../lib/uuid.js";
+import { isAdminSessionRequest, rejectIfOutflowMethodNotAllowed } from "../lib/outflow-policy.js";
 import {
   addReceivablePayment,
   getCustomerCreditProfile,
@@ -889,6 +890,8 @@ export function createFinanceRouter(): Router {
     const paymentMethod = typeof req.body?.paymentMethod === "string" ? req.body.paymentMethod : "efectivo";
     const referenceCode = typeof req.body?.referenceCode === "string" ? req.body.referenceCode : null;
 
+    if (initialPayment > 0 && rejectIfOutflowMethodNotAllowed(req, res, paymentMethod)) return;
+
     try {
       const result = await createAccountPayable(pool, {
         supplierId,
@@ -994,6 +997,8 @@ export function createFinanceRouter(): Router {
       ? req.body.receiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
       : null;
     const receiptFilename = typeof req.body?.receiptFilename === "string" ? req.body.receiptFilename : null;
+
+    if (rejectIfOutflowMethodNotAllowed(req, res, paymentMethod)) return;
 
     try {
       const result = await addPayablePayment(pool, {
@@ -1166,6 +1171,8 @@ export function createFinanceRouter(): Router {
       : null;
     const receiptFilename = typeof req.body?.receiptFilename === "string" ? req.body.receiptFilename : null;
 
+    if (rejectIfOutflowMethodNotAllowed(req, res, paymentMethod)) return;
+
     try {
       const item = await createCashOutflow(pool, {
         warehouseId,
@@ -1182,14 +1189,12 @@ export function createFinanceRouter(): Router {
         receiptUrl,
         receiptUrls,
         receiptFilename,
+        fromAdminSession: isAdminSessionRequest(req),
       });
       res.status(201).json({ item });
     } catch (err: any) {
-      if (err.code === "bank_account_restricted_to_main_warehouse") {
-        res.status(403).json({
-          error: "bank_account_restricted_to_main_warehouse",
-          message: err.message,
-        });
+      if (err.code === "physical_site_cash_only") {
+        res.status(400).json({ error: err.message, code: err.code });
         return;
       }
       if (err.code === "concept_required" || err.code === "beneficiary_required" || err.code === "invalid_amount") {
@@ -1320,6 +1325,8 @@ export function createFinanceRouter(): Router {
       : null;
     const senderReceiptFilename = typeof req.body?.senderReceiptFilename === "string" ? req.body.senderReceiptFilename : null;
 
+    if (rejectIfOutflowMethodNotAllowed(req, res, paymentMethod)) return;
+
     try {
       const item = await createCashTransfer(pool, {
         originWarehouseId,
@@ -1333,11 +1340,12 @@ export function createFinanceRouter(): Router {
         senderReceiptUrl,
         senderReceiptUrls,
         senderReceiptFilename,
+        fromAdminSession: isAdminSessionRequest(req),
       });
       res.status(201).json({ item });
     } catch (err: any) {
-      if (err.code === "bank_account_restricted_to_main_warehouse") {
-        res.status(403).json({ error: err.code, message: err.message });
+      if (err.code === "physical_site_cash_only") {
+        res.status(400).json({ error: err.message, code: err.code });
         return;
       }
       if (err.code === "origin_destination_same" || err.code === "carrier_required" || err.code === "invalid_amount") {
@@ -1715,6 +1723,9 @@ export function createFinanceRouter(): Router {
       res.status(400).json({ error: "payment_method_required" });
       return;
     }
+
+    // Sedes físicas: nómina solo en efectivo. Pagos por cuentas solo desde la Sede Administrativa.
+    if (rejectIfOutflowMethodNotAllowed(req, res, body.paymentMethod)) return;
 
     try {
       const item = await createPayrollPayment(pool, {

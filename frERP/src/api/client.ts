@@ -12,8 +12,21 @@ async function parseError(res: Response): Promise<string> {
   return res.statusText || "Error";
 }
 
+/**
+ * Indica al backend si la sesión actual es la Sede Administrativa.
+ * Regla: solo la Sede Administrativa puede pagar/egresar con cuentas; las sedes físicas solo en efectivo.
+ * (El backend además valida que el usuario realmente tenga acceso administrativo.)
+ */
+function sessionScopeHeaders(): Record<string, string> {
+  try {
+    return localStorage.getItem("evolution_erp_warehouse") === "__all__" ? { "X-Session-Scope": "admin" } : {};
+  } catch {
+    return {};
+  }
+}
+
 export async function apiPost<T>(path: string, body: unknown, token?: string): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...sessionScopeHeaders() };
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`${base}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(await parseError(res));

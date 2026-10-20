@@ -33,11 +33,8 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
     (w) => w.is_active && w.id !== originWarehouseId
   );
 
-  const originWh = warehouses.find((w) => w.id === originWarehouseId);
-  const isMainOrigin =
-    Boolean(originWh?.is_factory) ||
-    originWh?.code === "MAIN" ||
-    (originWh?.name || "").toLowerCase().includes("principal");
+  // REGLA GENERAL: desde sedes físicas solo efectivo; traslado bancario solo desde la Sede Administrativa
+  const isMainOrigin = isAllWarehouses;
 
   useEffect(() => {
     if (open) {

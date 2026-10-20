@@ -69,12 +69,9 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Determinar si la sede seleccionada es la Bodega Principal
+  // REGLA GENERAL: solo la Sede Administrativa puede pagar con cuentas; las sedes físicas solo en efectivo
   const currentWh = warehouses.find((w) => w.id === selectedWarehouseId);
-  const isMainWarehouse =
-    Boolean(currentWh?.is_factory) ||
-    currentWh?.code === "MAIN" ||
-    (currentWh?.name || "").toLowerCase().includes("principal");
+  const isMainWarehouse = isAllWarehouses;
 
   useEffect(() => {
     if (open) {
@@ -188,7 +185,7 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
     }
 
     if (!isMainWarehouse && paymentMethod !== "efectivo") {
-      setError("En esta sede solo se permite la salida de dinero en Efectivo.");
+      setError("Las sedes físicas solo pueden sacar dinero en Efectivo. Los pagos por cuentas se hacen desde la Sede Administrativa.");
       return;
     }
 
@@ -233,8 +230,8 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
       onSuccess(res.item);
       onClose();
     } catch (err: any) {
-      if (err.message === "bank_account_restricted_to_main_warehouse") {
-        setError("Las salidas bancarias solo están permitidas desde la Bodega Principal.");
+      if (err.message === "physical_site_cash_only") {
+        setError("Las sedes físicas solo pueden sacar dinero en Efectivo. Los pagos por cuentas se hacen desde la Sede Administrativa.");
       } else {
         setError(err instanceof Error ? err.message : "Error al registrar el egreso.");
       }
@@ -405,7 +402,7 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
             >
               <AlertCircle size={18} style={{ flexShrink: 0 }} />
               <span>
-                <strong>Sede Operativa:</strong> Las salidas de dinero se realizan exclusivamente en <strong>Efectivo</strong> de caja menor. Las transferencias por banco se autorizan desde la Bodega Principal.
+                <strong>Sede física:</strong> Las salidas de dinero se realizan exclusivamente en <strong>Efectivo</strong> de la caja de la sede. Los pagos por cuentas bancarias solo se hacen desde la Sede Administrativa.
               </span>
             </div>
           ) : (
@@ -424,7 +421,7 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
             >
               <span style={{ fontSize: "1.15rem", flexShrink: 0 }}>🏢</span>
               <span>
-                <strong>Bodega Principal (Secretaría):</strong> Autorizada para egresos en efectivo y giros bancarios directos.
+                <strong>Sede Administrativa:</strong> Autorizada para egresos en efectivo y pagos por cuentas bancarias.
               </span>
             </div>
           )}
