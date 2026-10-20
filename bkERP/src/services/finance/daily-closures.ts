@@ -38,6 +38,7 @@ export interface DailyClosureWorksheet {
   closureDate: string;
   openingCash: number;
   suggestedOpeningCash: number;
+  hasPreviousClosure: boolean;
   isExistingClosure: boolean;
   existingClosureId: string | null;
   existingStatus: string | null;
@@ -74,6 +75,7 @@ export interface DailyClosureWorksheet {
   // Auditoría de comprobantes
   receiptAuditList: ReceiptAuditItem[];
   pendingReceiptsCount: number;
+  existingBankBreakdown?: Record<string, number>;
 }
 
 export interface DailyClosureRecord {
@@ -99,6 +101,7 @@ export interface DailyClosureRecord {
   pendingReceiptsCount: number;
   cashierName: string | null;
   notes: string | null;
+  paymentBreakdown?: { method: string; label: string; amount: number }[];
   createdBy: string | null;
   createdByName?: string | null;
   submittedAt: string | null;
@@ -173,7 +176,11 @@ export async function getDailyClosureData(
     suggestedOpening = Number(prevGenRows[0].cash_to_keep || 0);
   }
 
-  const openingCash = existing ? Number(existing.opening_cash) : suggestedOpening;
+  const hasPreviousClosure = Boolean(prevRows[0] || prevGenRows[0]);
+
+  // Saldo de arranque (base): si existe cierre anterior más reciente, se toma su saldo.
+  // Si no hay cierre anterior (primer cierre), se permite configurar la base inicial.
+  const openingCash = hasPreviousClosure ? suggestedOpening : (existing ? Number(existing.opening_cash) : 0);
 
   // 4. Entradas de efectivo en el día
   // 4a. Ventas en efectivo desde inventory_documents
@@ -696,6 +703,17 @@ export async function getDailyClosureData(
 
   const pendingReceiptsCount = auditList.filter((a) => a.isMissing).length;
 
+  const existingBankBreakdown: Record<string, number> = {};
+  if (existing) {
+    const { rows: exBdRows } = await pool.query<{ method_code: string; amount: string }>(
+      `SELECT method_code, amount::float FROM closure_payment_breakdown WHERE daily_closure_id = $1::uuid`,
+      [existing.id]
+    );
+    for (const r of exBdRows) {
+      existingBankBreakdown[r.method_code] = Number(r.amount);
+    }
+  }
+
   return {
     warehouseId: wh.id,
     warehouseCode: wh.code,
@@ -703,6 +721,7 @@ export async function getDailyClosureData(
     closureDate: date,
     openingCash,
     suggestedOpeningCash: suggestedOpening,
+    hasPreviousClosure,
     isExistingClosure: Boolean(existing),
     existingClosureId: existing?.id || null,
     existingStatus: existing?.status || null,
@@ -729,6 +748,7 @@ export async function getDailyClosureData(
 
     receiptAuditList: auditList,
     pendingReceiptsCount,
+    existingBankBreakdown,
   };
 }
 
@@ -745,12 +765,27 @@ export async function saveDailyClosure(
     cashierName?: string | null;
     notes?: string | null;
     status?: "submitted" | "approved";
+    declaredBankMethods?: Record<string, number>;
   },
   userId?: string | null
 ): Promise<DailyClosureRecord> {
   const ws = await getDailyClosureData(pool, data.warehouseId, data.closureDate);
 
-  const openingCash = Math.max(0, data.openingCash);
+  if (ws.pendingReceiptsCount > 0) {
+    const err = new Error(
+      `No se puede guardar el cierre diario: hay ${ws.pendingReceiptsCount} comprobante(s) de pago pendientes por adjuntar en la auditoría de soportes.`
+    );
+    (err as any).statusCode = 400;
+    (err as any).code = "PENDING_RECEIPTS";
+    throw err;
+  }
+
+  // Saldo de arranque (base):
+  // Si existe cierre anterior, se toma automáticamente su saldo.
+  // Si es el primer cierre del sistema (sin cierres anteriores), se toma la base inicial configurada por el usuario.
+  const openingCash = ws.hasPreviousClosure
+    ? ws.suggestedOpeningCash
+    : Math.max(0, data.openingCash || 0);
   const countedCash = Math.max(0, data.countedCash);
   const expectedCash = openingCash + ws.totalCashIn - ws.totalCashOut;
   const cashDifference = countedCash - expectedCash;
@@ -873,13 +908,17 @@ export async function saveDailyClosure(
     [closureId]
   );
   for (const bm of ws.bankMethods) {
+    const val = data.declaredBankMethods?.[bm.method] !== undefined
+      ? Math.max(0, Number(data.declaredBankMethods[bm.method]))
+      : bm.amount;
+
     await pool.query(
       `
       INSERT INTO closure_payment_breakdown (daily_closure_id, method_code, amount)
       VALUES ($1::uuid, $2, $3)
       ON CONFLICT (daily_closure_id, method_code) DO UPDATE SET amount = EXCLUDED.amount
       `,
-      [closureId, bm.method, bm.amount]
+      [closureId, bm.method, val]
     );
   }
 
@@ -930,7 +969,29 @@ export async function getDailyClosureDetail(
     `,
     [closureId]
   );
-  return rows[0] || null;
+  if (!rows[0]) return null;
+
+  const { rows: bdRows } = await pool.query<{ method_code: string; amount: string }>(
+    `SELECT method_code, amount::float FROM closure_payment_breakdown WHERE daily_closure_id = $1::uuid`,
+    [closureId]
+  );
+  const methodNames: Record<string, string> = {
+    bancolombia: "Bancolombia",
+    davivienda: "Davivienda",
+    nequi: "Nequi",
+    daviplata: "Daviplata",
+    bold: "Bold",
+    addi: "Addi",
+    sistecredito: "Sistecrédito",
+    transferencia: "Transferencia Bancaria",
+  };
+  rows[0].paymentBreakdown = bdRows.map((r) => ({
+    method: r.method_code,
+    label: methodNames[r.method_code] || r.method_code.toUpperCase(),
+    amount: Number(r.amount),
+  }));
+
+  return rows[0];
 }
 
 /**

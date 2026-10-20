@@ -190,7 +190,7 @@ export function CashOutflowsPage() {
               <FileMinus size={24} />
             </div>
             <div>
-              <h1 className="fin-header__title">Salidas de Dinero y Traslados entre Sedes</h1>
+              <h1 className="fin-header__title">Egresos y Traslados</h1>
               <p className="fin-header__subtitle">
                 Emisión de comprobantes de egreso con firma, gastos operativos y remesas de efectivo entre sucursales.
               </p>
@@ -306,7 +306,7 @@ export function CashOutflowsPage() {
             onClick={() => setActiveTab("outflows")}
           >
             <FileMinus size={16} />
-            <span>Comprobantes de Egreso (Salidas)</span>
+            <span>Comprobantes de Egreso</span>
           </button>
           <button
             type="button"
@@ -314,7 +314,7 @@ export function CashOutflowsPage() {
             onClick={() => setActiveTab("transfers")}
           >
             <ArrowLeftRight size={16} />
-            <span>Traslados de Dinero entre Sedes</span>
+            <span>Traslados entre Sedes</span>
             {totalTransfers > 0 && <span className="fin-tab__badge">{totalTransfers}</span>}
           </button>
         </div>

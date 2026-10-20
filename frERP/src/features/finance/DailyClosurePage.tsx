@@ -16,12 +16,16 @@ import {
   Wallet,
   TrendingDown,
   Clock,
+  Info,
+  CreditCard,
 } from "lucide-react";
 import {
   fetchDailyClosureWorksheet,
   saveDailyClosure,
   fetchDailyClosures,
   fetchGeneralClosureWorksheet,
+  fetchLastGeneralClosure,
+  fetchGeneralClosureDetail,
   saveGeneralClosure,
   fetchGeneralClosures,
   type DailyClosureWorksheet,
@@ -37,6 +41,8 @@ import { ViewReceiptPhotosModal } from "../../components/common/ViewReceiptPhoto
 import {
   getTodayBogotaYmd,
   getFirstDayOfMonthBogotaYmd,
+  addDaysYmd,
+  formatBogotaDateTime,
 } from "../../lib/dateUtils.js";
 import { PrintDailyClosureModal } from "../../components/finance/PrintDailyClosureModal.js";
 import { PrintGeneralClosureModal } from "../../components/finance/PrintGeneralClosureModal.js";
@@ -65,8 +71,9 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
   const canSeeAll = isAllWarehouses;
 
   const isGeneralRoute = location.pathname.includes("cierre-general");
+  const isHistoryRoute = location.pathname.includes("cierre-diario/historial");
   const [activeTab, setActiveTab] = useState<"current" | "history" | "general">(
-    defaultTab ?? (isGeneralRoute ? "general" : "current")
+    defaultTab ?? (isGeneralRoute ? "general" : isHistoryRoute ? "history" : "current")
   );
 
   useEffect(() => {
@@ -74,6 +81,8 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
       setActiveTab(defaultTab);
     } else if (location.pathname.includes("cierre-general")) {
       setActiveTab("general");
+    } else if (location.pathname.includes("cierre-diario/historial")) {
+      setActiveTab("history");
     } else {
       setActiveTab("current");
     }
@@ -81,9 +90,13 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
 
   function handleTabChange(tab: "current" | "history" | "general") {
     setActiveTab(tab);
+    setError(null);
+    setSuccessMsg(null);
     if (tab === "general" && !location.pathname.includes("cierre-general")) {
       navigate("/app/finanzas/cierre-general");
-    } else if (tab !== "general" && location.pathname.includes("cierre-general")) {
+    } else if (tab === "history" && !location.pathname.includes("cierre-diario/historial")) {
+      navigate("/app/finanzas/cierre-diario/historial");
+    } else if (tab === "current" && (location.pathname.includes("cierre-general") || location.pathname.includes("cierre-diario/historial"))) {
       navigate("/app/finanzas/cierre-diario");
     }
   }
@@ -102,8 +115,9 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
 
   // Hoja de trabajo de cierre diario actual
   const [worksheet, setWorksheet] = useState<DailyClosureWorksheet | null>(null);
-  const [openingCashInput, setOpeningCashInput] = useState<string>("0");
+  const [initialBaseInput, setInitialBaseInput] = useState<string>("0");
   const [countedCashInput, setCountedCashInput] = useState<string>("0");
+  const [declaredBankInputs, setDeclaredBankInputs] = useState<Record<string, string>>({});
   const [cashierName, setCashierName] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -112,6 +126,16 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Historial Cierre Diario
+  const [historyWarehouseId, setHistoryWarehouseId] = useState<string>(
+    isAllWarehouses ? "" : (warehouseId || "")
+  );
+  useEffect(() => {
+    if (!isAllWarehouses && warehouseId) {
+      setHistoryWarehouseId(warehouseId);
+    }
+  }, [isAllWarehouses, warehouseId]);
+  const [historyDateFrom, setHistoryDateFrom] = useState(localFirstDayOfMonth);
+  const [historyDateTo, setHistoryDateTo] = useState(localTodayYmd);
   const [closuresHistory, setClosuresHistory] = useState<DailyClosureRecord[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -127,6 +151,14 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
   }, [isAllWarehouses, warehouseId]);
   const [generalDateFrom, setGeneralDateFrom] = useState(localFirstDayOfMonth);
   const [generalDateTo, setGeneralDateTo] = useState(localTodayYmd);
+  const [hasPreviousGeneralClosure, setHasPreviousGeneralClosure] = useState<boolean>(false);
+  const [lastGeneralClosureInfo, setLastGeneralClosureInfo] = useState<{
+    id?: string;
+    closureCode: string;
+    dateFrom?: string;
+    dateTo: string;
+    createdAt?: string;
+  } | null>(null);
   const [generalWorksheet, setGeneralWorksheet] = useState<GeneralClosureWorksheet | null>(null);
   const [generalCashToKeepInput, setGeneralCashToKeepInput] = useState<string>("0");
   const [generalNotes, setGeneralNotes] = useState<string>("");
@@ -149,12 +181,18 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
     try {
       const res = await fetchDailyClosureWorksheet(token, selectedWarehouseId, closureDate);
       setWorksheet(res);
-      setOpeningCashInput(String(res.openingCash ?? res.suggestedOpeningCash ?? 0));
+      setInitialBaseInput(String(res.openingCash ?? 0));
       setCountedCashInput(
         res.isExistingClosure && res.existingCountedCash !== null
           ? String(res.existingCountedCash)
           : String(res.expectedCash ?? 0)
       );
+      const bMap: Record<string, string> = {};
+      res.bankMethods.forEach((bm) => {
+        const prev = res.existingBankBreakdown?.[bm.method];
+        bMap[bm.method] = prev !== undefined ? String(prev) : String(bm.amount);
+      });
+      setDeclaredBankInputs(bMap);
       setCashierName(res.existingCashierName || user?.fullName || "");
       setNotes(res.existingNotes || "");
     } catch (err: any) {
@@ -170,7 +208,9 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
     setLoadingHistory(true);
     try {
       const res = await fetchDailyClosures(token, {
-        warehouseId: selectedWarehouseId || undefined,
+        warehouseId: historyWarehouseId || undefined,
+        dateFrom: historyDateFrom || undefined,
+        dateTo: historyDateTo || undefined,
       });
       setClosuresHistory(res.items);
     } catch (err: any) {
@@ -178,20 +218,60 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
     } finally {
       setLoadingHistory(false);
     }
-  }, [token, selectedWarehouseId]);
+  }, [token, historyWarehouseId, historyDateFrom, historyDateTo]);
+
+  // Obtener la fecha del último cierre general y fijar automáticamente la fecha de inicio
+  const initGeneralDates = useCallback(async () => {
+    if (!token) return null;
+    try {
+      const res = await fetchLastGeneralClosure(token, generalWarehouseId || undefined);
+      if (res.item) {
+        setHasPreviousGeneralClosure(true);
+        setLastGeneralClosureInfo({
+          id: res.item.id,
+          closureCode: res.item.closureCode,
+          dateFrom: res.item.dateFrom,
+          dateTo: res.item.dateTo,
+          createdAt: res.item.createdAt,
+        });
+        const nextStart = addDaysYmd(res.item.dateTo, 1);
+        setGeneralDateFrom(nextStart);
+        setGeneralDateTo((curTo) => (curTo < nextStart ? nextStart : curTo));
+        return nextStart;
+      } else {
+        setHasPreviousGeneralClosure(false);
+        setLastGeneralClosureInfo(null);
+        setGeneralDateFrom(localFirstDayOfMonth);
+        return localFirstDayOfMonth();
+      }
+    } catch {
+      return null;
+    }
+  }, [token, generalWarehouseId]);
 
   // Cargar Hoja de Trabajo Cierre General
-  const loadGeneralWorksheet = useCallback(async () => {
+  const loadGeneralWorksheet = useCallback(async (customDateFrom?: string) => {
     if (!token) return;
     setLoadingGeneral(true);
     setError(null);
     try {
+      const from = customDateFrom ?? generalDateFrom;
       const res = await fetchGeneralClosureWorksheet(token, {
         warehouseId: generalWarehouseId || undefined,
-        dateFrom: generalDateFrom,
+        dateFrom: from,
         dateTo: generalDateTo,
       });
       setGeneralWorksheet(res);
+      if (res.lastClosure) {
+        setHasPreviousGeneralClosure(true);
+        setLastGeneralClosureInfo({
+          id: res.lastClosure.id,
+          closureCode: res.lastClosure.closureCode,
+          dateFrom: res.lastClosure.dateFrom,
+          dateTo: res.lastClosure.dateTo,
+          createdAt: res.lastClosure.createdAt,
+        });
+      }
       setGeneralCashToKeepInput(
         res.isExisting && res.existingCashToKeep !== null
           ? String(res.existingCashToKeep)
@@ -227,16 +307,24 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
     } else if (activeTab === "history") {
       void loadHistory();
     } else if (activeTab === "general") {
-      void loadGeneralWorksheet();
-      void loadGeneralHistory();
+      void initGeneralDates().then((dateFrom) => {
+        void loadGeneralWorksheet(dateFrom ?? undefined);
+        void loadGeneralHistory();
+      });
     }
-  }, [activeTab, loadWorksheet, loadHistory, loadGeneralWorksheet, loadGeneralHistory]);
+  }, [activeTab, generalWarehouseId, loadWorksheet, loadHistory, loadGeneralWorksheet, loadGeneralHistory, initGeneralDates]);
 
   // Guardar Cierre Diario
   async function handleSaveClosure() {
     if (!token || !selectedWarehouseId || !worksheet) return;
 
-    const openingCashNum = parseFloat(openingCashInput) || 0;
+    if (worksheet.pendingReceiptsCount > 0) {
+      setError(
+        `No es posible efectuar ni actualizar el cierre diario: hay ${worksheet.pendingReceiptsCount} comprobante(s) de pago o soporte(s) bancario(s) pendiente(s) por adjuntar en la auditoría de soportes.`
+      );
+      return;
+    }
+
     const countedCashNum = parseFloat(countedCashInput) || 0;
 
     if (countedCashNum < 0) {
@@ -248,17 +336,24 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
     setError(null);
     setSuccessMsg(null);
     try {
+      const declaredMap: Record<string, number> = {};
+      worksheet.bankMethods.forEach((bm) => {
+        declaredMap[bm.method] = parseFloat(declaredBankInputs[bm.method] ?? String(bm.amount)) || 0;
+      });
+
       const res = await saveDailyClosure(token, {
         warehouseId: selectedWarehouseId,
         closureDate,
-        openingCash: openingCashNum,
+        openingCash: effectiveOpeningCash,
         countedCash: countedCashNum,
         cashierName: cashierName.trim() || undefined,
         notes: notes.trim() || undefined,
+        declaredBankMethods: declaredMap,
       });
 
       setSuccessMsg(`Cierre guardado exitosamente con comprobante: ${res.item.closingVoucherNumber}`);
       void loadWorksheet();
+      void loadHistory();
     } catch (err: any) {
       setError(err?.message || "Error al guardar cierre diario");
     } finally {
@@ -269,6 +364,11 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
   // Guardar Cierre General
   async function handleSaveGeneralClosure() {
     if (!token || !generalWorksheet) return;
+
+    if (generalDateTo < generalDateFrom) {
+      setError("La fecha fin no puede ser anterior a la fecha de inicio.");
+      return;
+    }
 
     const cashToKeepVal = parseFloat(generalCashToKeepInput.replace(/[^0-9.]/g, "")) || 0;
     if (cashToKeepVal < 0) {
@@ -289,6 +389,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
       });
 
       setSuccessMsg(`Cierre contable general emitido con código: ${res.item.closureCode}`);
+      await initGeneralDates();
       void loadGeneralWorksheet();
       void loadGeneralHistory();
     } catch (err: any) {
@@ -299,7 +400,13 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
   }
 
   // Cálculos dinámicos en vivo del arqueo diario
-  const openingCashNum = parseFloat(openingCashInput) || 0;
+  // Saldo de arranque (base):
+  // Si existe cierre anterior, se toma automáticamente de dicho cierre.
+  // Si es el primer cierre del sistema (hasPreviousClosure === false), se toma la base inicial configurada (1 sola vez).
+  const effectiveOpeningCash = worksheet?.hasPreviousClosure
+    ? (worksheet.suggestedOpeningCash > 0 ? worksheet.suggestedOpeningCash : worksheet.openingCash)
+    : (parseFloat(initialBaseInput) || 0);
+  const openingCashNum = effectiveOpeningCash;
   const countedCashNum = parseFloat(countedCashInput) || 0;
 
   const totalCashIn = worksheet
@@ -317,6 +424,18 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
 
   const dynamicExpectedCash = openingCashNum + totalCashIn - totalCashOut;
   const dynamicDifference = countedCashNum - dynamicExpectedCash;
+
+  // Cálculos dinámicos de medios electrónicos y bancos
+  const totalDeclaredBank = worksheet
+    ? worksheet.bankMethods.reduce((sum, bm) => {
+        const val = parseFloat(declaredBankInputs[bm.method] ?? String(bm.amount)) || 0;
+        return sum + val;
+      }, 0)
+    : 0;
+
+  const bankDifference = totalDeclaredBank - (worksheet?.bankPaymentsTotal ?? 0);
+  const grandTotalCollected = countedCashNum + totalDeclaredBank;
+  const grandTotalExpected = dynamicExpectedCash + (worksheet?.bankPaymentsTotal ?? 0);
 
   return (
     <div className="fin-page">
@@ -358,6 +477,9 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
             >
               <History size={16} />
               <span>Historial Diario</span>
+              {closuresHistory.length > 0 && (
+                <span className="fin-tab__badge">{closuresHistory.length}</span>
+              )}
             </button>
             <button
               type="button"
@@ -399,14 +521,38 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
             </div>
           )}
 
-          <div className="fin-filter-field" style={{ minWidth: 150 }}>
-            <span>Fecha Inicio</span>
+          <div className="fin-filter-field" style={{ minWidth: 170 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Fecha Inicio</span>
+              {hasPreviousGeneralClosure && (
+                <span style={{ fontSize: "0.7rem", color: "#059669", fontWeight: 700 }}>
+                  Automática
+                </span>
+              )}
+            </div>
             <input
               className="fin-input"
               type="date"
               value={generalDateFrom}
               onChange={(e) => setGeneralDateFrom(e.target.value)}
+              disabled={hasPreviousGeneralClosure}
+              readOnly={hasPreviousGeneralClosure}
+              title={
+                hasPreviousGeneralClosure && lastGeneralClosureInfo
+                  ? `Fijada automáticamente: día siguiente al último cierre general (${lastGeneralClosureInfo.closureCode} cerrado hasta ${lastGeneralClosureInfo.dateTo})`
+                  : "Fecha inicial del período"
+              }
+              style={
+                hasPreviousGeneralClosure
+                  ? { background: "var(--inv-bg-field)", cursor: "not-allowed", opacity: 0.9 }
+                  : {}
+              }
             />
+            {hasPreviousGeneralClosure && lastGeneralClosureInfo && (
+              <span style={{ fontSize: "0.72rem", color: "#64748b", marginTop: 2, display: "block" }}>
+                Último cierre: {lastGeneralClosureInfo.dateTo} ({lastGeneralClosureInfo.closureCode})
+              </span>
+            )}
           </div>
 
           <div className="fin-filter-field" style={{ minWidth: 150 }}>
@@ -415,6 +561,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
               className="fin-input"
               type="date"
               value={generalDateTo}
+              min={generalDateFrom}
               onChange={(e) => setGeneralDateTo(e.target.value)}
             />
           </div>
@@ -431,6 +578,66 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
             >
               <RefreshCw size={16} className={loadingGeneral ? "spin" : ""} />
               <span>{loadingGeneral ? "Calculando…" : "Consultar Período"}</span>
+            </button>
+          </div>
+        </div>
+      ) : activeTab === "history" ? (
+        <div className="fin-filter-card">
+          {canSeeAll ? (
+            <div className="fin-filter-field" style={{ minWidth: 200 }}>
+              <span>Sede de Historial</span>
+              <select
+                className="fin-select"
+                value={historyWarehouseId}
+                onChange={(e) => setHistoryWarehouseId(e.target.value)}
+              >
+                <option value="">Consolidado (Todas las Sedes)</option>
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} ({w.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="fin-filter-field" style={{ minWidth: 160 }}>
+              <span>SEDE</span>
+              <div style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)", fontSize: "0.85rem", fontWeight: 600, color: "var(--inv-text-primary)" }}>
+                {warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
+              </div>
+            </div>
+          )}
+
+          <div className="fin-filter-field" style={{ minWidth: 150 }}>
+            <span>Fecha Desde</span>
+            <input
+              className="fin-input"
+              type="date"
+              value={historyDateFrom}
+              onChange={(e) => setHistoryDateFrom(e.target.value)}
+            />
+          </div>
+
+          <div className="fin-filter-field" style={{ minWidth: 150 }}>
+            <span>Fecha Hasta</span>
+            <input
+              className="fin-input"
+              type="date"
+              value={historyDateTo}
+              onChange={(e) => setHistoryDateTo(e.target.value)}
+            />
+          </div>
+
+          <div className="fin-filter-field fin-filter-field--fixed">
+            <button
+              type="button"
+              className="fin-btn fin-btn--primary"
+              onClick={() => void loadHistory()}
+              title="Consultar historial de cierres en este rango de fechas"
+              disabled={loadingHistory}
+            >
+              <RefreshCw size={16} className={loadingHistory ? "spin" : ""} />
+              <span>{loadingHistory ? "Buscando…" : "Consultar Historial"}</span>
             </button>
           </div>
         </div>
@@ -474,11 +681,11 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
             <button
               type="button"
               className="fin-btn fin-btn--ghost"
-              onClick={() => (activeTab === "current" ? void loadWorksheet() : void loadHistory())}
+              onClick={() => void loadWorksheet()}
               title="Refrescar datos"
-              disabled={loading || loadingHistory}
+              disabled={loading}
             >
-              <RefreshCw size={16} className={loading || loadingHistory ? "spin" : ""} />
+              <RefreshCw size={16} className={loading ? "spin" : ""} />
               <span>Actualizar</span>
             </button>
           </div>
@@ -538,10 +745,22 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    className="fin-btn fin-btn--primary fin-btn--sm"
-                    onClick={() => {
+                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+                    <button
+                      type="button"
+                      className="fin-btn fin-btn--ghost fin-btn--sm"
+                      onClick={() => handleTabChange("history")}
+                      style={{ background: "#ffffff", borderColor: "#a7f3d0" }}
+                      title="Ver listado completo de cierres diarios anteriores"
+                    >
+                      <History size={15} />
+                      <span>Ver Historial de Cierres</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="fin-btn fin-btn--primary fin-btn--sm"
+                      onClick={() => {
                       if (worksheet.existingClosureId) {
                         setViewingClosure({
                           id: worksheet.existingClosureId,
@@ -576,34 +795,60 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                     <Printer size={15} />
                     <span>Ver / Imprimir Acta Oficial</span>
                   </button>
+                  </div>
                 </div>
               )}
 
               {/* Tarjetas de Saldo de Arranque y Resumen de Efectivo */}
               <div className="fin-kpi-grid fin-kpi-grid--4">
                 {/* 1. Saldo de Arranque */}
-                <div className="fin-kpi-card fin-kpi-card--teal">
-                  <div className="fin-kpi-top">
-                    <span className="fin-kpi-label">Saldo de Arranque (Base)</span>
-                    <div className="fin-kpi-icon fin-kpi-icon--teal">
-                      <Wallet size={18} />
+                {worksheet.hasPreviousClosure ? (
+                  <div className="fin-kpi-card fin-kpi-card--teal">
+                    <div className="fin-kpi-top">
+                      <span className="fin-kpi-label">Saldo de Arranque (Base)</span>
+                      <div className="fin-kpi-icon fin-kpi-icon--teal">
+                        <Wallet size={18} />
+                      </div>
+                    </div>
+                    <div className="fin-kpi-val fin-kpi-val--teal">
+                      {formatMoney(openingCashNum)}
+                    </div>
+                    <div className="fin-kpi-sub">
+                      {worksheet.suggestedOpeningCash > 0 ? (
+                        <span>Tomado del cierre anterior: <strong>{formatMoney(worksheet.suggestedOpeningCash)}</strong></span>
+                      ) : (
+                        <span>Base automática del día: <strong>$ 0</strong></span>
+                      )}
                     </div>
                   </div>
-                  <div>
-                    <input
-                      className="fin-input"
-                      type="number"
-                      min="0"
-                      step="1000"
-                      value={openingCashInput}
-                      onChange={(e) => setOpeningCashInput(e.target.value)}
-                      style={{ fontSize: "1.35rem", fontWeight: 800, height: 44 }}
-                    />
+                ) : (
+                  <div className="fin-kpi-card fin-kpi-card--teal" style={{ border: "2px dashed #0d9488" }}>
+                    <div className="fin-kpi-top">
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                        <span className="fin-kpi-label" style={{ color: "#0f766e", fontWeight: 700 }}>Base de Arranque</span>
+                        <span className="fin-badge fin-badge--warning" style={{ fontSize: "0.68rem", padding: "1px 6px" }}>Primer Cierre</span>
+                      </div>
+                      <div className="fin-kpi-icon fin-kpi-icon--teal">
+                        <Wallet size={18} />
+                      </div>
+                    </div>
+                    <div style={{ margin: "4px 0" }}>
+                      <input
+                        className="fin-input"
+                        type="number"
+                        min="0"
+                        step="1000"
+                        value={initialBaseInput}
+                        onChange={(e) => setInitialBaseInput(e.target.value)}
+                        placeholder="0"
+                        style={{ fontSize: "1.3rem", fontWeight: 800, height: 42, borderColor: "#0d9488" }}
+                      />
+                    </div>
+                    <div className="fin-kpi-sub" style={{ color: "#0f766e", lineHeight: 1.3 }}>
+                      Configuración inicial (única vez). A partir de mañana se tomará sola del día anterior.
+                    </div>
                   </div>
-                  <div className="fin-kpi-sub">
-                    Base del día anterior: <strong>{formatMoney(worksheet.suggestedOpeningCash)}</strong>
-                  </div>
-                </div>
+                )}
 
                 {/* 2. Entradas de Efectivo (+) */}
                 <div className="fin-kpi-card fin-kpi-card--emerald">
@@ -803,6 +1048,248 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                 </div>
               </div>
 
+              {/* Sección de Arqueo y Declaración de Medios Electrónicos / Bancos */}
+              <div
+                style={{
+                  background: "#ffffff",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: 16,
+                  padding: "1.5rem",
+                  boxShadow: "var(--fin-shadow-sm)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem", flexWrap: "wrap", gap: "0.75rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <CreditCard className="text-primary" size={22} />
+                    <div>
+                      <h2 style={{ fontSize: "1.15rem", fontWeight: 700, margin: 0, color: "#0f172a" }}>
+                        Arqueo y Cuadre de Medios Electrónicos y Bancos
+                      </h2>
+                      <p style={{ margin: "2px 0 0 0", color: "#64748b", fontSize: "0.82rem" }}>
+                        Declara el valor recaudado en cada banco o pasarela y compáralo con lo facturado y los soportes adjuntos.
+                      </p>
+                    </div>
+                  </div>
+
+                  {worksheet.bankMethods.length > 0 && (
+                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                      <span className={`fin-badge ${bankDifference === 0 ? "fin-badge--success" : "fin-badge--danger"}`}>
+                        {bankDifference === 0 ? "✓ Bancos Cuadrados" : `Diferencia Bancos: ${formatMoney(bankDifference)}`}
+                      </span>
+                      <span className="fin-badge fin-badge--neutral">
+                        {worksheet.bankMethods.length} medios con movimiento
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {worksheet.bankMethods.length === 0 ? (
+                  <div className="fin-empty" style={{ padding: "1.75rem 1rem", background: "#f8fafc", borderRadius: 12 }}>
+                    <p className="fin-empty__desc" style={{ margin: 0 }}>
+                      No se registraron ventas ni cobros por entidades bancarias o pasarelas en esta fecha. La totalidad del recaudo fue en efectivo físico.
+                    </p>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                    <div className="fin-table-wrap">
+                      <table className="fin-table">
+                        <thead>
+                          <tr>
+                            <th>Medio / Entidad Bancaria</th>
+                            <th style={{ textAlign: "center" }}>Operaciones</th>
+                            <th style={{ textAlign: "right" }}>Esperado en Sistema</th>
+                            <th style={{ textAlign: "center" }}>Soportes Adjuntos</th>
+                            <th style={{ textAlign: "right", minWidth: 180 }}>Valor Recogido / Declarado ($ COP) *</th>
+                            <th style={{ textAlign: "center" }}>Cuadre</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {worksheet.bankMethods.map((bm) => {
+                            const declaredVal = parseFloat(declaredBankInputs[bm.method] ?? String(bm.amount)) || 0;
+                            const diff = declaredVal - bm.amount;
+                            const isMatched = diff === 0;
+
+                            // Comprobantes de este medio
+                            const methodAudits = worksheet.receiptAuditList.filter(
+                              (a) => a.paymentMethod.toLowerCase() === bm.method.toLowerCase()
+                            );
+                            const missingMethodAudits = methodAudits.filter((a) => a.isMissing).length;
+
+                            return (
+                              <tr key={bm.method}>
+                                <td>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                    <span className="fin-badge fin-badge--neutral" style={{ textTransform: "uppercase", fontWeight: 700 }}>
+                                      {bm.label}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td style={{ textAlign: "center" }}>
+                                  <span className="fin-badge fin-badge--info">{bm.count} ops</span>
+                                </td>
+                                <td className="fin-table-num" style={{ fontWeight: 700, fontSize: "0.95rem" }}>
+                                  {formatMoney(bm.amount)}
+                                </td>
+                                <td style={{ textAlign: "center" }}>
+                                  {methodAudits.length === 0 ? (
+                                    <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>—</span>
+                                  ) : missingMethodAudits === 0 ? (
+                                    <span className="fin-badge fin-badge--success">
+                                      ✓ {methodAudits.length} de {methodAudits.length}
+                                    </span>
+                                  ) : (
+                                    <span className="fin-badge fin-badge--danger">
+                                      ⚠️ {missingMethodAudits} faltante{missingMethodAudits > 1 ? "s" : ""}
+                                    </span>
+                                  )}
+                                </td>
+                                <td style={{ textAlign: "right" }}>
+                                  <input
+                                    className="fin-input"
+                                    type="number"
+                                    min="0"
+                                    step="1000"
+                                    value={declaredBankInputs[bm.method] ?? String(bm.amount)}
+                                    onChange={(e) =>
+                                      setDeclaredBankInputs((prev) => ({
+                                        ...prev,
+                                        [bm.method]: e.target.value,
+                                      }))
+                                    }
+                                    style={{
+                                      textAlign: "right",
+                                      fontWeight: 800,
+                                      height: 38,
+                                      fontSize: "1rem",
+                                      color: isMatched ? "#059669" : "#e11d48",
+                                      borderColor: isMatched ? "#a7f3d0" : "#fca5a5",
+                                      background: isMatched ? "#f0fdf4" : "#fff1f2",
+                                    }}
+                                  />
+                                </td>
+                                <td style={{ textAlign: "center" }}>
+                                  {isMatched ? (
+                                    <span className="fin-badge fin-badge--success">✓ Cuadrado</span>
+                                  ) : (
+                                    <span className={`fin-badge ${diff < 0 ? "fin-badge--danger" : "fin-badge--warning"}`}>
+                                      {diff < 0 ? `Faltante: - ${formatMoney(Math.abs(diff))}` : `Sobrante: + ${formatMoney(diff)}`}
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Resumen Total de Medios Electrónicos */}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        background: "#f8fafc",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: 12,
+                        padding: "0.85rem 1.25rem",
+                        flexWrap: "wrap",
+                        gap: "1rem",
+                      }}
+                    >
+                      <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", fontSize: "0.85rem", color: "#475569" }}>
+                        <div>
+                          <span>Total Esperado en Bancos: </span>
+                          <strong style={{ color: "#0f172a" }}>{formatMoney(worksheet.bankPaymentsTotal)}</strong>
+                        </div>
+                        <div>
+                          <span>Total Recogido / Declarado: </span>
+                          <strong style={{ color: bankDifference === 0 ? "#059669" : "#e11d48" }}>{formatMoney(totalDeclaredBank)}</strong>
+                        </div>
+                        <div>
+                          <span>Diferencia Digital: </span>
+                          <strong style={{ color: bankDifference === 0 ? "#059669" : "#e11d48" }}>{formatMoney(bankDifference)}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Gran Total Consolidado del Cierre (Efectivo + Medios Digitales) */}
+              <div
+                style={{
+                  background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
+                  borderRadius: 16,
+                  padding: "1.35rem 1.75rem",
+                  color: "#ffffff",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "1.25rem",
+                  boxShadow: "0 4px 15px rgba(15, 23, 42, 0.15)",
+                }}
+              >
+                <div>
+                  <span style={{ fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "#94a3b8", fontWeight: 700 }}>
+                    Consolidado de Cuadre General de la Jornada
+                  </span>
+                  <div style={{ fontSize: "1.85rem", fontWeight: 900, color: "#38bdf8", marginTop: 4 }}>
+                    {formatMoney(grandTotalCollected)}
+                  </div>
+                  <div style={{ fontSize: "0.82rem", color: "#cbd5e1", marginTop: 3 }}>
+                    Efectivo Físico: <strong>{formatMoney(countedCashNum)}</strong> + Medios Electrónicos: <strong>{formatMoney(totalDeclaredBank)}</strong> <span style={{ opacity: 0.75 }}>(Esperado General: {formatMoney(grandTotalExpected)})</span>
+                  </div>
+                </div>
+
+                <div style={{ textAlign: "right" }}>
+                  <div
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.5rem",
+                      padding: "6px 14px",
+                      borderRadius: 999,
+                      background:
+                        dynamicDifference === 0 && bankDifference === 0 && worksheet.pendingReceiptsCount === 0
+                          ? "rgba(16, 185, 129, 0.2)"
+                          : "rgba(245, 158, 11, 0.2)",
+                      border: `1px solid ${
+                        dynamicDifference === 0 && bankDifference === 0 && worksheet.pendingReceiptsCount === 0
+                          ? "#10b981"
+                          : "#f59e0b"
+                      }`,
+                      color:
+                        dynamicDifference === 0 && bankDifference === 0 && worksheet.pendingReceiptsCount === 0
+                          ? "#34d399"
+                          : "#fbbf24",
+                      fontWeight: 700,
+                      fontSize: "0.88rem",
+                    }}
+                  >
+                    {dynamicDifference === 0 && bankDifference === 0 && worksheet.pendingReceiptsCount === 0 ? (
+                      <>
+                        <CheckCircle2 size={16} />
+                        <span>Jornada Cuadrada y Auditada al 100%</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle size={16} />
+                        <span>
+                          {worksheet.pendingReceiptsCount > 0
+                            ? `${worksheet.pendingReceiptsCount} comprobantes pendientes`
+                            : "Descuadre en Efectivo o Bancos"}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: 4 }}>
+                    Base inicial de caja: {formatMoney(effectiveOpeningCash)}
+                  </div>
+                </div>
+              </div>
+
               {/* Auditoría de Comprobantes Digitales y Soportes */}
               <div className="fin-table-card">
                 <div className="fin-table-header">
@@ -926,24 +1413,64 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                   gap: "1rem",
                 }}
               >
-                <div>
+                <div style={{ flex: 1, minWidth: 260 }}>
                   <div style={{ fontWeight: 700, fontSize: "1rem", color: "#0f172a" }}>
                     Confirmar Cierre Diario de la Sede
                   </div>
                   <div style={{ fontSize: "0.84rem", color: "#64748b" }}>
                     Al guardar, se emitirá el Acta Oficial con número consecutivo y sello de auditoría.
                   </div>
+                  {worksheet.pendingReceiptsCount > 0 && (
+                    <div
+                      style={{
+                        marginTop: "0.5rem",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "0.45rem",
+                        padding: "5px 12px",
+                        borderRadius: 8,
+                        background: "var(--fin-rose-bg)",
+                        border: "1px solid var(--fin-rose-border)",
+                        color: "#be123c",
+                        fontSize: "0.82rem",
+                        fontWeight: 600,
+                      }}
+                    >
+                      <AlertTriangle size={15} />
+                      <span>
+                        Bloqueado: Debes adjuntar todos los soportes bancarios ({worksheet.pendingReceiptsCount} pendientes) antes de efectuar el cierre.
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <button
                   type="button"
                   className="fin-btn fin-btn--primary"
-                  disabled={saving}
+                  disabled={saving || worksheet.pendingReceiptsCount > 0}
                   onClick={() => void handleSaveClosure()}
-                  style={{ height: 44, padding: "0 1.5rem" }}
+                  style={{
+                    height: 44,
+                    padding: "0 1.5rem",
+                    opacity: worksheet.pendingReceiptsCount > 0 ? 0.65 : 1,
+                    cursor: worksheet.pendingReceiptsCount > 0 ? "not-allowed" : "pointer",
+                  }}
+                  title={
+                    worksheet.pendingReceiptsCount > 0
+                      ? `No puedes cerrar la jornada: faltan ${worksheet.pendingReceiptsCount} comprobantes por adjuntar`
+                      : undefined
+                  }
                 >
                   <ShieldCheck size={18} />
-                  <span>{saving ? "Procesando Cierre…" : worksheet.isExistingClosure ? "Actualizar Cierre Diario" : "Efectuar y Guardar Cierre Diario"}</span>
+                  <span>
+                    {saving
+                      ? "Procesando Cierre…"
+                      : worksheet.pendingReceiptsCount > 0
+                      ? `Bloqueado (${worksheet.pendingReceiptsCount} comprobantes pendientes)`
+                      : worksheet.isExistingClosure
+                      ? "Actualizar Cierre Diario"
+                      : "Efectuar y Guardar Cierre Diario"}
+                  </span>
                 </button>
               </div>
             </div>
@@ -1045,15 +1572,30 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                             {c.cashierName ?? c.createdByName ?? "—"}
                           </td>
                           <td style={{ textAlign: "center" }}>
-                            <button
-                              type="button"
-                              className="fin-btn fin-btn--ghost fin-btn--sm"
-                              onClick={() => setViewingClosure(c)}
-                              title="Ver e imprimir acta oficial de cierre"
-                            >
-                              <Printer size={14} />
-                              <span>Acta</span>
-                            </button>
+                            <div style={{ display: "inline-flex", gap: "0.35rem" }}>
+                              <button
+                                type="button"
+                                className="fin-btn fin-btn--ghost fin-btn--sm"
+                                onClick={() => {
+                                  setSelectedWarehouseId(c.warehouseId);
+                                  setClosureDate(c.closureDate);
+                                  handleTabChange("current");
+                                }}
+                                title="Cargar este día en la pantalla de Cierre del Día"
+                              >
+                                <Eye size={14} />
+                                <span>Ver Cuadre</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="fin-btn fin-btn--ghost fin-btn--sm"
+                                onClick={() => setViewingClosure(c)}
+                                title="Ver e imprimir acta oficial de cierre"
+                              >
+                                <Printer size={14} />
+                                <span>Acta</span>
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1069,6 +1611,137 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
       {/* ─── PESTAÑA 3: CIERRE CONTABLE GENERAL (RANGO DE FECHAS) ─────────────── */}
       {activeTab === "general" && (
         <>
+          {/* Banner Informativo Permanente: Cuándo fue el último cierre general */}
+          <div style={{ marginBottom: "1.25rem" }}>
+            {hasPreviousGeneralClosure && lastGeneralClosureInfo ? (
+              <div
+                style={{
+                  background: "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)",
+                  border: "1px solid #6ee7b7",
+                  borderRadius: 14,
+                  padding: "0.95rem 1.25rem",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "0.85rem",
+                  boxShadow: "0 1px 3px rgba(16, 185, 129, 0.08)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      backgroundColor: "#d1fae5",
+                      color: "#059669",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Clock size={20} />
+                  </div>
+                  <div>
+                    <div
+                      style={{
+                        fontSize: "0.76rem",
+                        fontWeight: 800,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                        color: "#047857",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                      }}
+                    >
+                      <span>Último Cierre General Registrado</span>
+                      <span className="fin-badge fin-badge--success" style={{ fontSize: "0.68rem", padding: "1px 7px" }}>
+                        Cierre Previo Oficial
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "0.92rem",
+                        color: "#1e293b",
+                        marginTop: 3,
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "center",
+                        gap: "0.45rem",
+                      }}
+                    >
+                      <span>
+                        Comprobante: <strong style={{ color: "#0284c7" }}>{lastGeneralClosureInfo.closureCode}</strong>
+                      </span>
+                      <span style={{ color: "#94a3b8" }}>•</span>
+                      <span>
+                        Período cerrado:{" "}
+                        <strong style={{ color: "#0f172a" }}>
+                          {lastGeneralClosureInfo.dateFrom ? `${lastGeneralClosureInfo.dateFrom} al ` : ""}
+                          {lastGeneralClosureInfo.dateTo}
+                        </strong>
+                      </span>
+                      {lastGeneralClosureInfo.createdAt && (
+                        <>
+                          <span style={{ color: "#94a3b8" }}>•</span>
+                          <span>
+                            Efectuado el:{" "}
+                            <strong style={{ color: "#334155" }}>
+                              {formatBogotaDateTime(lastGeneralClosureInfo.createdAt)}
+                            </strong>
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {lastGeneralClosureInfo.id && (
+                  <button
+                    type="button"
+                    className="fin-btn fin-btn--ghost fin-btn--sm"
+                    onClick={() => {
+                      const item = generalHistory.find((h) => h.id === lastGeneralClosureInfo.id);
+                      if (item) {
+                        setViewingGeneralClosure(item);
+                      } else {
+                        void fetchGeneralClosureDetail(token!, lastGeneralClosureInfo.id!).then((res) => {
+                          if (res.item) setViewingGeneralClosure(res.item);
+                        });
+                      }
+                    }}
+                    title="Ver acta oficial del último cierre registrado"
+                    style={{ background: "#ffffff", borderColor: "#a7f3d0" }}
+                  >
+                    <Printer size={14} />
+                    <span>Ver Acta Cierre Anterior</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div
+                style={{
+                  background: "#f8fafc",
+                  border: "1px dashed #cbd5e1",
+                  borderRadius: 12,
+                  padding: "0.85rem 1.25rem",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.65rem",
+                  color: "#64748b",
+                  fontSize: "0.86rem",
+                }}
+              >
+                <Info size={16} color="#64748b" />
+                <span>
+                  <strong>Sin cierres generales previos:</strong> Esta sede aún no cuenta con cierres contables emitidos. La fecha de inicio está libre para definir el punto de arranque inicial.
+                </span>
+              </div>
+            )}
+          </div>
           {loadingGeneral ? (
             <div className="fin-empty">
               <div className="fin-empty__icon">

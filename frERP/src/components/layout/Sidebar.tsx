@@ -374,13 +374,6 @@ export function Sidebar({ open, pinned = false, onTogglePin, onNavigate }: Sideb
               hint: "Créditos, abonos y saldos a favor",
             },
             {
-              to: "/app/finanzas/caja",
-              end: true,
-              icon: PiggyBank,
-              label: "Arqueo y Medios",
-              hint: "Arqueo de ingresos por efectivo, bancos y plataformas",
-            },
-            {
               to: "/app/finanzas/apartados",
               end: true,
               icon: Bookmark,
@@ -398,7 +391,7 @@ export function Sidebar({ open, pinned = false, onTogglePin, onNavigate }: Sideb
               to: "/app/finanzas/egresos",
               end: true,
               icon: ArrowLeftRight,
-              label: "Salidas y Traslados",
+              label: "Egresos y Traslados",
               hint: "Comprobantes de egreso, vales y traslados de efectivo",
             },
             {
@@ -409,8 +402,15 @@ export function Sidebar({ open, pinned = false, onTogglePin, onNavigate }: Sideb
               hint: "Liquidación de sueldos, vouchers y transferencias",
             },
             {
-              to: "/app/finanzas/cierre-diario",
+              to: "/app/finanzas/caja",
               end: true,
+              icon: PiggyBank,
+              label: "Arqueo y Medios",
+              hint: "Arqueo de ingresos por efectivo, bancos y plataformas",
+            },
+            {
+              to: "/app/finanzas/cierre-diario",
+              end: false,
               icon: ShieldCheck,
               label: "Cierre Diario",
               hint: "Arqueo de caja acumulativo, arranques y auditoría de soportes",

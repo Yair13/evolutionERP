@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
-import { createCashOutflow, fetchSuppliers, uploadClosureReceiptFiles, type CashOutflowItem, type SupplierItem } from "../../api/finance.js";
+import { createCashOutflow, uploadClosureReceiptFiles, type CashOutflowItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
-import { FileMinus, X, Building2, AlertCircle, Check, Loader2 } from "lucide-react";
+import { FileMinus, X, AlertCircle, Check, Loader2 } from "lucide-react";
 import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
 
 type Props = {
@@ -35,15 +35,9 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
   }, [open, isAllWarehouses, warehouseId, warehouses]);
   const [concept, setConcept] = useState("");
   const [beneficiaryName, setBeneficiaryName] = useState("");
-  const [beneficiaryDoc, setBeneficiaryDoc] = useState("");
   const [amountStr, setAmountStr] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("efectivo");
-  const [referenceCode, setReferenceCode] = useState("");
   const [notes, setNotes] = useState("");
-
-  // Proveedores opcionales
-  const [supplierList, setSupplierList] = useState<SupplierItem[]>([]);
-  const [selectedSupplierId, setSelectedSupplierId] = useState<string>("");
 
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -61,12 +55,9 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
       setSelectedWarehouseId(warehouseId || (warehouses[0]?.id ?? ""));
       setConcept("");
       setBeneficiaryName("");
-      setBeneficiaryDoc("");
       setAmountStr("");
       setPaymentMethod("efectivo");
-      setReferenceCode("");
       setNotes("");
-      setSelectedSupplierId("");
       setReceiptFiles([]);
       setError(null);
     }
@@ -78,14 +69,6 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
       setPaymentMethod("efectivo");
     }
   }, [isMainWarehouse, paymentMethod]);
-
-  // Cargar lista de proveedores para autocompletar si lo desean
-  useEffect(() => {
-    if (!open || !token) return;
-    fetchSuppliers(token, { activeOnly: true, limit: 100 })
-      .then((res) => setSupplierList(res.items || []))
-      .catch((err) => console.error("Error al cargar proveedores:", err));
-  }, [open, token]);
 
   // Close on Escape key
   useEffect(() => {
@@ -157,11 +140,11 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
         warehouseId: selectedWarehouseId,
         concept: concept.trim(),
         beneficiaryName: beneficiaryName.trim(),
-        beneficiaryDoc: beneficiaryDoc.trim() || null,
+        beneficiaryDoc: null,
         amount,
         paymentMethod,
-        supplierId: selectedSupplierId || null,
-        referenceCode: referenceCode.trim() || null,
+        supplierId: null,
+        referenceCode: null,
         notes: notes.trim() || null,
         receiptUrl: uploadedReceiptUrl,
         receiptUrls: uploadedReceiptUrls,
@@ -368,30 +351,17 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
           )}
 
           {/* Beneficiario / Quien recibe */}
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)", gap: "0.85rem" }}>
-            <label className="field">
-              <span style={{ fontWeight: 600, fontSize: "0.88rem", color: "#334155" }}>
-                Persona a quien se entrega el dinero (Beneficiario) *
-              </span>
-              <input
-                value={beneficiaryName}
-                onChange={(e) => setBeneficiaryName(e.target.value)}
-                placeholder="Ej: Pedro Martínez / Mensajero"
-                required
-              />
-            </label>
-
-            <label className="field">
-              <span style={{ fontWeight: 600, fontSize: "0.88rem", color: "#334155" }}>
-                Cédula / Documento
-              </span>
-              <input
-                value={beneficiaryDoc}
-                onChange={(e) => setBeneficiaryDoc(e.target.value)}
-                placeholder="12345678"
-              />
-            </label>
-          </div>
+          <label className="field">
+            <span style={{ fontWeight: 600, fontSize: "0.88rem", color: "#334155" }}>
+              Persona a quien se entrega el dinero (Beneficiario) *
+            </span>
+            <input
+              value={beneficiaryName}
+              onChange={(e) => setBeneficiaryName(e.target.value)}
+              placeholder="Ej: Pedro Martínez / Mensajero"
+              required
+            />
+          </label>
 
           {/* Concepto y Monto */}
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.8fr) minmax(0, 1fr)", gap: "0.85rem" }}>
@@ -423,7 +393,7 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
             </label>
           </div>
 
-          {/* Medio de pago y referencia */}
+          {/* Medio de pago y correlativo calculado */}
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)", gap: "0.85rem" }}>
             <label className="field">
               <span style={{ fontWeight: 600, fontSize: "0.88rem", color: "#334155" }}>
@@ -448,51 +418,41 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
 
             <label className="field">
               <span style={{ fontWeight: 600, fontSize: "0.88rem", color: "#334155" }}>
-                N° Comprobante / Ref
+                N° de Comprobante
               </span>
-              <input
-                value={referenceCode}
-                onChange={(e) => setReferenceCode(e.target.value)}
-                placeholder="N° transferencia / recibo"
-              />
-            </label>
-          </div>
-
-          {/* Asociar a proveedor si aplica */}
-          <div
-            style={{
-              background: "#f8fafc",
-              border: "1px solid rgba(15, 23, 42, 0.08)",
-              padding: "0.85rem 1rem",
-              borderRadius: 12,
-            }}
-          >
-            <label className="field" style={{ margin: 0 }}>
-              <span
+              <div
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: "0.45rem",
-                  fontWeight: 600,
-                  fontSize: "0.88rem",
-                  color: "#334155",
+                  height: "42px",
+                  padding: "0 12px",
+                  background: "#f1f5f9",
+                  border: "1px dashed #cbd5e1",
+                  borderRadius: 8,
+                  fontSize: "0.86rem",
+                  color: "#475569",
+                  fontWeight: 500,
+                  boxSizing: "border-box",
                 }}
+                title="El sistema genera automáticamente el consecutivo oficial del comprobante al registrar el egreso."
               >
-                <Building2 size={16} color="#4f46e5" />
-                Asociar a Proveedor (Opcional)
-              </span>
-              <select
-                value={selectedSupplierId}
-                onChange={(e) => setSelectedSupplierId(e.target.value)}
-                style={{ marginTop: 4, width: "100%" }}
-              >
-                <option value="">-- Ninguno / Gasto general o personal --</option>
-                {supplierList.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} {s.taxId ? `(NIT: ${s.taxId})` : ""}
-                  </option>
-                ))}
-              </select>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      backgroundColor: "#10b981",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <strong style={{ color: "#0f172a" }}>Calculado por sistema</strong>
+                  <span style={{ color: "#64748b", fontSize: "0.8rem" }}>
+                    (CE-{(currentWh?.code || "BOD").slice(0, 6).toUpperCase()}-#)
+                  </span>
+                </span>
+              </div>
             </label>
           </div>
 

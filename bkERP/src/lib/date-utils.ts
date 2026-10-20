@@ -43,6 +43,21 @@ export function getDaysAgoBogotaYmd(days: number): string {
 }
 
 /**
+ * Suma o resta días a una fecha 'YYYY-MM-DD' de manera segura sin desajuste de zona horaria.
+ */
+export function addDaysYmd(ymd: string, days: number): string {
+  if (!ymd || !/^\d{4}-\d{2}-\d{2}$/.test(ymd.trim())) return ymd;
+  const [y, m, d] = ymd.trim().split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days, 12, 0, 0));
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(dt);
+}
+
+/**
  * Retorna una lista de fechas 'MM-DD' para los últimos N días en Colombia.
  */
 export function getLastNDatesBogota(days: number): string[] {

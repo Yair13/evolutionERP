@@ -1089,6 +1089,7 @@ export interface DailyClosureWorksheet {
   closureDate: string;
   openingCash: number;
   suggestedOpeningCash: number;
+  hasPreviousClosure?: boolean;
   isExistingClosure: boolean;
   existingClosureId: string | null;
   existingStatus: string | null;
@@ -1125,6 +1126,7 @@ export interface DailyClosureWorksheet {
   // Auditoría de comprobantes
   receiptAuditList: ReceiptAuditItem[];
   pendingReceiptsCount: number;
+  existingBankBreakdown?: Record<string, number>;
 }
 
 export interface DailyClosureRecord {
@@ -1150,6 +1152,7 @@ export interface DailyClosureRecord {
   pendingReceiptsCount: number;
   cashierName: string | null;
   notes: string | null;
+  paymentBreakdown?: { method: string; label: string; amount: number }[];
   createdBy: string | null;
   createdByName?: string | null;
   submittedAt: string | null;
@@ -1175,6 +1178,7 @@ export async function saveDailyClosure(
     cashierName?: string | null;
     notes?: string | null;
     status?: "submitted" | "approved";
+    declaredBankMethods?: Record<string, number>;
   }
 ) {
   return apiPost<{ item: DailyClosureRecord }>("/finance/closures", data, token);
@@ -1318,6 +1322,17 @@ export interface GeneralClosureWorksheet {
   // Desglose por método
   paymentBreakdown: MethodBreakdownItem[];
 
+  // Información del último cierre previo
+  lastClosure?: {
+    id: string;
+    closureCode: string;
+    dateFrom: string;
+    dateTo: string;
+    createdAt: string;
+  } | null;
+  suggestedDateFrom?: string;
+  hasPreviousClosure?: boolean;
+
   // Cierre existente si ya fue registrado
   isExisting: boolean;
   existingId: string | null;
@@ -1396,6 +1411,29 @@ export async function fetchGeneralClosures(
   if (params?.dateTo) qry.set("dateTo", params.dateTo);
   const qs = qry.toString();
   return apiGet<{ items: GeneralClosureRecord[] }>(`/finance/general-closures${qs ? `?${qs}` : ""}`, token);
+}
+
+export async function fetchLastGeneralClosure(
+  token: string,
+  warehouseId?: string | null
+) {
+  const qry = new URLSearchParams();
+  if (warehouseId) qry.set("warehouseId", warehouseId);
+  const qs = qry.toString();
+  return apiGet<{
+    item: {
+      id: string;
+      closureCode: string;
+      warehouseId: string | null;
+      dateFrom: string;
+      dateTo: string;
+      cashToKeep: number;
+      cashToWithdraw: number;
+      createdAt: string;
+    } | null;
+    suggestedDateFrom: string;
+    hasPreviousClosure: boolean;
+  }>(`/finance/general-closures/last${qs ? `?${qs}` : ""}`, token);
 }
 
 export async function fetchGeneralClosureDetail(token: string, id: string) {

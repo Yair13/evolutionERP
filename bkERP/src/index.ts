@@ -65,7 +65,15 @@ app.use("/system", createSystemRouter());
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error(err);
-  const e = err as { code?: string; message?: string };
+  const e = err as { code?: string; message?: string; statusCode?: number; status?: number };
+  if (e?.statusCode && typeof e.statusCode === "number") {
+    res.status(e.statusCode).json({ error: e.message || "error" });
+    return;
+  }
+  if (e?.status && typeof e.status === "number") {
+    res.status(e.status).json({ error: e.message || "error" });
+    return;
+  }
   if (e?.code === "LIMIT_FILE_SIZE") {
     res.status(400).json({ error: "file_too_large" });
     return;

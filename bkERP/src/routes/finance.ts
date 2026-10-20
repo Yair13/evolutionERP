@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getTodayBogotaYmd, getFirstDayOfMonthBogotaYmd } from "../lib/date-utils.js";
+import { getTodayBogotaYmd, getFirstDayOfMonthBogotaYmd, addDaysYmd } from "../lib/date-utils.js";
 import { getPool } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { isUuid } from "../lib/uuid.js";
@@ -72,6 +72,7 @@ import {
   saveGeneralClosure,
   getGeneralClosureDetail,
   listGeneralClosures,
+  getLastGeneralClosure,
 } from "../services/finance/general-closures.js";
 
 export function createFinanceRouter(): Router {
@@ -132,7 +133,11 @@ export function createFinanceRouter(): Router {
         offset,
       });
       res.json(result);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -160,7 +165,11 @@ export function createFinanceRouter(): Router {
         return;
       }
       res.json({ item: detail });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -262,7 +271,11 @@ export function createFinanceRouter(): Router {
         return;
       }
       res.json(profile);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -280,7 +293,11 @@ export function createFinanceRouter(): Router {
     try {
       const report = await getReceivablesByWarehouseReport(pool);
       res.json(report);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -327,7 +344,11 @@ export function createFinanceRouter(): Router {
         dateTo,
       });
       res.json(summary);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -393,7 +414,11 @@ export function createFinanceRouter(): Router {
         offset,
       });
       res.json(result);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -489,7 +514,11 @@ export function createFinanceRouter(): Router {
         return;
       }
       res.json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -585,7 +614,11 @@ export function createFinanceRouter(): Router {
     try {
       const result = await cancelLayaway(pool, id, { refundToCreditBalance, notes });
       res.json(result);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -609,7 +642,11 @@ export function createFinanceRouter(): Router {
     try {
       const item = await getActiveLayawayForCustomer(pool, customerId);
       res.json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -634,7 +671,11 @@ export function createFinanceRouter(): Router {
     try {
       const result = await listSuppliers(pool, { q, activeOnly, limit, offset });
       res.json(result);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -670,7 +711,11 @@ export function createFinanceRouter(): Router {
         notes: typeof req.body?.notes === "string" ? req.body.notes : null,
       });
       res.status(201).json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -698,7 +743,11 @@ export function createFinanceRouter(): Router {
         return;
       }
       res.json(profile);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -788,7 +837,11 @@ export function createFinanceRouter(): Router {
         offset,
       });
       res.json(result);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -893,7 +946,11 @@ export function createFinanceRouter(): Router {
         return;
       }
       res.json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1008,7 +1065,11 @@ export function createFinanceRouter(): Router {
         dateTo,
       });
       res.json(result);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1062,7 +1123,11 @@ export function createFinanceRouter(): Router {
         offset,
       });
       res.json(result);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1158,7 +1223,11 @@ export function createFinanceRouter(): Router {
         return;
       }
       res.json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1203,7 +1272,11 @@ export function createFinanceRouter(): Router {
         offset,
       });
       res.json(result);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1298,7 +1371,11 @@ export function createFinanceRouter(): Router {
         return;
       }
       res.json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1398,7 +1475,11 @@ export function createFinanceRouter(): Router {
     try {
       const items = await listEmployees(pool, { warehouseId, search, isActive });
       res.json({ items });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1426,7 +1507,11 @@ export function createFinanceRouter(): Router {
         return;
       }
       res.json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1473,7 +1558,11 @@ export function createFinanceRouter(): Router {
         notes: body.notes,
       });
       res.status(201).json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1497,7 +1586,11 @@ export function createFinanceRouter(): Router {
     try {
       const item = await updateEmployee(pool, id, req.body || {});
       res.json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1514,7 +1607,11 @@ export function createFinanceRouter(): Router {
     try {
       const saved = await savePayrollReceiptFile(req.file.buffer, req.file.originalname);
       res.json(saved);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1546,7 +1643,11 @@ export function createFinanceRouter(): Router {
         search,
       });
       res.json({ items });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1574,7 +1675,11 @@ export function createFinanceRouter(): Router {
         return;
       }
       res.json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1677,7 +1782,11 @@ export function createFinanceRouter(): Router {
         referenceCode,
       });
       res.json({ item: updated });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1699,7 +1808,11 @@ export function createFinanceRouter(): Router {
     try {
       const summary = await getPayrollSummary(pool, { warehouseId, dateFrom, dateTo });
       res.json(summary);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1780,10 +1893,15 @@ export function createFinanceRouter(): Router {
         cashierName: body.cashierName,
         notes: body.notes,
         status: body.status || "submitted",
+        declaredBankMethods: body.declaredBankMethods,
       }, req.auth!.userId);
 
       res.status(201).json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1805,7 +1923,11 @@ export function createFinanceRouter(): Router {
     try {
       const items = await listDailyClosures(pool, { warehouseId, dateFrom, dateTo });
       res.json({ items });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1833,7 +1955,11 @@ export function createFinanceRouter(): Router {
         return;
       }
       res.json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1850,7 +1976,11 @@ export function createFinanceRouter(): Router {
     try {
       const saved = await saveClosureReceiptFile(req.file.buffer, req.file.originalname);
       res.json(saved);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1870,7 +2000,11 @@ export function createFinanceRouter(): Router {
         files.map((f) => saveClosureReceiptFile(f.buffer, f.originalname))
       );
       res.json({ files: saved });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1904,12 +2038,39 @@ export function createFinanceRouter(): Router {
         receiptFilename: body.receiptFilename || "comprobante.jpg",
       });
       res.json({ ok: true });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
 
   // ─── Cierres Contables Generales (Por Rango de Fechas y Sede) ───────────────
+
+  /**
+   * Obtener el último cierre contable general registrado para una sede (o consolidado).
+   */
+  r.get("/general-closures/last", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const warehouseId = typeof req.query.warehouseId === "string" && isUuid(req.query.warehouseId.trim())
+      ? req.query.warehouseId.trim()
+      : null;
+
+    try {
+      const item = await getLastGeneralClosure(pool, warehouseId);
+      const suggestedDateFrom = item ? addDaysYmd(item.dateTo, 1) : getFirstDayOfMonthBogotaYmd();
+      res.json({ item, suggestedDateFrom, hasPreviousClosure: Boolean(item) });
+    } catch (err) {
+      next(err);
+    }
+  });
 
   /**
    * Obtener hoja de trabajo de Cierre Contable General por rango de fechas.
@@ -1925,9 +2086,14 @@ export function createFinanceRouter(): Router {
       ? req.query.warehouseId.trim()
       : null;
 
-    const dateFrom = typeof req.query.dateFrom === "string" && req.query.dateFrom.trim()
+    let dateFrom = typeof req.query.dateFrom === "string" && req.query.dateFrom.trim()
       ? req.query.dateFrom.trim()
-      : getFirstDayOfMonthBogotaYmd();
+      : "";
+
+    if (!dateFrom) {
+      const last = await getLastGeneralClosure(pool, warehouseId);
+      dateFrom = last ? addDaysYmd(last.dateTo, 1) : getFirstDayOfMonthBogotaYmd();
+    }
 
     const dateTo = typeof req.query.dateTo === "string" && req.query.dateTo.trim()
       ? req.query.dateTo.trim()
@@ -1936,7 +2102,11 @@ export function createFinanceRouter(): Router {
     try {
       const data = await getGeneralClosureData(pool, { warehouseId, dateFrom, dateTo });
       res.json(data);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1971,7 +2141,11 @@ export function createFinanceRouter(): Router {
       }, req.auth!.userId);
 
       res.status(201).json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -1993,7 +2167,11 @@ export function createFinanceRouter(): Router {
     try {
       const items = await listGeneralClosures(pool, { warehouseId });
       res.json({ items });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -2021,7 +2199,11 @@ export function createFinanceRouter(): Router {
         return;
       }
       res.json({ item });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });

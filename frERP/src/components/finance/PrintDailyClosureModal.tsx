@@ -337,6 +337,22 @@ export function PrintDailyClosureModal({ closure, onClose }: Props) {
             <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "#0f172a" }}>
               {formatMoney(closure.bankPaymentsTotal)}
             </div>
+
+            {closure.paymentBreakdown && closure.paymentBreakdown.length > 0 && (
+              <div style={{ marginTop: "0.75rem", width: "100%", borderTop: "1px dashed #cbd5e1", paddingTop: "0.5rem" }}>
+                <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#475569", marginBottom: 4, textTransform: "uppercase" }}>
+                  Desglose por Entidad Bancaria / Pasarela:
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "0.5rem" }}>
+                  {closure.paymentBreakdown.map((pb) => (
+                    <div key={pb.method} style={{ background: "#ffffff", padding: "4px 8px", borderRadius: 6, border: "1px solid #e2e8f0", fontSize: "0.8rem", display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontWeight: 600, color: "#334155" }}>{pb.label}:</span>
+                      <strong style={{ color: "#0f172a" }}>{formatMoney(pb.amount)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {closure.notes && (
