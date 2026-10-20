@@ -22,11 +22,27 @@ export function BarcodeScannerModal({ open, onClose, onDetected }: Props) {
 
     void (async () => {
       try {
-        const devices = await BrowserMultiFormatReader.listVideoInputDevices();
-        const preferred =
-          devices.find((d) => /back|rear|trás|environment/i.test(d.label))?.deviceId ??
-          devices[devices.length - 1]?.deviceId ??
-          devices[0]?.deviceId;
+        if (!navigator.mediaDevices?.getUserMedia) {
+          if (typeof window !== "undefined" && !window.isSecureContext) {
+            throw new Error(
+              "Conexión no segura (HTTP): Los navegadores bloquean la cámara si entras por IP local sin HTTPS. Accede por localhost o usa HTTPS."
+            );
+          }
+          throw new Error("Este navegador o dispositivo no soporta acceso a la cámara.");
+        }
+
+        let preferred: string | undefined = undefined;
+        try {
+          const devices = await BrowserMultiFormatReader.listVideoInputDevices();
+          if (devices && devices.length > 0) {
+            preferred =
+              devices.find((d) => /back|rear|trás|environment/i.test(d.label))?.deviceId ??
+              devices[devices.length - 1]?.deviceId ??
+              devices[0]?.deviceId;
+          }
+        } catch {
+          // Si listVideoInputDevices falla antes de otorgar permisos, se intenta sin deviceId (usará facingMode por defecto)
+        }
 
         if (!videoRef.current || cancelled) return;
 
@@ -37,8 +53,20 @@ export function BarcodeScannerModal({ open, onClose, onDetected }: Props) {
           onClose();
         });
         controlsRef.current = controls;
-      } catch {
-        if (!cancelled) setError("No se pudo usar la cámara. Revisa permisos o usa una pistola USB.");
+      } catch (err: unknown) {
+        if (cancelled) return;
+        const e = err as { name?: string; message?: string };
+        if (e?.name === "NotAllowedError" || e?.name === "PermissionDeniedError") {
+          setError("Permiso denegado: autoriza el acceso a la cámara en el candado de la barra del navegador.");
+        } else if (e?.name === "NotFoundError" || e?.name === "DevicesNotFoundError") {
+          setError("No se detectó ninguna cámara disponible en este dispositivo.");
+        } else if (e?.name === "NotReadableError" || e?.name === "TrackStartError") {
+          setError("La cámara ya está siendo utilizada por otra aplicación o pestaña.");
+        } else if (e?.message) {
+          setError(e.message);
+        } else {
+          setError("No se pudo usar la cámara. Revisa permisos o usa una pistola USB.");
+        }
       }
     })();
 
