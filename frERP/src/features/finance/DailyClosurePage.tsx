@@ -387,7 +387,6 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
       return;
     }
 
-    const openingCashVal = parseFloat(generalOpeningCashInput.replace(/[^0-9.]/g, "")) || 0;
     const cashToKeepVal = parseFloat(generalCashToKeepInput.replace(/[^0-9.]/g, "")) || 0;
     if (cashToKeepVal < 0) {
       setError("El valor que permanece en caja no puede ser negativo.");
@@ -402,7 +401,6 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
         warehouseId: generalWarehouseId || undefined,
         dateFrom: generalDateFrom,
         dateTo: generalDateTo,
-        openingCash: openingCashVal,
         cashToKeep: cashToKeepVal,
         notes: generalNotes.trim() || undefined,
       });
@@ -2278,20 +2276,17 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                                 </span>
                               )}
                             </div>
-                            <input
-                              className="fin-input"
-                              type="number"
-                              min="0"
-                              step="1000"
-                              value={generalOpeningCashInput}
-                              onChange={(e) => setGeneralOpeningCashInput(e.target.value)}
-                              style={{ fontSize: "1.1rem", fontWeight: 700 }}
-                              placeholder="0"
-                            />
+                            <div
+                              className="fin-kpi-val"
+                              style={{ fontSize: "1.4rem", color: "var(--accent)", display: "flex", alignItems: "center", gap: 6 }}
+                              title="Valor calculado por el sistema. No editable."
+                            >
+                              🔒 {formatMoney(openingCashVal)}
+                            </div>
                             <div style={{ fontSize: "0.74rem", color: "#64748b", marginTop: 3 }}>
                               {hasPreviousGeneralClosure
-                                ? "Fondo dejado en el último cierre general"
-                                : "Fondo con el que inició operaciones la sede"}
+                                ? "Fondo dejado en sede en el último cierre general (no editable)"
+                                : "Base con la que se inició el primer cierre diario (no editable)"}
                             </div>
                           </div>
                         </div>

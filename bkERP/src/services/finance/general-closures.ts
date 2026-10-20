@@ -239,16 +239,16 @@ export async function getGeneralClosureData(
 
   // Saldo de arranque (base inicial) sugerido:
   // Si hay cierre general previo: es el fondo que se dejó en sede (cash_to_keep) de ese cierre
-  // Si no hay cierre general previo: buscamos la base del primer cierre diario registrado en el rango
+  // Si no hay cierre general previo: es la base con la que arrancó el PRIMER cierre diario de la sede
   let suggestedOpeningCash = 0;
   if (lastClosure) {
     suggestedOpeningCash = Number(lastClosure.cashToKeep || 0);
   } else if (opts.warehouseId) {
     const { rows: firstDc } = await pool.query<{ opening_cash: string }>(
       `SELECT opening_cash FROM daily_closures
-       WHERE warehouse_id = $1::uuid AND closure_date >= $2::date AND status <> 'voided'
-       ORDER BY closure_date ASC LIMIT 1`,
-      [opts.warehouseId, opts.dateFrom]
+       WHERE warehouse_id = $1::uuid AND status <> 'voided'
+       ORDER BY closure_date ASC, shift_number ASC, created_at ASC LIMIT 1`,
+      [opts.warehouseId]
     );
     if (firstDc[0]) {
       suggestedOpeningCash = Number(firstDc[0].opening_cash || 0);
@@ -260,10 +260,9 @@ export async function getGeneralClosureData(
        FROM (
          SELECT DISTINCT ON (warehouse_id) opening_cash
          FROM daily_closures
-         WHERE closure_date >= $1::date AND status <> 'voided'
-         ORDER BY warehouse_id, closure_date ASC
-       ) sub`,
-      [opts.dateFrom]
+         WHERE status <> 'voided'
+         ORDER BY warehouse_id, closure_date ASC, shift_number ASC, created_at ASC
+       ) sub`
     );
     if (firstDcAll[0]) {
       suggestedOpeningCash = Number(firstDcAll[0].total_opening || 0);
@@ -536,7 +535,9 @@ export async function saveGeneralClosure(
     );
   }
 
-  const openingCash = Math.max(0, Number(data.openingCash !== undefined ? data.openingCash : ws.openingCash));
+  // La base inicial NO es editable: siempre se toma del sistema (fondo dejado en el
+  // último cierre general o, si no existe, la base con la que arrancó el primer cierre diario).
+  const openingCash = Math.max(0, Number(ws.openingCash || 0));
   const cashToKeep = Math.max(0, data.cashToKeep);
   const totalCashAvailable = openingCash + ws.totalNetCash;
   const cashToWithdraw = Math.max(0, totalCashAvailable - cashToKeep);
