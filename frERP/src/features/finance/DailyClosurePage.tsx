@@ -959,7 +959,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                   </div>
 
                   <div style={{ fontSize: "0.82rem", color: "#475569", fontWeight: 600 }}>
-                    Base de inicio asignada: <strong style={{ color: "#059669" }}>{formatMoney(openingCashNum)}</strong>
+                    Saldo de arranque en efectivo: <strong style={{ color: "#059669" }}>{formatMoney(openingCashNum)}</strong>
                   </div>
                 </div>
               )}
@@ -970,7 +970,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                 {worksheet.hasPreviousClosure ? (
                   <div className="fin-kpi-card fin-kpi-card--teal">
                     <div className="fin-kpi-top">
-                      <span className="fin-kpi-label">Saldo de Arranque (Base)</span>
+                      <span className="fin-kpi-label">Saldo de Arranque en Efectivo (Base)</span>
                       <div className="fin-kpi-icon fin-kpi-icon--teal">
                         <Wallet size={18} />
                       </div>
@@ -1482,7 +1482,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                     )}
                   </div>
                   <div style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: 4 }}>
-                    Base inicial de caja: {formatMoney(effectiveOpeningCash)}
+                    Saldo de arranque en efectivo: {formatMoney(effectiveOpeningCash)}
                   </div>
                 </div>
               </div>
@@ -2088,7 +2088,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                       <span>Cierre Contable Emitido: {generalWorksheet.existingCode}</span>
                     </div>
                     <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: 3 }}>
-                      Base inicial: <strong>{formatMoney(generalWorksheet.openingCash ?? 0)}</strong> |{" "}
+                      Saldo de arranque en efectivo: <strong>{formatMoney(generalWorksheet.openingCash ?? 0)}</strong> |{" "}
                       Total en caja: <strong>{formatMoney((generalWorksheet.openingCash ?? 0) + generalWorksheet.totalNetCash)}</strong> |{" "}
                       Fondo dejado en sede: <strong>{formatMoney(generalWorksheet.existingCashToKeep ?? 0)}</strong> |{" "}
                       Efectivo a retirar/consignar: <strong>{formatMoney(generalWorksheet.existingCashToWithdraw ?? 0)}</strong>
@@ -2269,7 +2269,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                         <div className="fin-kpi-card fin-kpi-card--teal">
                           <div className="fin-filter-field">
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                              <span style={{ fontWeight: 700, color: "var(--accent)" }}>Base Inicial (Arranque) ($ COP)</span>
+                              <span style={{ fontWeight: 700, color: "var(--accent)" }}>Saldo de Arranque en Efectivo (Base)</span>
                               {hasPreviousGeneralClosure && (
                                 <span style={{ fontSize: "0.7rem", color: "#059669", fontWeight: 700 }}>
                                   Del cierre previo
@@ -2309,7 +2309,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                             {formatMoney(totalCashAvailable)}
                           </div>
                           <div className="fin-kpi-sub" style={{ color: "#065f46" }}>
-                            (Base Inicial + Efectivo Operativo)
+                            (Saldo de Arranque + Efectivo Operativo)
                           </div>
                         </div>
 
@@ -2401,7 +2401,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                           <th>Código</th>
                           <th>Sede</th>
                           <th>Rango de Fechas</th>
-                          <th style={{ textAlign: "right" }}>Base Inicial</th>
+                          <th style={{ textAlign: "right" }}>Saldo Arranque Efectivo</th>
                           <th style={{ textAlign: "right" }}>Ventas Totales</th>
                           <th style={{ textAlign: "right" }}>Efectivo Neto</th>
                           <th style={{ textAlign: "right" }}>Total en Caja</th>

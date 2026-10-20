@@ -233,7 +233,7 @@ export function PrintDailyClosureModal({ closure, onClose }: Props) {
             <tbody>
               <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
                 <td style={{ padding: "8px 10px" }}>
-                  <strong>Saldo de Arranque (Base inicial de caja)</strong>
+                  <strong>Saldo de Arranque en Efectivo (Base)</strong>
                 </td>
                 <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600 }}>
                   {formatMoney(closure.openingCash)}
