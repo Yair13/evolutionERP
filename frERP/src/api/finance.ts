@@ -39,6 +39,9 @@ export interface ReceivablePaymentItem {
   amount: number;
   appliedToDebt: number;
   excessToFavour: number;
+  receiptUrl?: string | null;
+  receiptUrls?: string[];
+  receiptFilename?: string | null;
   notes: string | null;
   createdAt: string;
   createdByName: string | null;
@@ -161,6 +164,9 @@ export async function addReceivablePayment(
     paymentMethod: string;
     amount: number;
     notes?: string | null;
+    receiptUrl?: string | null;
+    receiptUrls?: string[] | null;
+    receiptFilename?: string | null;
   }
 ) {
   return apiPost<{
@@ -244,6 +250,9 @@ export interface LayawayPaymentItem {
   receiptNumber: string;
   paymentMethod: string;
   amount: number;
+  receiptUrl?: string | null;
+  receiptUrls?: string[];
+  receiptFilename?: string | null;
   notes: string | null;
   createdAt: string;
   createdByName?: string | null;
@@ -305,6 +314,9 @@ export async function createLayaway(
     items?: LayawayItem[];
     expiryDate?: string | null;
     notes?: string | null;
+    receiptUrl?: string | null;
+    receiptUrls?: string[] | null;
+    receiptFilename?: string | null;
   }
 ) {
   return apiPost<{ item: LayawayDetail }>(`/finance/layaways`, data, token);
@@ -318,6 +330,9 @@ export async function addLayawayPayment(
     paymentMethod: string;
     amount: number;
     notes?: string | null;
+    receiptUrl?: string | null;
+    receiptUrls?: string[] | null;
+    receiptFilename?: string | null;
   }
 ) {
   return apiPost<{
@@ -411,6 +426,9 @@ export interface PayablePaymentItem {
   appliedToDebt: number;
   excessToFavour: number;
   referenceCode: string | null;
+  receiptUrl?: string | null;
+  receiptUrls?: string[];
+  receiptFilename?: string | null;
   notes: string | null;
   createdAt: string;
   createdByName?: string | null;
@@ -561,6 +579,9 @@ export async function addPayablePayment(
     amount: number;
     referenceCode?: string | null;
     notes?: string | null;
+    receiptUrl?: string | null;
+    receiptUrls?: string[] | null;
+    receiptFilename?: string | null;
   }
 ) {
   return apiPost<{
@@ -609,6 +630,9 @@ export interface CashOutflowItem {
   payableId: string | null;
   billNumber: string | null;
   referenceCode: string | null;
+  receiptUrl?: string | null;
+  receiptUrls?: string[];
+  receiptFilename?: string | null;
   notes: string | null;
   createdAt: string;
   createdByName: string | null;
@@ -632,6 +656,12 @@ export interface CashTransferItem {
   paymentMethod: string;
   status: TransferStatus;
   rejectionReason: string | null;
+  senderReceiptUrl?: string | null;
+  senderReceiptUrls?: string[];
+  senderReceiptFilename?: string | null;
+  receiverReceiptUrl?: string | null;
+  receiverReceiptUrls?: string[];
+  receiverReceiptFilename?: string | null;
   createdAt: string;
   createdByName: string | null;
   approvedAt: string | null;
@@ -682,6 +712,9 @@ export async function createCashOutflow(
     payableId?: string | null;
     referenceCode?: string | null;
     notes?: string | null;
+    receiptUrl?: string | null;
+    receiptUrls?: string[] | null;
+    receiptFilename?: string | null;
   }
 ) {
   return apiPost<{ item: CashOutflowItem }>("/finance/outflows", data, token);
@@ -728,6 +761,9 @@ export async function createCashTransfer(
     carrierDoc?: string | null;
     concept: string;
     paymentMethod?: string;
+    senderReceiptUrl?: string | null;
+    senderReceiptUrls?: string[] | null;
+    senderReceiptFilename?: string | null;
   }
 ) {
   return apiPost<{ item: CashTransferItem }>("/finance/transfers", data, token);
@@ -737,8 +773,16 @@ export async function fetchCashTransferDetail(token: string, id: string) {
   return apiGet<{ item: CashTransferItem }>(`/finance/transfers/${id}`, token);
 }
 
-export async function approveCashTransfer(token: string, id: string) {
-  return apiPost<{ item: CashTransferItem }>(`/finance/transfers/${id}/approve`, {}, token);
+export async function approveCashTransfer(
+  token: string,
+  id: string,
+  receiptData?: {
+    receiverReceiptUrl?: string | null;
+    receiverReceiptUrls?: string[] | null;
+    receiverReceiptFilename?: string | null;
+  }
+) {
+  return apiPost<{ item: CashTransferItem }>(`/finance/transfers/${id}/approve`, receiptData || {}, token);
 }
 
 export async function rejectCashTransfer(token: string, id: string, reason?: string) {
@@ -792,6 +836,7 @@ export interface PayrollPaymentItem {
   paymentMethod: string;
   paymentDate: string;
   transferReceiptUrl: string | null;
+  transferReceiptUrls?: string[];
   transferReceiptFilename: string | null;
   referenceCode: string | null;
   deductedFromCashRegister: boolean;
@@ -935,6 +980,7 @@ export async function createPayrollPayment(
     paymentMethod: string;
     paymentDate?: string;
     transferReceiptUrl?: string | null;
+    transferReceiptUrls?: string[] | null;
     transferReceiptFilename?: string | null;
     referenceCode?: string | null;
     notes?: string | null;
@@ -971,12 +1017,16 @@ export async function uploadPayrollReceiptFile(
 export async function attachPayrollReceipt(
   token: string,
   paymentId: string,
-  file: File,
+  files: File[] | File,
   referenceCode?: string
 ) {
   const base = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
   const form = new FormData();
-  form.append("file", file);
+  const fileArr = Array.isArray(files) ? files : [files];
+  for (const f of fileArr) {
+    form.append("files", f);
+    form.append("file", f);
+  }
   if (referenceCode) form.append("referenceCode", referenceCode);
   const res = await fetch(`${base}/finance/payroll/payments/${paymentId}/receipt`, {
     method: "POST",
@@ -1016,16 +1066,20 @@ export async function fetchPayrollSummary(
 
 export interface ReceiptAuditItem {
   id: string;
-  type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "transfer_sent" | "transfer_received" | "payroll";
+  type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "cash_outflow" | "payable_payment" | "transfer_sent" | "transfer_received" | "payroll" | "payroll_payment";
   typeLabel: string;
   reference: string;
   concept: string;
   amount: number;
   paymentMethod: string;
   receiptUrl: string | null;
+  receiptUrls?: string[];
   receiptFilename: string | null;
-  isMissing: boolean;
+  isMissing?: boolean;
   createdAt: string;
+  warehouseId?: string;
+  warehouseName?: string;
+  createdByName?: string | null;
 }
 
 export interface DailyClosureWorksheet {
@@ -1171,12 +1225,53 @@ export async function uploadClosureReceiptFile(
   return res.json() as Promise<{ filename: string; publicUrl: string }>;
 }
 
+export async function uploadClosureReceiptFiles(
+  token: string,
+  files: File[]
+): Promise<Array<{ filename: string; publicUrl: string; url: string }>> {
+  if (files.length === 0) return [];
+  const base = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  const form = new FormData();
+  for (const f of files) {
+    form.append("files", f);
+  }
+
+  try {
+    const res = await fetch(`${base}/finance/closures/upload-receipts`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.files) && data.files.length > 0) {
+        return data.files.map((f: any) => ({
+          filename: f.filename,
+          publicUrl: f.publicUrl || f.url,
+          url: f.url || f.publicUrl,
+        }));
+      }
+    }
+  } catch {
+    // fallback if endpoint not reachable
+  }
+
+  // Fallback upload sequentially / parallel
+  const fallback = await Promise.all(files.map((f) => uploadClosureReceiptFile(token, f)));
+  return fallback.map((fb) => ({
+    filename: fb.filename,
+    publicUrl: fb.publicUrl,
+    url: fb.publicUrl,
+  }));
+}
+
 export async function attachReceiptToOperation(
   token: string,
   data: {
-    type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "transfer_sent" | "transfer_received" | "payroll";
+    type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "cash_outflow" | "payable_payment" | "transfer_sent" | "transfer_received" | "payroll" | "payroll_payment";
     id: string;
     receiptUrl: string;
+    receiptUrls?: string[];
     receiptFilename?: string;
   }
 ) {

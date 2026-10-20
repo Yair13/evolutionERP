@@ -1,6 +1,9 @@
 import pg from "pg";
 
-const { Pool } = pg;
+const { Pool, types } = pg;
+
+// Evitar que node-postgres desplace columnas DATE a UTC o reste días por huso horario:
+types.setTypeParser(1082, (val: string) => val);
 
 let pool: pg.Pool | null = null;
 
@@ -11,6 +14,7 @@ export function getPool(): pg.Pool | null {
     pool = new Pool({
       connectionString: url,
       max: Number(process.env.PGPOOL_MAX) || 10,
+      options: "-c timezone=America/Bogota",
     });
   }
   return pool;

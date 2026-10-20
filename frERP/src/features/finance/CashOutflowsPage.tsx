@@ -6,12 +6,16 @@ import {
   rejectCashTransfer,
   type CashOutflowItem,
   type CashTransferItem,
+  type ReceiptAuditItem,
 } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
+import { formatBogotaDateTime } from "../../lib/dateUtils.js";
 import { CreateEgressVoucherModal } from "../../components/finance/CreateEgressVoucherModal.js";
 import { CreateCashTransferModal } from "../../components/finance/CreateCashTransferModal.js";
 import { PrintEgressVoucherModal } from "../../components/finance/PrintEgressVoucherModal.js";
+import { ViewReceiptPhotosModal } from "../../components/common/ViewReceiptPhotosModal.js";
+import { UploadReceiptModal } from "../../components/finance/UploadReceiptModal.js";
 import {
   FileMinus,
   ArrowLeftRight,
@@ -24,6 +28,8 @@ import {
   ArrowRight,
   Filter,
   RefreshCw,
+  Camera,
+  Image as ImageIcon,
 } from "lucide-react";
 
 function formatMoney(n: number): string {
@@ -35,14 +41,7 @@ function formatMoney(n: number): string {
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("es-CO", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatBogotaDateTime(iso);
 }
 
 export function CashOutflowsPage() {
@@ -86,6 +85,8 @@ export function CashOutflowsPage() {
   const [openCreateOutflow, setOpenCreateOutflow] = useState(false);
   const [openCreateTransfer, setOpenCreateTransfer] = useState(false);
   const [voucherToPrint, setVoucherToPrint] = useState<CashOutflowItem | null>(null);
+  const [viewingPhotos, setViewingPhotos] = useState<{ title: string; urls: string[] } | null>(null);
+  const [uploadingAuditItem, setUploadingAuditItem] = useState<ReceiptAuditItem | null>(null);
 
   // Cargar Egresos
   const loadOutflows = useCallback(async () => {
@@ -477,6 +478,7 @@ export function CashOutflowsPage() {
                     <th>Proveedor</th>
                     <th>Medio</th>
                     <th style={{ textAlign: "right" }}>Valor Salida</th>
+                    <th>Soporte</th>
                     <th>Registrado por</th>
                     <th style={{ textAlign: "right" }}>Acciones</th>
                   </tr>
@@ -484,21 +486,25 @@ export function CashOutflowsPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={10} style={{ textAlign: "center", padding: "2.5rem", color: "#64748b" }}>
+                      <td colSpan={11} style={{ textAlign: "center", padding: "2.5rem", color: "#64748b" }}>
                         <RefreshCw size={24} className="spin" style={{ margin: "0 auto 0.5rem" }} />
                         <div>Cargando egresos…</div>
                       </td>
                     </tr>
                   ) : outflows.length === 0 ? (
                     <tr>
-                      <td colSpan={10} style={{ textAlign: "center", padding: "3rem 1rem", color: "#64748b" }}>
+                      <td colSpan={11} style={{ textAlign: "center", padding: "3rem 1rem", color: "#64748b" }}>
                         <Filter size={32} style={{ margin: "0 auto 0.75rem", opacity: 0.4 }} />
                         <div style={{ fontWeight: 600, color: "#1e293b" }}>No se encontraron comprobantes de egreso</div>
                         <div style={{ fontSize: "0.82rem", marginTop: 4 }}>Ajusta los filtros de búsqueda o fecha.</div>
                       </td>
                     </tr>
                   ) : (
-                    outflows.map((item) => (
+                    outflows.map((item) => {
+                      const urls = (item.receiptUrls && item.receiptUrls.length > 0)
+                        ? item.receiptUrls
+                        : (item.receiptUrl ? [item.receiptUrl] : []);
+                      return (
                       <tr key={item.id}>
                         <td>
                           <span className="fin-badge fin-badge--danger" style={{ fontWeight: 800 }}>
@@ -537,6 +543,52 @@ export function CashOutflowsPage() {
                         <td className="fin-table-num" style={{ fontWeight: 800, color: "#e11d48" }}>
                           {formatMoney(item.amount)}
                         </td>
+                        <td>
+                          {urls.length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setViewingPhotos({
+                                  title: `Soporte ${item.voucherNumber} - ${item.concept}`,
+                                  urls,
+                                })
+                              }
+                              className="fin-btn fin-btn--ghost fin-btn--sm"
+                              style={{ color: "#6366f1", gap: "4px" }}
+                              title="Ver fotos / soporte adjunto"
+                            >
+                              <ImageIcon size={14} />
+                              <span>{urls.length > 1 ? `${urls.length} fotos` : "Ver foto"}</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setUploadingAuditItem({
+                                  id: item.id,
+                                  type: "cash_outflow",
+                                  typeLabel: "Comprobante de Egreso",
+                                  reference: item.voucherNumber,
+                                  concept: item.concept,
+                                  paymentMethod: item.paymentMethod,
+                                  amount: item.amount,
+                                  warehouseId: item.warehouseId,
+                                  warehouseName: item.warehouseName,
+                                  createdAt: item.createdAt,
+                                  createdByName: item.createdByName || null,
+                                  receiptUrl: null,
+                                  receiptFilename: null,
+                                })
+                              }
+                              className="fin-btn fin-btn--ghost fin-btn--sm"
+                              style={{ color: "#f59e0b", gap: "4px" }}
+                              title="Adjuntar o tomar foto de soporte con la cámara"
+                            >
+                              <Camera size={14} />
+                              <span>+ Adjuntar</span>
+                            </button>
+                          )}
+                        </td>
                         <td style={{ fontSize: "0.82rem", color: "#64748b" }}>
                           {item.createdByName || "—"}
                         </td>
@@ -552,7 +604,8 @@ export function CashOutflowsPage() {
                           </button>
                         </td>
                       </tr>
-                    ))
+                    );
+                  })
                   )}
                 </tbody>
               </table>
@@ -624,27 +677,37 @@ export function CashOutflowsPage() {
                     <th>Estado</th>
                     <th>Fecha Envío</th>
                     <th>Fecha Recepción</th>
+                    <th>Soportes</th>
                     <th style={{ textAlign: "right" }}>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={10} style={{ textAlign: "center", padding: "2.5rem", color: "#64748b" }}>
+                      <td colSpan={11} style={{ textAlign: "center", padding: "2.5rem", color: "#64748b" }}>
                         <RefreshCw size={24} className="spin" style={{ margin: "0 auto 0.5rem" }} />
                         <div>Cargando traslados de dinero…</div>
                       </td>
                     </tr>
                   ) : transfers.length === 0 ? (
                     <tr>
-                      <td colSpan={10} style={{ textAlign: "center", padding: "3rem 1rem", color: "#64748b" }}>
+                      <td colSpan={11} style={{ textAlign: "center", padding: "3rem 1rem", color: "#64748b" }}>
                         <ArrowLeftRight size={32} style={{ margin: "0 auto 0.75rem", opacity: 0.4 }} />
                         <div style={{ fontWeight: 600, color: "#1e293b" }}>No se han registrado traslados de dinero entre sedes</div>
                         <div style={{ fontSize: "0.82rem", marginTop: 4 }}>Usa el botón "Trasladar Dinero" para registrar una remesa.</div>
                       </td>
                     </tr>
                   ) : (
-                    transfers.map((t) => (
+                    transfers.map((t) => {
+                      const senderUrls = (t.senderReceiptUrls && t.senderReceiptUrls.length > 0)
+                        ? t.senderReceiptUrls
+                        : (t.senderReceiptUrl ? [t.senderReceiptUrl] : []);
+
+                      const receiverUrls = (t.receiverReceiptUrls && t.receiverReceiptUrls.length > 0)
+                        ? t.receiverReceiptUrls
+                        : (t.receiverReceiptUrl ? [t.receiverReceiptUrl] : []);
+
+                      return (
                       <tr key={t.id}>
                         <td>
                           <span className="fin-badge fin-badge--teal" style={{ fontWeight: 800 }}>
@@ -702,6 +765,85 @@ export function CashOutflowsPage() {
                         <td style={{ fontSize: "0.82rem", color: "#64748b", whiteSpace: "nowrap" }}>
                           {t.approvedAt ? formatDate(t.approvedAt) : "—"}
                         </td>
+                        <td>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                            {senderUrls.length > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => setViewingPhotos({ title: `Soporte de Envío ${t.code}`, urls: senderUrls })}
+                                className="fin-btn fin-btn--ghost fin-btn--sm"
+                                style={{ color: "#6366f1", padding: "2px 6px", fontSize: "0.74rem", gap: "3px" }}
+                                title="Ver comprobante de envío"
+                              >
+                                <ImageIcon size={12} />
+                                <span>Envío ({senderUrls.length})</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setUploadingAuditItem({
+                                  id: t.id,
+                                  type: "transfer_sent",
+                                  typeLabel: "Traslado Enviado",
+                                  reference: t.code,
+                                  concept: `Envío ${t.originWarehouseName} → ${t.destinationWarehouseName}`,
+                                  paymentMethod: t.paymentMethod,
+                                  amount: t.amount,
+                                  warehouseId: t.originWarehouseId,
+                                  warehouseName: t.originWarehouseName,
+                                  createdAt: t.createdAt,
+                                  createdByName: null,
+                                  receiptUrl: null,
+                                  receiptFilename: null,
+                                })}
+                                className="fin-btn fin-btn--ghost fin-btn--sm"
+                                style={{ color: "#94a3b8", padding: "2px 6px", fontSize: "0.74rem", gap: "3px" }}
+                                title="Adjuntar foto de soporte del envío"
+                              >
+                                <Camera size={12} />
+                                <span>+ Sop. Envío</span>
+                              </button>
+                            )}
+
+                            {receiverUrls.length > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => setViewingPhotos({ title: `Soporte de Recepción ${t.code}`, urls: receiverUrls })}
+                                className="fin-btn fin-btn--ghost fin-btn--sm"
+                                style={{ color: "#10b981", padding: "2px 6px", fontSize: "0.74rem", gap: "3px" }}
+                                title="Ver comprobante de recepción"
+                              >
+                                <ImageIcon size={12} />
+                                <span>Recepción ({receiverUrls.length})</span>
+                              </button>
+                            ) : t.status === "approved" ? (
+                              <button
+                                type="button"
+                                onClick={() => setUploadingAuditItem({
+                                  id: t.id,
+                                  type: "transfer_received",
+                                  typeLabel: "Traslado Recibido",
+                                  reference: t.code,
+                                  concept: `Recepción ${t.originWarehouseName} → ${t.destinationWarehouseName}`,
+                                  paymentMethod: t.paymentMethod,
+                                  amount: t.amount,
+                                  warehouseId: t.destinationWarehouseId,
+                                  warehouseName: t.destinationWarehouseName,
+                                  createdAt: t.approvedAt || t.createdAt,
+                                  createdByName: null,
+                                  receiptUrl: null,
+                                  receiptFilename: null,
+                                })}
+                                className="fin-btn fin-btn--ghost fin-btn--sm"
+                                style={{ color: "#94a3b8", padding: "2px 6px", fontSize: "0.74rem", gap: "3px" }}
+                                title="Adjuntar foto de soporte de la recepción"
+                              >
+                                <Camera size={12} />
+                                <span>+ Sop. Recep.</span>
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
                         <td style={{ textAlign: "right" }}>
                           {t.status === "pending" && t.destinationWarehouseId === warehouseId && (
                             <div style={{ display: "inline-flex", gap: "0.35rem" }}>
@@ -723,7 +865,8 @@ export function CashOutflowsPage() {
                           )}
                         </td>
                       </tr>
-                    ))
+                    );
+                  })
                   )}
                 </tbody>
               </table>
@@ -759,6 +902,31 @@ export function CashOutflowsPage() {
           open={Boolean(voucherToPrint)}
           outflow={voucherToPrint}
           onClose={() => setVoucherToPrint(null)}
+        />
+      )}
+
+      {viewingPhotos && (
+        <ViewReceiptPhotosModal
+          open={Boolean(viewingPhotos)}
+          onClose={() => setViewingPhotos(null)}
+          title={viewingPhotos.title}
+          urls={viewingPhotos.urls}
+        />
+      )}
+
+      {uploadingAuditItem && token && (
+        <UploadReceiptModal
+          token={token}
+          item={uploadingAuditItem}
+          onClose={() => setUploadingAuditItem(null)}
+          onSuccess={() => {
+            setUploadingAuditItem(null);
+            if (activeTab === "outflows") {
+              void loadOutflows();
+            } else {
+              void loadTransfers();
+            }
+          }}
         />
       )}
     </div>

@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { addPayablePayment, type PayableSummaryItem } from "../../api/finance.js";
+import { addPayablePayment, uploadClosureReceiptFiles, type PayableSummaryItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { Wallet, X, CheckCircle2, CreditCard } from "lucide-react";
+import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
 
 type Props = {
   open: boolean;
@@ -52,6 +53,7 @@ export function AddPayablePaymentModal({
   const [method, setMethod] = useState<string>("efectivo");
   const [referenceCode, setReferenceCode] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receiptResult, setReceiptResult] = useState<any | null>(null);
@@ -81,12 +83,33 @@ export function AddPayablePaymentModal({
     setError(null);
 
     try {
+      let uploadedReceiptUrl: string | null = null;
+      let uploadedReceiptUrls: string[] = [];
+      let uploadedReceiptFilename: string | null = null;
+
+      if (receiptFiles.length > 0) {
+        try {
+          const uploads = await uploadClosureReceiptFiles(token, receiptFiles);
+          uploadedReceiptUrls = uploads.map((u) => u.url);
+          uploadedReceiptUrl = uploadedReceiptUrls[0] || null;
+          uploadedReceiptFilename = uploads[0]?.filename || null;
+        } catch (uploadErr) {
+          console.error("Error al subir comprobantes:", uploadErr);
+          setError("No se pudieron subir las fotos del soporte. Por favor reintenta.");
+          setSubmitting(false);
+          return;
+        }
+      }
+
       const res = await addPayablePayment(token, payable.id, {
         warehouseId: targetWh,
         paymentMethod: method,
         amount,
         referenceCode: referenceCode.trim() || null,
         notes: notes.trim() || null,
+        receiptUrl: uploadedReceiptUrl,
+        receiptUrls: uploadedReceiptUrls,
+        receiptFilename: uploadedReceiptFilename,
       });
 
       setReceiptResult(res);
@@ -107,6 +130,7 @@ export function AddPayablePaymentModal({
     setAmountStr("");
     setReferenceCode("");
     setNotes("");
+    setReceiptFiles([]);
     setError(null);
     onClose();
   }
@@ -342,6 +366,16 @@ export function AddPayablePaymentModal({
                   </div>
                 )}
               </div>
+            )}
+
+            {method !== "saldo_a_favor" && (
+              <ReceiptPhotosUploader
+                files={receiptFiles}
+                onChange={setReceiptFiles}
+                disabled={submitting}
+                label="Fotos / Soporte del Pago (Transferencia / Comprobante)"
+                helperText="Toma foto con la cámara o adjunta comprobantes para auditar el pago bancario."
+              />
             )}
 
             <label className="field">

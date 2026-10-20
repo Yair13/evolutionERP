@@ -178,6 +178,15 @@ export type InventoryDocumentDetail = {
   metadata?: any;
   lines: InventoryDocumentLine[];
   events?: DocumentStatusEvent[];
+  receivable?: {
+    id: string;
+    totalAmount: number;
+    initialPayment: number;
+    paidAmount: number;
+    balanceAmount: number;
+    status: string;
+    dueDate?: string | null;
+  } | null;
 };
 
 export type InventoryDocumentSummary = Omit<InventoryDocumentDetail, "lines">;

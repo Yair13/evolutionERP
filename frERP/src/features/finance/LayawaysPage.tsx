@@ -9,6 +9,7 @@ import { useWarehouse } from "../../context/WarehouseContext.js";
 import { CreateLayawayModal } from "../../components/finance/CreateLayawayModal.js";
 import { AddLayawayPaymentModal } from "../../components/finance/AddLayawayPaymentModal.js";
 import { LayawayDetailModal } from "../../components/finance/LayawayDetailModal.js";
+import { formatBogotaDate } from "../../lib/dateUtils.js";
 import {
   Bookmark,
   PlusCircle,
@@ -30,12 +31,7 @@ function formatMoney(n: number): string {
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("es-CO", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return formatBogotaDate(iso);
 }
 
 export function LayawaysPage() {

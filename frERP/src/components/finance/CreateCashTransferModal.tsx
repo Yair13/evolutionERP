@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import { createCashTransfer } from "../../api/finance.js";
+import { createCashTransfer, uploadClosureReceiptFiles } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
-import { ArrowLeftRight, X, AlertCircle } from "lucide-react";
+import { ArrowLeftRight, X, AlertCircle, Check, Loader2 } from "lucide-react";
+import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
 
 type Props = {
   open: boolean;
@@ -23,6 +24,7 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
   const [carrierDoc, setCarrierDoc] = useState<string>("");
   const [concept, setConcept] = useState<string>("");
   const [paymentMethod, setPaymentMethod] = useState<string>("efectivo");
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,9 +50,22 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
       setCarrierDoc("");
       setConcept("");
       setPaymentMethod("efectivo");
+      setReceiptFiles([]);
       setError(null);
     }
   }, [open, warehouseId, warehouses]);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && !submitting) {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, submitting, onClose]);
 
   if (!open) return null;
 
@@ -93,6 +108,24 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
     setError(null);
 
     try {
+      let uploadedReceiptUrl: string | null = null;
+      let uploadedReceiptUrls: string[] = [];
+      let uploadedReceiptFilename: string | null = null;
+
+      if (receiptFiles.length > 0) {
+        try {
+          const uploads = await uploadClosureReceiptFiles(token, receiptFiles);
+          uploadedReceiptUrls = uploads.map((u) => u.url);
+          uploadedReceiptUrl = uploadedReceiptUrls[0] || null;
+          uploadedReceiptFilename = uploads[0]?.filename || null;
+        } catch (uploadErr) {
+          console.error("Error al subir comprobantes de traslado:", uploadErr);
+          setError("No se pudieron subir las fotos del soporte. Por favor reintenta.");
+          setSubmitting(false);
+          return;
+        }
+      }
+
       await createCashTransfer(token, {
         originWarehouseId,
         destinationWarehouseId,
@@ -101,6 +134,9 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
         carrierDoc: carrierDoc.trim() || null,
         concept: concept.trim(),
         paymentMethod,
+        senderReceiptUrl: uploadedReceiptUrl,
+        senderReceiptUrls: uploadedReceiptUrls,
+        senderReceiptFilename: uploadedReceiptFilename,
       });
 
       onSuccess();
@@ -113,57 +149,139 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
   }
 
   return (
-    <div className="inv-modal-backdrop" role="presentation" onClick={() => !submitting && onClose()}>
+    <div
+      className="inv-modal-backdrop"
+      role="presentation"
+      onClick={() => !submitting && onClose()}
+      style={{
+        position: "fixed",
+        inset: 0,
+        backgroundColor: "rgba(15, 23, 42, 0.65)",
+        backdropFilter: "blur(6px)",
+        WebkitBackdropFilter: "blur(6px)",
+        zIndex: 1050,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px",
+      }}
+    >
       <div
         className="inv-modal"
         role="dialog"
+        aria-modal="true"
         aria-labelledby="create-transfer-title"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 580 }}
+        style={{
+          width: "100%",
+          maxWidth: 620,
+          maxHeight: "92vh",
+          display: "flex",
+          flexDirection: "column",
+          padding: 0,
+          borderRadius: 20,
+          background: "#ffffff",
+          color: "#0f172a",
+          boxShadow: "0 25px 60px -15px rgba(15, 23, 42, 0.3), 0 0 0 1px rgba(15, 23, 42, 0.08)",
+          overflow: "hidden",
+        }}
       >
-        <div className="inv-modal__header">
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <ArrowLeftRight size={20} color="#6366f1" />
-            <h2 id="create-transfer-title" className="inv-modal__title">
-              Traslado de Dinero entre Sedes
-            </h2>
+        {/* Modal Header */}
+        <div
+          style={{
+            padding: "20px 24px",
+            borderBottom: "1px solid rgba(15, 23, 42, 0.08)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "#ffffff",
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            <div
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                background: "rgba(99, 102, 241, 0.1)",
+                color: "#4f46e5",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <ArrowLeftRight size={22} />
+            </div>
+            <div>
+              <h2
+                id="create-transfer-title"
+                style={{
+                  margin: 0,
+                  fontSize: "1.25rem",
+                  fontWeight: 700,
+                  color: "#0f172a",
+                  lineHeight: 1.25,
+                }}
+              >
+                Traslado de Dinero entre Sedes
+              </h2>
+              <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#64748b" }}>
+                Envía dinero en tránsito a otra sede con acuse de recibo
+              </p>
+            </div>
           </div>
           <button
             type="button"
-            className="inv-btn inv-btn--ghost inv-btn--icon"
+            className="inv-modal__close"
             onClick={onClose}
             disabled={submitting}
+            aria-label="Cerrar modal"
           >
             <X size={18} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="inv-modal__body" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        {/* Modal Body Form */}
+        <form
+          onSubmit={handleSubmit}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "1.1rem",
+            padding: "22px 24px",
+            overflowY: "auto",
+            overflowX: "hidden",
+          }}
+        >
           {error && <div className="inv-form-error">{error}</div>}
 
           <div
             style={{
-              padding: "0.6rem 0.8rem",
+              padding: "0.75rem 1rem",
               background: "rgba(99, 102, 241, 0.08)",
-              border: "1px solid rgba(99, 102, 241, 0.25)",
-              borderRadius: 6,
-              fontSize: "0.82rem",
+              border: "1px solid rgba(99, 102, 241, 0.22)",
+              borderRadius: 10,
+              fontSize: "0.84rem",
               display: "flex",
               alignItems: "center",
-              gap: "0.5rem",
-              color: "#818cf8",
+              gap: "0.6rem",
+              color: "#4338ca",
             }}
           >
-            <AlertCircle size={18} />
+            <AlertCircle size={18} style={{ flexShrink: 0 }} />
             <span>
-              Al confirmar, el dinero quedará <strong>en tránsito</strong> y se notificará de inmediato a la sede de destino. Apenas el receptor confirme en su pantalla, el dinero se depositará en su caja de efectivo.
+              Al confirmar, el dinero quedará <strong>en tránsito</strong> y se notificará a la sede de destino. Una vez recibido allí, ingresará a su caja de efectivo.
             </span>
           </div>
 
           {/* Sedes Origen y Destino */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: "0.85rem" }}>
             <label className="field">
-              <span>Sede de Origen (Emisora) *</span>
+              <span style={{ fontWeight: 600, fontSize: "0.88rem", color: "#334155" }}>
+                Sede de Origen (Emisora) *
+              </span>
               {isAllWarehouses ? (
                 <select
                   value={originWarehouseId}
@@ -174,6 +292,7 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
                   }}
                   disabled={submitting}
                   required
+                  style={{ width: "100%" }}
                 >
                   {warehouses.map((w) => (
                     <option key={w.id} value={w.id}>
@@ -182,18 +301,31 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
                   ))}
                 </select>
               ) : (
-                <div style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-elevated)", fontWeight: 600, fontSize: "0.9rem" }}>
+                <div
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(15, 23, 42, 0.12)",
+                    background: "#f8fafc",
+                    fontWeight: 600,
+                    fontSize: "0.92rem",
+                    color: "#0f172a",
+                  }}
+                >
                   {warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
                 </div>
               )}
             </label>
 
             <label className="field">
-              <span>Sede de Destino (Receptora) *</span>
+              <span style={{ fontWeight: 600, fontSize: "0.88rem", color: "#334155" }}>
+                Sede de Destino (Receptora) *
+              </span>
               <select
                 value={destinationWarehouseId}
                 onChange={(e) => setDestinationWarehouseId(e.target.value)}
                 required
+                style={{ width: "100%" }}
               >
                 <option value="">-- Selecciona sede receptora --</option>
                 {destinationOptions.map((w) => (
@@ -206,9 +338,11 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
           </div>
 
           {/* Monto y Medio */}
-          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "0.75rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)", gap: "0.85rem" }}>
             <label className="field">
-              <span>Valor a trasladar *</span>
+              <span style={{ fontWeight: 600, fontSize: "0.88rem", color: "#334155" }}>
+                Valor a trasladar *
+              </span>
               <input
                 type="number"
                 min="1"
@@ -217,15 +351,17 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
                 onChange={(e) => setAmountStr(e.target.value)}
                 placeholder="$ 0"
                 required
-                autoFocus
               />
             </label>
 
             <label className="field">
-              <span>Medio de envío *</span>
+              <span style={{ fontWeight: 600, fontSize: "0.88rem", color: "#334155" }}>
+                Medio de envío *
+              </span>
               <select
                 value={paymentMethod}
                 onChange={(e) => setPaymentMethod(e.target.value)}
+                style={{ width: "100%" }}
               >
                 <option value="efectivo">Efectivo 💵</option>
                 {isMainOrigin && <option value="bancolombia">Bancolombia 🟡</option>}
@@ -235,9 +371,11 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
           </div>
 
           {/* Transportador / Mensajero */}
-          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: "0.75rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)", gap: "0.85rem" }}>
             <label className="field">
-              <span>Persona / Mensajero que transporta *</span>
+              <span style={{ fontWeight: 600, fontSize: "0.88rem", color: "#334155" }}>
+                Persona / Mensajero que transporta *
+              </span>
               <input
                 value={carrierName}
                 onChange={(e) => setCarrierName(e.target.value)}
@@ -247,7 +385,9 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
             </label>
 
             <label className="field">
-              <span>Cédula del transportador</span>
+              <span style={{ fontWeight: 600, fontSize: "0.88rem", color: "#334155" }}>
+                Cédula del transportador
+              </span>
               <input
                 value={carrierDoc}
                 onChange={(e) => setCarrierDoc(e.target.value)}
@@ -257,7 +397,9 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
           </div>
 
           <label className="field">
-            <span>Concepto / Motivo del traslado *</span>
+            <span style={{ fontWeight: 600, fontSize: "0.88rem", color: "#334155" }}>
+              Concepto / Motivo del traslado *
+            </span>
             <input
               value={concept}
               onChange={(e) => setConcept(e.target.value)}
@@ -266,12 +408,35 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
             />
           </label>
 
-          <div className="inv-modal__actions" style={{ marginTop: "0.5rem" }}>
+          <ReceiptPhotosUploader
+            files={receiptFiles}
+            onChange={setReceiptFiles}
+            disabled={submitting}
+            label="Fotos / Soporte del Envío (Recibo, comprobante o guía)"
+            helperText="Puedes tomar fotos con la cámara o seleccionar archivos para dejar registro del dinero despachado."
+          />
+
+          {/* Modal Footer Actions */}
+          <div
+            style={{
+              paddingTop: "0.5rem",
+              display: "flex",
+              justifyContent: "flex-end",
+              alignItems: "center",
+              gap: "12px",
+            }}
+          >
             <button
               type="button"
               className="inv-btn inv-btn--ghost"
               onClick={onClose}
               disabled={submitting}
+              style={{
+                borderRadius: 10,
+                padding: "9px 18px",
+                fontWeight: 600,
+                fontSize: "0.9rem",
+              }}
             >
               Cancelar
             </button>
@@ -279,8 +444,31 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
               type="submit"
               className="inv-btn inv-btn--primary"
               disabled={submitting}
+              style={{
+                borderRadius: 10,
+                padding: "9px 22px",
+                fontWeight: 600,
+                fontSize: "0.9rem",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                background: "linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)",
+                borderColor: "#4338ca",
+                color: "#ffffff",
+                boxShadow: "0 2px 8px rgba(79, 70, 229, 0.28)",
+              }}
             >
-              {submitting ? "Enviando..." : "Registrar Traslado de Dinero"}
+              {submitting ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>Enviando...</span>
+                </>
+              ) : (
+                <>
+                  <Check size={16} />
+                  <span>Registrar Traslado de Dinero</span>
+                </>
+              )}
             </button>
           </div>
         </form>

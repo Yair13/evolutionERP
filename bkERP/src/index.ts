@@ -1,4 +1,7 @@
 import "dotenv/config";
+
+// Garantizar hora de Colombia en Node.js
+process.env.TZ = "America/Bogota";
 import compression from "compression";
 import cors from "cors";
 import type { NextFunction, Request, Response } from "express";

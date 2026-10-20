@@ -918,6 +918,7 @@ export function MovementPosPage({ mode }: Props) {
         destinationWarehouseId: data.destinationWarehouseId || null,
         layawayId: data.layawayId || null,
         receiptUrl: data.receiptUrl || null,
+        receiptUrls: data.receiptUrls || null,
         receiptFilename: data.receiptFilename || null,
       });
       setCart([]);

@@ -33,6 +33,25 @@ export const closureReceiptUpload = multer({
   },
 });
 
+export const closureReceiptsMultiUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_RECEIPT_BYTES, files: 10 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/heic",
+      "application/pdf",
+    ];
+    if (allowed.includes(file.mimetype.toLowerCase())) {
+      cb(null, true);
+    } else {
+      cb(new Error("invalid_receipt_file_type"));
+    }
+  },
+});
+
 export async function saveClosureReceiptFile(
   fileBuffer: Buffer,
   originalName: string

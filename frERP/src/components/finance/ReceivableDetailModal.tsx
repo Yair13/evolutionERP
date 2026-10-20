@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
-import { fetchReceivableDetail, type ReceivableDetail } from "../../api/finance.js";
+import { useEffect, useState, useCallback } from "react";
+import { fetchReceivableDetail, type ReceivableDetail, type ReceiptAuditItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
-import { Package, Receipt, X } from "lucide-react";
+import { Package, Receipt, X, Camera, Upload } from "lucide-react";
+import { formatBogotaDateTime } from "../../lib/dateUtils.js";
+import { ViewReceiptPhotosModal } from "../common/ViewReceiptPhotosModal.js";
+import { UploadReceiptModal } from "./UploadReceiptModal.js";
 
 type Props = {
   open: boolean;
@@ -19,14 +22,7 @@ function formatMoney(n: number): string {
 }
 
 function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString("es-CO", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
-  } catch {
-    return iso;
-  }
+  return formatBogotaDateTime(iso);
 }
 
 export function ReceivableDetailModal({
@@ -39,16 +35,25 @@ export function ReceivableDetailModal({
   const [detail, setDetail] = useState<ReceivableDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [viewingUrls, setViewingUrls] = useState<string[] | null>(null);
+  const [viewingRef, setViewingRef] = useState<string>("");
+  const [uploadItem, setUploadItem] = useState<ReceiptAuditItem | null>(null);
 
-  useEffect(() => {
-    if (!open || !receivableId || !token) return;
+  const loadDetail = useCallback(() => {
+    if (!receivableId || !token) return;
     setLoading(true);
     setError(null);
     fetchReceivableDetail(token, receivableId)
       .then((res) => setDetail(res.item))
       .catch((err) => setError(err.message || "Error al cargar detalle"))
       .finally(() => setLoading(false));
-  }, [open, receivableId, token]);
+  }, [receivableId, token]);
+
+  useEffect(() => {
+    if (open) {
+      loadDetail();
+    }
+  }, [open, loadDetail]);
 
   if (!open || !receivableId) return null;
 
@@ -193,30 +198,99 @@ export function ReceivableDetailModal({
                         <th style={{ padding: "6px 10px" }}>Fecha</th>
                         <th style={{ padding: "6px 10px" }}>Método</th>
                         <th style={{ padding: "6px 10px", textAlign: "right" }}>Abono</th>
+                        <th style={{ padding: "6px 10px", textAlign: "center" }}>Soporte</th>
                         <th style={{ padding: "6px 10px" }}>Notas</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {detail.payments.map((p) => (
-                        <tr key={p.id} style={{ borderTop: "1px solid var(--border-color, rgba(255,255,255,0.05))" }}>
-                          <td style={{ padding: "6px 10px", fontWeight: 600 }}>{p.receiptNumber}</td>
-                          <td style={{ padding: "6px 10px", color: "var(--text-muted)" }}>{formatDate(p.createdAt)}</td>
-                          <td style={{ padding: "6px 10px" }}>
-                            <span style={{ textTransform: "capitalize", padding: "2px 6px", background: "rgba(255,255,255,0.05)", borderRadius: 4 }}>
-                              {p.paymentMethod}
-                            </span>
-                          </td>
-                          <td style={{ padding: "6px 10px", textAlign: "right", color: "#10b981", fontWeight: 700 }}>
-                            {formatMoney(p.amount)}
-                            {p.excessToFavour > 0 && (
-                              <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
-                                ({formatMoney(p.appliedToDebt)} a deuda + {formatMoney(p.excessToFavour)} a favor)
-                              </div>
-                            )}
-                          </td>
-                          <td style={{ padding: "6px 10px", color: "var(--text-muted)" }}>{p.notes || "—"}</td>
-                        </tr>
-                      ))}
+                      {detail.payments.map((p) => {
+                        const urls = (p.receiptUrls && p.receiptUrls.length > 0)
+                          ? p.receiptUrls
+                          : (p.receiptUrl ? [p.receiptUrl] : []);
+                        const hasReceipt = urls.length > 0;
+                        const isBank = p.paymentMethod.toLowerCase() !== "efectivo" && p.paymentMethod.toLowerCase() !== "saldo_a_favor";
+
+                        return (
+                          <tr key={p.id} style={{ borderTop: "1px solid var(--border-color, rgba(255,255,255,0.05))" }}>
+                            <td style={{ padding: "6px 10px", fontWeight: 600 }}>{p.receiptNumber}</td>
+                            <td style={{ padding: "6px 10px", color: "var(--text-muted)" }}>{formatDate(p.createdAt)}</td>
+                            <td style={{ padding: "6px 10px" }}>
+                              <span style={{ textTransform: "capitalize", padding: "2px 6px", background: "rgba(255,255,255,0.05)", borderRadius: 4 }}>
+                                {p.paymentMethod}
+                              </span>
+                            </td>
+                            <td style={{ padding: "6px 10px", textAlign: "right", color: "#10b981", fontWeight: 700 }}>
+                              {formatMoney(p.amount)}
+                              {p.excessToFavour > 0 && (
+                                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                                  ({formatMoney(p.appliedToDebt)} a deuda + {formatMoney(p.excessToFavour)} a favor)
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: "6px 10px", textAlign: "center" }}>
+                              {hasReceipt ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setViewingUrls(urls);
+                                    setViewingRef(p.receiptNumber);
+                                  }}
+                                  className="inv-btn inv-btn--ghost"
+                                  style={{
+                                    fontSize: "0.72rem",
+                                    padding: "2px 6px",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "0.25rem",
+                                    color: "#38bdf8",
+                                    border: "1px solid rgba(56, 189, 248, 0.3)",
+                                  }}
+                                  title="Ver foto(s) del soporte"
+                                >
+                                  <Camera size={13} />
+                                  <span>{urls.length === 1 ? "Ver foto" : `${urls.length} fotos`}</span>
+                                </button>
+                              ) : isBank ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setUploadItem({
+                                      id: p.id,
+                                      type: "credit_payment",
+                                      typeLabel: "Abono Cartera por Banco",
+                                      reference: p.receiptNumber,
+                                      concept: `Abono a ${detail.invoiceNumber}`,
+                                      amount: p.amount,
+                                      paymentMethod: p.paymentMethod,
+                                      receiptUrl: null,
+                                      receiptFilename: null,
+                                      isMissing: true,
+                                      createdAt: p.createdAt,
+                                    })
+                                  }
+                                  className="inv-btn inv-btn--ghost"
+                                  style={{
+                                    fontSize: "0.72rem",
+                                    padding: "2px 6px",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "0.25rem",
+                                    color: "#f59e0b",
+                                    border: "1px dashed rgba(245, 158, 11, 0.4)",
+                                  }}
+                                  title="Adjuntar soporte con cámara o archivo"
+                                >
+                                  <Upload size={12} />
+                                  <span>+ Foto</span>
+                                </button>
+                              ) : (
+                                <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>—</span>
+                              )}
+                            </td>
+                            <td style={{ padding: "6px 10px", color: "var(--text-muted)" }}>{p.notes || "—"}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -240,6 +314,30 @@ export function ReceivableDetailModal({
           )}
         </div>
       </div>
+
+      {/* Modal para ver fotos de soporte */}
+      {viewingUrls && viewingUrls.length > 0 && (
+        <ViewReceiptPhotosModal
+          open={Boolean(viewingUrls)}
+          onClose={() => setViewingUrls(null)}
+          urls={viewingUrls}
+          title="Soporte de Abono a Crédito"
+          reference={viewingRef}
+        />
+      )}
+
+      {/* Modal para adjuntar soporte con cámara o fotos si faltaba */}
+      {uploadItem && token && (
+        <UploadReceiptModal
+          token={token}
+          item={uploadItem}
+          onClose={() => setUploadItem(null)}
+          onSuccess={() => {
+            setUploadItem(null);
+            loadDetail();
+          }}
+        />
+      )}
     </div>
   );
 }

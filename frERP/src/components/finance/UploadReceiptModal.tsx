@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Upload, X, CheckCircle2, FileText } from "lucide-react";
+import { Upload, X } from "lucide-react";
 import {
-  uploadClosureReceiptFile,
+  uploadClosureReceiptFiles,
   attachReceiptToOperation,
   type ReceiptAuditItem,
 } from "../../api/finance.js";
+import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
 
 function formatMoney(n: number): string {
   return new Intl.NumberFormat("es-CO", {
@@ -22,14 +23,14 @@ type Props = {
 };
 
 export function UploadReceiptModal({ token, item, onClose, onSuccess }: Props) {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!file) {
-      setError("Por favor selecciona un archivo de imagen o PDF.");
+    if (files.length === 0) {
+      setError("Por favor toma una foto con la cámara o selecciona al menos un archivo.");
       return;
     }
 
@@ -37,15 +38,20 @@ export function UploadReceiptModal({ token, item, onClose, onSuccess }: Props) {
     setError(null);
 
     try {
-      // 1. Subir el archivo al servidor
-      const uploaded = await uploadClosureReceiptFile(token, file);
+      // 1. Subir los archivos al servidor
+      const uploaded = await uploadClosureReceiptFiles(token, files);
 
-      // 2. Adjuntarlo a la operación correspondiente
+      if (!uploaded || uploaded.length === 0) {
+        throw new Error("No se pudo subir ningún archivo.");
+      }
+
+      // 2. Adjuntarlo a la operación correspondiente con soporte múltiple
       await attachReceiptToOperation(token, {
         type: item.type,
         id: item.id,
-        receiptUrl: uploaded.publicUrl,
-        receiptFilename: uploaded.filename,
+        receiptUrl: uploaded[0].url,
+        receiptUrls: uploaded.map((u) => u.url),
+        receiptFilename: uploaded[0].filename,
       });
 
       onSuccess();
@@ -150,47 +156,13 @@ export function UploadReceiptModal({ token, item, onClose, onSuccess }: Props) {
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-          <div>
-            <label
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "0.5rem",
-                padding: "1.5rem",
-                background: "rgba(255, 255, 255, 0.02)",
-                border: "2px dashed var(--border-color, rgba(255, 255, 255, 0.2))",
-                borderRadius: 8,
-                cursor: "pointer",
-                textAlign: "center",
-              }}
-            >
-              <FileText size={32} className="text-primary" />
-              <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>
-                {file ? file.name : "Haz clic para seleccionar imagen o PDF del soporte"}
-              </span>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                Formatos: JPG, PNG, WEBP, PDF (Máx 10 MB)
-              </span>
-              <input
-                type="file"
-                accept="image/*,application/pdf"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  if (e.target.files && e.target.files[0]) {
-                    setFile(e.target.files[0]);
-                  }
-                }}
-              />
-            </label>
-          </div>
-
-          {file && (
-            <div style={{ fontSize: "0.8rem", color: "#10b981", display: "flex", alignItems: "center", gap: "0.4rem" }}>
-              <CheckCircle2 size={16} /> Archivo listo para adjuntar ({(file.size / 1024).toFixed(0)} KB)
-            </div>
-          )}
+          <ReceiptPhotosUploader
+            files={files}
+            onChange={setFiles}
+            disabled={uploading}
+            label="Fotos o comprobantes del soporte"
+            helperText="Puedes tomar una o varias fotos con la cámara o seleccionar archivos JPG, PNG, WEBP o PDF."
+          />
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem", marginTop: "0.5rem" }}>
             <button
@@ -204,9 +176,9 @@ export function UploadReceiptModal({ token, item, onClose, onSuccess }: Props) {
             <button
               type="submit"
               className="inv-btn inv-btn--primary"
-              disabled={uploading || !file}
+              disabled={uploading || files.length === 0}
             >
-              {uploading ? "Subiendo…" : "Adjuntar y Validar"}
+              {uploading ? "Subiendo…" : `Adjuntar y Validar (${files.length})`}
             </button>
           </div>
         </form>

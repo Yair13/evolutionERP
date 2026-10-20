@@ -2719,11 +2719,59 @@ button.inv-pos__pick-media--expand:focus-visible {
 }
 
 .inv-modal {
-  width: min(400px, 100%);
+  width: 100%;
+  max-width: 440px;
   padding: 24px;
   border-radius: 20px;
   background: var(--surface);
   box-shadow: 0 24px 64px rgba(2, 6, 23, 0.25);
+  box-sizing: border-box;
+}
+
+.inv-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.inv-modal__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.inv-modal__subtitle {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.inv-modal__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.inv-modal__close:hover {
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--text);
+  border-color: rgba(15, 23, 42, 0.18);
 }
 
 .inv-modal h2 {
@@ -5702,6 +5750,117 @@ button.inv-pos__pick-media--expand:focus-visible {
   background: #e2e8f0;
 }
 
+.inv-invoice__table tfoot tr.inv-invoice__row-credit-subtotal td {
+  background: #f1f5f9;
+  font-size: 13px;
+  font-weight: 600;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #cbd5e1;
+}
+
+.inv-invoice__table tfoot tr.inv-invoice__row-credit-paid td {
+  background: #f8fafc;
+  font-size: 13px;
+  font-weight: 600;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #cbd5e1;
+}
+
+.inv-invoice__table tfoot tr.inv-invoice__row-credit-balance td {
+  background: #fee2e2;
+  font-size: 15px;
+  font-weight: 800;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  color: #991b1b;
+  border-top: 2px solid #ef4444;
+}
+
+.inv-invoice__credit-card {
+  margin: 0 14px 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inv-invoice__credit-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inv-invoice__credit-title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #334155;
+}
+
+.inv-invoice__credit-badge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.inv-invoice__credit-badge.is-pending {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.inv-invoice__credit-badge.is-paid {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+
+.inv-invoice__credit-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 20px;
+}
+
+.inv-invoice__credit-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inv-invoice__credit-stat span {
+  font-size: 10px;
+  color: #64748b;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.inv-invoice__credit-stat strong {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.inv-invoice__credit-stat strong.is-balance {
+  font-size: 14px;
+  color: #dc2626;
+}
+
+.inv-invoice__credit-stat strong.is-paid-amount {
+  color: #059669;
+}
+
 .inv-invoice__notes {
   margin: 0 14px 10px;
   padding: 8px 10px;
@@ -6431,6 +6590,65 @@ button.inv-pos__pick-media--expand:focus-visible {
     font-size: 11px !important;
     padding-top: 6px !important;
     padding-bottom: 6px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice__table tfoot tr.inv-invoice__row-credit-subtotal td {
+    background: #f1f5f9 !important;
+    font-size: 9px !important;
+    padding: 3px 6px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice__table tfoot tr.inv-invoice__row-credit-paid td {
+    background: #f8fafc !important;
+    font-size: 9px !important;
+    padding: 3px 6px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice__table tfoot tr.inv-invoice__row-credit-balance td {
+    background: #fee2e2 !important;
+    font-size: 11px !important;
+    padding: 4px 6px !important;
+    color: #991b1b !important;
+    border-top: 1.5px solid #ef4444 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.inv-print-invoice .inv-invoice__credit-card {
+    margin: 0 12px 6px !important;
+    padding: 5px 8px !important;
+    border-radius: 6px !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    background: #f8fafc !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.inv-print-invoice .inv-invoice__credit-title {
+    font-size: 8px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice__credit-badge {
+    font-size: 8px !important;
+    padding: 1px 5px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice__credit-stats {
+    gap: 4px 12px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice__credit-stat span {
+    font-size: 7px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice__credit-stat strong {
+    font-size: 9px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice__credit-stat strong.is-balance {
+    font-size: 10px !important;
+    color: #dc2626 !important;
   }
 
   body.inv-print-invoice .inv-invoice__notes {

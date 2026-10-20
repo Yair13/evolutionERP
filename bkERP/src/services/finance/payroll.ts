@@ -45,6 +45,7 @@ export interface PayrollPaymentRecord {
   paymentMethod: string;
   paymentDate: string;
   transferReceiptUrl: string | null;
+  transferReceiptUrls?: string[];
   transferReceiptFilename: string | null;
   referenceCode: string | null;
   deductedFromCashRegister: boolean;
@@ -409,6 +410,7 @@ export async function createPayrollPayment(
     paymentMethod: string;
     paymentDate?: string;
     transferReceiptUrl?: string | null;
+    transferReceiptUrls?: string[] | null;
     transferReceiptFilename?: string | null;
     referenceCode?: string | null;
     notes?: string | null;
@@ -439,6 +441,12 @@ export async function createPayrollPayment(
   const method = data.paymentMethod.trim().toLowerCase();
   const isCash = method === "efectivo";
 
+  const finalUrls = (data.transferReceiptUrls && data.transferReceiptUrls.length > 0)
+    ? data.transferReceiptUrls
+    : (data.transferReceiptUrl ? [data.transferReceiptUrl] : []);
+  const primaryUrl = finalUrls[0] || data.transferReceiptUrl || null;
+  const jsonUrls = JSON.stringify(finalUrls);
+
   const { rows } = await pool.query<any>(
     `
     INSERT INTO payroll_payments (
@@ -456,12 +464,13 @@ export async function createPayrollPayment(
       payment_date,
       transfer_receipt_url,
       transfer_receipt_filename,
+      transfer_receipt_urls,
       reference_code,
       deducted_from_cash_register,
       notes,
       created_by
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::date, CURRENT_DATE), $13, $14, $15, $16, $17, $18
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::date, CURRENT_DATE), $13, $14, $15::jsonb, $16, $17, $18, $19
     )
     RETURNING
       id,
@@ -479,6 +488,7 @@ export async function createPayrollPayment(
       payment_date AS "paymentDate",
       transfer_receipt_url AS "transferReceiptUrl",
       transfer_receipt_filename AS "transferReceiptFilename",
+      transfer_receipt_urls AS "transferReceiptUrls",
       reference_code AS "referenceCode",
       deducted_from_cash_register AS "deductedFromCashRegister",
       notes,
@@ -498,8 +508,9 @@ export async function createPayrollPayment(
       netAmount,
       method,
       data.paymentDate || null,
-      data.transferReceiptUrl || null,
+      primaryUrl,
       data.transferReceiptFilename || null,
+      jsonUrls,
       data.referenceCode?.trim() || null,
       isCash, // Se descuenta directamente de la caja si es efectivo
       data.notes?.trim() || null,
@@ -600,6 +611,7 @@ export async function listPayrollPayments(
       p.payment_date AS "paymentDate",
       p.transfer_receipt_url AS "transferReceiptUrl",
       p.transfer_receipt_filename AS "transferReceiptFilename",
+      COALESCE(p.transfer_receipt_urls, '[]'::jsonb) AS "transferReceiptUrls",
       p.reference_code AS "referenceCode",
       p.deducted_from_cash_register AS "deductedFromCashRegister",
       p.notes,
@@ -651,6 +663,7 @@ export async function getPayrollPaymentDetail(
       p.payment_date AS "paymentDate",
       p.transfer_receipt_url AS "transferReceiptUrl",
       p.transfer_receipt_filename AS "transferReceiptFilename",
+      COALESCE(p.transfer_receipt_urls, '[]'::jsonb) AS "transferReceiptUrls",
       p.reference_code AS "referenceCode",
       p.deducted_from_cash_register AS "deductedFromCashRegister",
       p.notes,
@@ -677,15 +690,23 @@ export async function attachPayrollReceipt(
   paymentId: string,
   receipt: {
     url: string;
+    urls?: string[];
     filename: string;
     referenceCode?: string;
   }
 ): Promise<PayrollPaymentRecord> {
+  const finalUrls = (receipt.urls && receipt.urls.length > 0)
+    ? receipt.urls
+    : (receipt.url ? [receipt.url] : []);
+  const primaryUrl = finalUrls[0] || receipt.url;
+  const jsonUrls = JSON.stringify(finalUrls);
+
   const updates: string[] = [
     `transfer_receipt_url = $2`,
     `transfer_receipt_filename = $3`,
+    `transfer_receipt_urls = $4::jsonb`,
   ];
-  const params: any[] = [paymentId, receipt.url, receipt.filename];
+  const params: any[] = [paymentId, primaryUrl, receipt.filename, jsonUrls];
 
   if (receipt.referenceCode) {
     params.push(receipt.referenceCode.trim());

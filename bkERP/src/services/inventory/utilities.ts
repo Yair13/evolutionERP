@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { getTodayBogotaYmd, getDaysAgoBogotaYmd } from "../../lib/date-utils.js";
 
 export type UtilitiesPeriod = {
   revenue: number;
@@ -159,7 +160,7 @@ export async function getUtilitiesSummary(
   pool: pg.Pool,
   warehouseId: string | null
 ): Promise<UtilitiesSummary> {
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = getTodayBogotaYmd();
   const monthStart = `${todayStr.slice(0, 8)}01`;
 
   const [today, month, topProfitable, lowMargin] = await Promise.all([
@@ -208,9 +209,7 @@ export async function getUtilitiesSummary(
 
   const profitTrend: UtilitiesSummary["profitTrend"] = [];
   for (let i = 13; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
+    const key = getDaysAgoBogotaYmd(i);
     const s = salesMap.get(key);
     const revenue = s?.revenue ?? 0;
     const cost = s?.cost ?? 0;

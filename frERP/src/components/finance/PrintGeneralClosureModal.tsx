@@ -1,4 +1,5 @@
 import { Printer, X, FileSpreadsheet } from "lucide-react";
+import { formatBogotaDateTime } from "../../lib/dateUtils.js";
 import type { GeneralClosureRecord } from "../../api/finance.js";
 
 function formatMoney(n: number): string {
@@ -171,7 +172,7 @@ export function PrintGeneralClosureModal({ closure, onClose }: Props) {
                 Período: <strong>{closure.dateFrom}</strong> al <strong>{closure.dateTo}</strong>
               </div>
               <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                Fecha emisión: {closure.createdAt ? new Date(closure.createdAt).toLocaleString("es-CO") : "—"}
+                Fecha emisión: {closure.createdAt ? formatBogotaDateTime(closure.createdAt) : "—"}
               </div>
             </div>
           </div>

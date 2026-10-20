@@ -60,6 +60,9 @@ export interface PayablePaymentItem {
   appliedToDebt: number;
   excessToFavour: number;
   referenceCode: string | null;
+  receiptUrl?: string | null;
+  receiptUrls?: string[];
+  receiptFilename?: string | null;
   notes: string | null;
   createdAt: string;
   createdByName?: string | null;
@@ -428,6 +431,9 @@ export async function getSupplierProfile(
       pp.applied_to_debt::float AS "appliedToDebt",
       pp.excess_to_favour::float AS "excessToFavour",
       pp.reference_code AS "referenceCode",
+      pp.receipt_url AS "receiptUrl",
+      pp.receipt_filename AS "receiptFilename",
+      COALESCE(pp.receipt_urls, '[]'::jsonb) AS "receiptUrls",
       pp.notes,
       pp.created_at AS "createdAt",
       u.full_name AS "createdByName"
@@ -854,6 +860,9 @@ export async function getAccountPayableDetail(
       pp.applied_to_debt::float AS "appliedToDebt",
       pp.excess_to_favour::float AS "excessToFavour",
       pp.reference_code AS "referenceCode",
+      pp.receipt_url AS "receiptUrl",
+      pp.receipt_filename AS "receiptFilename",
+      COALESCE(pp.receipt_urls, '[]'::jsonb) AS "receiptUrls",
       pp.notes,
       pp.created_at AS "createdAt",
       u.full_name AS "createdByName"
@@ -912,6 +921,9 @@ export async function addPayablePayment(
     referenceCode?: string | null;
     notes?: string | null;
     userId?: string | null;
+    receiptUrl?: string | null;
+    receiptUrls?: string[] | null;
+    receiptFilename?: string | null;
   }
 ): Promise<{
   payment: PayablePaymentItem;
@@ -921,7 +933,18 @@ export async function addPayablePayment(
   newStatus: PayableStatus;
   supplierCreditBalance: number;
 }> {
-  const { payableId, warehouseId, paymentMethod, amount, referenceCode, notes, userId } = params;
+  const {
+    payableId,
+    warehouseId,
+    paymentMethod,
+    amount,
+    referenceCode,
+    notes,
+    userId,
+    receiptUrl,
+    receiptUrls,
+    receiptFilename,
+  } = params;
 
   if (amount <= 0) {
     throw Object.assign(new Error("invalid_amount"), { code: "invalid_amount" });
@@ -1014,17 +1037,25 @@ export async function addPayablePayment(
     // Generar Comprobante de Egreso
     const receiptNumber = await nextPayableReceiptNumber(client, warehouseId);
 
+    const finalUrls = (receiptUrls && receiptUrls.length > 0)
+      ? receiptUrls
+      : (receiptUrl ? [receiptUrl] : []);
+    const primaryUrl = finalUrls[0] || receiptUrl || null;
+    const jsonUrls = JSON.stringify(finalUrls);
+
     const { rows: payRows } = await client.query<PayablePaymentItem>(
       `
       INSERT INTO payable_payments (
         payable_id, supplier_id, warehouse_id, receipt_number,
         payment_method, amount, applied_to_debt, excess_to_favour,
-        reference_code, notes, created_by
+        reference_code, notes, created_by,
+        receipt_url, receipt_filename, receipt_urls
       )
       VALUES (
         $1::uuid, $2::uuid, $3::uuid, $4,
         $5, $6, $7, $8,
-        $9, $10, $11::uuid
+        $9, $10, $11::uuid,
+        $12, $13, $14::jsonb
       )
       RETURNING
         id::text,
@@ -1037,6 +1068,9 @@ export async function addPayablePayment(
         applied_to_debt::float AS "appliedToDebt",
         excess_to_favour::float AS "excessToFavour",
         reference_code AS "referenceCode",
+        receipt_url AS "receiptUrl",
+        receipt_filename AS "receiptFilename",
+        receipt_urls AS "receiptUrls",
         notes,
         created_at AS "createdAt"
       `,
@@ -1052,6 +1086,9 @@ export async function addPayablePayment(
         referenceCode?.trim() || null,
         notes?.trim() || null,
         userId || null,
+        primaryUrl,
+        receiptFilename?.trim() || null,
+        jsonUrls,
       ]
     );
 

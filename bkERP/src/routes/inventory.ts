@@ -642,6 +642,9 @@ export function createInventoryRouter(): Router {
           typeof req.body?.destinationWarehouseId === "string" ? req.body.destinationWarehouseId : null,
         layawayId: typeof req.body?.layawayId === "string" ? req.body.layawayId : null,
         receiptUrl: typeof req.body?.receiptUrl === "string" ? req.body.receiptUrl : null,
+        receiptUrls: Array.isArray(req.body?.receiptUrls)
+          ? req.body.receiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
+          : null,
         receiptFilename: typeof req.body?.receiptFilename === "string" ? req.body.receiptFilename : null,
       });
       res.status(201).json({ item });

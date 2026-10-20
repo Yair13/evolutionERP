@@ -3,6 +3,11 @@ import { fetchPaymentsCashSummary, type PaymentsCashSummary } from "../../api/fi
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import {
+  getTodayBogotaYmd,
+  getYesterdayBogotaYmd,
+  getFirstDayOfMonthBogotaYmd,
+} from "../../lib/dateUtils.js";
+import {
   PiggyBank,
   RefreshCw,
   Wallet,
@@ -20,8 +25,7 @@ function formatMoney(n: number): string {
 }
 
 function localTodayYmd(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return getTodayBogotaYmd();
 }
 
 const METHOD_STYLE: Record<
@@ -145,24 +149,17 @@ export function PaymentsCashPage() {
 
   // Atajos rápidos de fecha
   function setPeriod(type: "today" | "yesterday" | "month") {
-    const today = new Date();
-    const ymd = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
     if (type === "today") {
-      const t = ymd(today);
+      const t = getTodayBogotaYmd();
       setDateFrom(t);
       setDateTo(t);
     } else if (type === "yesterday") {
-      const y = new Date(today);
-      y.setDate(y.getDate() - 1);
-      const str = ymd(y);
-      setDateFrom(str);
-      setDateTo(str);
+      const y = getYesterdayBogotaYmd();
+      setDateFrom(y);
+      setDateTo(y);
     } else if (type === "month") {
-      const first = new Date(today.getFullYear(), today.getMonth(), 1);
-      setDateFrom(ymd(first));
-      setDateTo(ymd(today));
+      setDateFrom(getFirstDayOfMonthBogotaYmd());
+      setDateTo(getTodayBogotaYmd());
     }
   }
 

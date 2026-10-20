@@ -2,16 +2,33 @@ import type pg from "pg";
 
 export interface ReceiptAuditItem {
   id: string;
-  type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "transfer_sent" | "transfer_received" | "payroll";
+  type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "payable_payment" | "transfer_sent" | "transfer_received" | "payroll";
   typeLabel: string;
   reference: string;
   concept: string;
   amount: number;
   paymentMethod: string;
   receiptUrl: string | null;
+  receiptUrls?: string[];
   receiptFilename: string | null;
   isMissing: boolean;
   createdAt: string;
+}
+
+function parseReceiptUrls(raw: any, singleFallback: string | null): string[] {
+  if (Array.isArray(raw)) {
+    const list = raw.filter((u): u is string => typeof u === "string" && u.trim().length > 0);
+    if (list.length > 0) return list;
+  } else if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const list = parsed.filter((u): u is string => typeof u === "string" && u.trim().length > 0);
+        if (list.length > 0) return list;
+      }
+    } catch {}
+  }
+  return singleFallback ? [singleFallback] : [];
 }
 
 export interface DailyClosureWorksheet {
@@ -364,6 +381,7 @@ export async function getDailyClosureData(
       COALESCE(d.invoice_number, d.id::text) AS "docNumber",
       d.receipt_url AS "receiptUrl",
       d.receipt_filename AS "receiptFilename",
+      COALESCE(d.receipt_urls, '[]'::jsonb) AS "receiptUrls",
       d.created_at AS "createdAt",
       p->>'method' AS "method",
       (p->>'amount')::float AS "amount"
@@ -384,6 +402,7 @@ export async function getDailyClosureData(
     [warehouseId, date]
   );
   for (const s of saleDocs) {
+    const urls = parseReceiptUrls(s.receiptUrls, s.receiptUrl || null);
     auditList.push({
       id: s.id,
       type: "sale",
@@ -392,9 +411,10 @@ export async function getDailyClosureData(
       concept: `Venta facturada por ${s.method.toUpperCase()}`,
       amount: Number(s.amount),
       paymentMethod: s.method,
-      receiptUrl: s.receiptUrl || null,
+      receiptUrl: urls[0] || s.receiptUrl || null,
+      receiptUrls: urls,
       receiptFilename: s.receiptFilename || null,
-      isMissing: !s.receiptUrl,
+      isMissing: urls.length === 0,
       createdAt: s.createdAt,
     });
   }
@@ -409,6 +429,7 @@ export async function getDailyClosureData(
       rp.payment_method AS "paymentMethod",
       rp.receipt_url AS "receiptUrl",
       rp.receipt_filename AS "receiptFilename",
+      COALESCE(rp.receipt_urls, '[]'::jsonb) AS "receiptUrls",
       rp.created_at AS "createdAt",
       c.display_name AS "customerName"
     FROM receivable_payments rp
@@ -420,6 +441,7 @@ export async function getDailyClosureData(
     [warehouseId, date]
   );
   for (const cp of creditPayDocs) {
+    const urls = parseReceiptUrls(cp.receiptUrls, cp.receiptUrl || null);
     auditList.push({
       id: cp.id,
       type: "credit_payment",
@@ -428,9 +450,10 @@ export async function getDailyClosureData(
       concept: `Abono de cliente ${cp.customerName ?? ""}`,
       amount: Number(cp.amount),
       paymentMethod: cp.paymentMethod,
-      receiptUrl: cp.receiptUrl || null,
+      receiptUrl: urls[0] || cp.receiptUrl || null,
+      receiptUrls: urls,
       receiptFilename: cp.receiptFilename || null,
-      isMissing: !cp.receiptUrl,
+      isMissing: urls.length === 0,
       createdAt: cp.createdAt,
     });
   }
@@ -445,6 +468,7 @@ export async function getDailyClosureData(
       lp.payment_method AS "paymentMethod",
       lp.receipt_url AS "receiptUrl",
       lp.receipt_filename AS "receiptFilename",
+      COALESCE(lp.receipt_urls, '[]'::jsonb) AS "receiptUrls",
       lp.created_at AS "createdAt",
       c.display_name AS "customerName"
     FROM layaway_payments lp
@@ -457,6 +481,7 @@ export async function getDailyClosureData(
     [warehouseId, date]
   );
   for (const lp of layPayDocs) {
+    const urls = parseReceiptUrls(lp.receiptUrls, lp.receiptUrl || null);
     auditList.push({
       id: lp.id,
       type: "layaway_payment",
@@ -465,9 +490,10 @@ export async function getDailyClosureData(
       concept: `Abono separe cliente ${lp.customerName ?? ""}`,
       amount: Number(lp.amount),
       paymentMethod: lp.paymentMethod,
-      receiptUrl: lp.receiptUrl || null,
+      receiptUrl: urls[0] || lp.receiptUrl || null,
+      receiptUrls: urls,
       receiptFilename: lp.receiptFilename || null,
-      isMissing: !lp.receiptUrl,
+      isMissing: urls.length === 0,
       createdAt: lp.createdAt,
     });
   }
@@ -484,6 +510,7 @@ export async function getDailyClosureData(
       payment_method AS "paymentMethod",
       receipt_url AS "receiptUrl",
       receipt_filename AS "receiptFilename",
+      COALESCE(receipt_urls, '[]'::jsonb) AS "receiptUrls",
       created_at AS "createdAt"
     FROM cash_outflows
     WHERE warehouse_id = $1::uuid
@@ -492,6 +519,7 @@ export async function getDailyClosureData(
     [warehouseId, date]
   );
   for (const o of outflowDocs) {
+    const urls = parseReceiptUrls(o.receiptUrls, o.receiptUrl || null);
     auditList.push({
       id: o.id,
       type: "outflow",
@@ -500,14 +528,54 @@ export async function getDailyClosureData(
       concept: `${o.concept} (${o.beneficiaryName})`,
       amount: Number(o.amount),
       paymentMethod: o.paymentMethod,
-      receiptUrl: o.receiptUrl || null,
+      receiptUrl: urls[0] || o.receiptUrl || null,
+      receiptUrls: urls,
       receiptFilename: o.receiptFilename || null,
-      isMissing: !o.receiptUrl,
+      isMissing: urls.length === 0,
       createdAt: o.createdAt,
     });
   }
 
-  // 8e. Traslados enviados
+  // 8e. Pagos a proveedores por banco
+  const { rows: payablePayDocs } = await pool.query<any>(
+    `
+    SELECT
+      pp.id,
+      pp.receipt_number AS "receiptNumber",
+      pp.amount::float AS "amount",
+      pp.payment_method AS "paymentMethod",
+      pp.receipt_url AS "receiptUrl",
+      pp.receipt_filename AS "receiptFilename",
+      COALESCE(pp.receipt_urls, '[]'::jsonb) AS "receiptUrls",
+      pp.created_at AS "createdAt",
+      s.name AS "supplierName"
+    FROM payable_payments pp
+    LEFT JOIN suppliers s ON s.id = pp.supplier_id
+    WHERE pp.warehouse_id = $1::uuid
+      AND pp.created_at::date = $2::date
+      AND LOWER(TRIM(pp.payment_method)) NOT IN ('efectivo', 'saldo_a_favor')
+    `,
+    [warehouseId, date]
+  );
+  for (const pp of payablePayDocs) {
+    const urls = parseReceiptUrls(pp.receiptUrls, pp.receiptUrl || null);
+    auditList.push({
+      id: pp.id,
+      type: "payable_payment",
+      typeLabel: "Pago Proveedor por Banco",
+      reference: pp.receiptNumber,
+      concept: `Pago a proveedor ${pp.supplierName ?? ""}`,
+      amount: Number(pp.amount),
+      paymentMethod: pp.paymentMethod,
+      receiptUrl: urls[0] || pp.receiptUrl || null,
+      receiptUrls: urls,
+      receiptFilename: pp.receiptFilename || null,
+      isMissing: urls.length === 0,
+      createdAt: pp.createdAt,
+    });
+  }
+
+  // 8f. Traslados enviados
   const { rows: sentTransferDocs } = await pool.query<any>(
     `
     SELECT
@@ -517,6 +585,7 @@ export async function getDailyClosureData(
       ct.carrier_name AS "carrierName",
       ct.sender_receipt_url AS "receiptUrl",
       ct.sender_receipt_filename AS "receiptFilename",
+      COALESCE(ct.sender_receipt_urls, '[]'::jsonb) AS "receiptUrls",
       ct.payment_method AS "paymentMethod",
       ct.created_at AS "createdAt",
       dw.name AS "destName"
@@ -529,6 +598,7 @@ export async function getDailyClosureData(
     [warehouseId, date]
   );
   for (const st of sentTransferDocs) {
+    const urls = parseReceiptUrls(st.receiptUrls, st.receiptUrl || null);
     auditList.push({
       id: st.id,
       type: "transfer_sent",
@@ -537,14 +607,15 @@ export async function getDailyClosureData(
       concept: `Remesa a ${st.destName} (Mensajero: ${st.carrierName})`,
       amount: Number(st.amount),
       paymentMethod: st.paymentMethod,
-      receiptUrl: st.receiptUrl || null,
+      receiptUrl: urls[0] || st.receiptUrl || null,
+      receiptUrls: urls,
       receiptFilename: st.receiptFilename || null,
-      isMissing: !st.receiptUrl,
+      isMissing: urls.length === 0,
       createdAt: st.createdAt,
     });
   }
 
-  // 8f. Traslados recibidos
+  // 8g. Traslados recibidos
   const { rows: recvTransferDocs } = await pool.query<any>(
     `
     SELECT
@@ -554,6 +625,7 @@ export async function getDailyClosureData(
       ct.carrier_name AS "carrierName",
       ct.receiver_receipt_url AS "receiptUrl",
       ct.receiver_receipt_filename AS "receiptFilename",
+      COALESCE(ct.receiver_receipt_urls, '[]'::jsonb) AS "receiptUrls",
       ct.payment_method AS "paymentMethod",
       ct.approved_at AS "createdAt",
       ow.name AS "originName"
@@ -566,6 +638,7 @@ export async function getDailyClosureData(
     [warehouseId, date]
   );
   for (const rt of recvTransferDocs) {
+    const urls = parseReceiptUrls(rt.receiptUrls, rt.receiptUrl || null);
     auditList.push({
       id: rt.id,
       type: "transfer_received",
@@ -574,14 +647,15 @@ export async function getDailyClosureData(
       concept: `Remesa recibida de ${rt.originName} (Mensajero: ${rt.carrierName})`,
       amount: Number(rt.amount),
       paymentMethod: rt.paymentMethod,
-      receiptUrl: rt.receiptUrl || null,
+      receiptUrl: urls[0] || rt.receiptUrl || null,
+      receiptUrls: urls,
       receiptFilename: rt.receiptFilename || null,
-      isMissing: !rt.receiptUrl,
+      isMissing: urls.length === 0,
       createdAt: rt.createdAt,
     });
   }
 
-  // 8g. Nóminas del día
+  // 8h. Nóminas del día
   const { rows: payRollDocs } = await pool.query<any>(
     `
     SELECT
@@ -592,6 +666,7 @@ export async function getDailyClosureData(
       p.payment_method AS "paymentMethod",
       p.transfer_receipt_url AS "receiptUrl",
       p.transfer_receipt_filename AS "receiptFilename",
+      COALESCE(p.transfer_receipt_urls, '[]'::jsonb) AS "receiptUrls",
       p.created_at AS "createdAt"
     FROM payroll_payments p
     JOIN employees e ON e.id = p.employee_id
@@ -602,6 +677,7 @@ export async function getDailyClosureData(
     [warehouseId, date]
   );
   for (const pr of payRollDocs) {
+    const urls = parseReceiptUrls(pr.receiptUrls, pr.receiptUrl || null);
     auditList.push({
       id: pr.id,
       type: "payroll",
@@ -610,9 +686,10 @@ export async function getDailyClosureData(
       concept: `Pago a ${pr.employeeName} por ${pr.paymentMethod.toUpperCase()}`,
       amount: Number(pr.amount),
       paymentMethod: pr.paymentMethod,
-      receiptUrl: pr.receiptUrl || null,
+      receiptUrl: urls[0] || pr.receiptUrl || null,
+      receiptUrls: urls,
       receiptFilename: pr.receiptFilename || null,
-      isMissing: !pr.receiptUrl,
+      isMissing: urls.length === 0,
       createdAt: pr.createdAt,
     });
   }
@@ -927,58 +1004,73 @@ export async function listDailyClosures(
 
 /**
  * Adjuntar comprobante / soporte directamente a una operación específica
- * (venta, abono, egreso, remesa enviada, remesa recibida, nómina).
+ * (venta, abono cartera, abono apartado, egreso, pago a proveedor, remesa enviada, remesa recibida, nómina).
  */
 export async function attachReceiptToOperation(
   pool: pg.Pool,
   data: {
-    type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "transfer_sent" | "transfer_received" | "payroll";
+    type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "cash_outflow" | "payable_payment" | "transfer_sent" | "transfer_received" | "payroll" | "payroll_payment";
     id: string;
     receiptUrl: string;
+    receiptUrls?: string[];
     receiptFilename: string;
   }
 ): Promise<void> {
+  const urls = (data.receiptUrls && data.receiptUrls.length > 0)
+    ? data.receiptUrls
+    : (data.receiptUrl ? [data.receiptUrl] : []);
+  const primaryUrl = urls[0] || data.receiptUrl;
+  const jsonUrls = JSON.stringify(urls);
+
   switch (data.type) {
     case "sale":
       await pool.query(
-        `UPDATE inventory_documents SET receipt_url = $1, receipt_filename = $2 WHERE id = $3::uuid`,
-        [data.receiptUrl, data.receiptFilename, data.id]
+        `UPDATE inventory_documents SET receipt_url = $1, receipt_filename = $2, receipt_urls = $4::jsonb WHERE id = $3::uuid`,
+        [primaryUrl, data.receiptFilename, data.id, jsonUrls]
       );
       break;
     case "credit_payment":
       await pool.query(
-        `UPDATE receivable_payments SET receipt_url = $1, receipt_filename = $2 WHERE id = $3::uuid`,
-        [data.receiptUrl, data.receiptFilename, data.id]
+        `UPDATE receivable_payments SET receipt_url = $1, receipt_filename = $2, receipt_urls = $4::jsonb WHERE id = $3::uuid`,
+        [primaryUrl, data.receiptFilename, data.id, jsonUrls]
       );
       break;
     case "layaway_payment":
       await pool.query(
-        `UPDATE layaway_payments SET receipt_url = $1, receipt_filename = $2 WHERE id = $3::uuid`,
-        [data.receiptUrl, data.receiptFilename, data.id]
+        `UPDATE layaway_payments SET receipt_url = $1, receipt_filename = $2, receipt_urls = $4::jsonb WHERE id = $3::uuid`,
+        [primaryUrl, data.receiptFilename, data.id, jsonUrls]
       );
       break;
     case "outflow":
+    case "cash_outflow":
       await pool.query(
-        `UPDATE cash_outflows SET receipt_url = $1, receipt_filename = $2 WHERE id = $3::uuid`,
-        [data.receiptUrl, data.receiptFilename, data.id]
+        `UPDATE cash_outflows SET receipt_url = $1, receipt_filename = $2, receipt_urls = $4::jsonb WHERE id = $3::uuid`,
+        [primaryUrl, data.receiptFilename, data.id, jsonUrls]
+      );
+      break;
+    case "payable_payment":
+      await pool.query(
+        `UPDATE payable_payments SET receipt_url = $1, receipt_filename = $2, receipt_urls = $4::jsonb WHERE id = $3::uuid`,
+        [primaryUrl, data.receiptFilename, data.id, jsonUrls]
       );
       break;
     case "transfer_sent":
       await pool.query(
-        `UPDATE cash_transfers SET sender_receipt_url = $1, sender_receipt_filename = $2 WHERE id = $3::uuid`,
-        [data.receiptUrl, data.receiptFilename, data.id]
+        `UPDATE cash_transfers SET sender_receipt_url = $1, sender_receipt_filename = $2, sender_receipt_urls = $4::jsonb WHERE id = $3::uuid`,
+        [primaryUrl, data.receiptFilename, data.id, jsonUrls]
       );
       break;
     case "transfer_received":
       await pool.query(
-        `UPDATE cash_transfers SET receiver_receipt_url = $1, receiver_receipt_filename = $2 WHERE id = $3::uuid`,
-        [data.receiptUrl, data.receiptFilename, data.id]
+        `UPDATE cash_transfers SET receiver_receipt_url = $1, receiver_receipt_filename = $2, receiver_receipt_urls = $4::jsonb WHERE id = $3::uuid`,
+        [primaryUrl, data.receiptFilename, data.id, jsonUrls]
       );
       break;
     case "payroll":
+    case "payroll_payment":
       await pool.query(
-        `UPDATE payroll_payments SET transfer_receipt_url = $1, transfer_receipt_filename = $2 WHERE id = $3::uuid`,
-        [data.receiptUrl, data.receiptFilename, data.id]
+        `UPDATE payroll_payments SET transfer_receipt_url = $1, transfer_receipt_filename = $2, transfer_receipt_urls = $4::jsonb WHERE id = $3::uuid`,
+        [primaryUrl, data.receiptFilename, data.id, jsonUrls]
       );
       break;
     default:

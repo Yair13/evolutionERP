@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { getDaysAgoBogotaYmd } from "../lib/date-utils.js";
 
 export type AuthForScope = {
   warehouseIds: string[] | null;
@@ -41,15 +42,8 @@ function scopeClause(alias: string, auth: AuthForScope): { sql: string; params: 
 
 function lastNDates(days: number): string[] {
   const out: string[] = [];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
   for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    out.push(`${y}-${m}-${day}`);
+    out.push(getDaysAgoBogotaYmd(i));
   }
   return out;
 }

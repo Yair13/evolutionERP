@@ -7,6 +7,7 @@ import {
   MOVEMENT_EDIT_TZ,
 } from "./movement-edit-settings.js";
 import { recordCreditFromExitDocument } from "../finance/receivables.js";
+import { getTodayBogotaYmd } from "../../lib/date-utils.js";
 import { redeemLayawayInSale } from "../finance/layaways.js";
 
 export type DocType = "entry" | "exit";
@@ -25,6 +26,7 @@ export type ConfirmExitInput = {
   destinationWarehouseId?: string | null;
   layawayId?: string | null;
   receiptUrl?: string | null;
+  receiptUrls?: string[] | null;
   receiptFilename?: string | null;
 };
 
@@ -98,6 +100,15 @@ export type DocumentLineView = {
 export type InventoryDocumentDetail = InventoryDocumentSummary & {
   lines: DocumentLineView[];
   events?: DocumentStatusEventView[];
+  receivable?: {
+    id: string;
+    totalAmount: number;
+    initialPayment: number;
+    paidAmount: number;
+    balanceAmount: number;
+    status: string;
+    dueDate: string | null;
+  } | null;
 };
 
 export type UnlockDocumentEditingInput = {
@@ -274,7 +285,7 @@ async function nextProductionOrderCode(
     [warehouseId]
   );
   const num = Number(seq[0]?.n ?? 0) + 1;
-  const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const ymd = getTodayBogotaYmd().replace(/-/g, "");
   return `OP-${prefix}-${ymd}-${String(num).padStart(4, "0")}`;
 }
 
@@ -813,6 +824,15 @@ export async function confirmExitDocument(
       destinationWarehouseCode = destWh[0].code;
     }
 
+    const saleTotalForMeta = cleaned.reduce(
+      (sum, line) => sum + line.quantity * (Number(line.unitSalePrice) || 0),
+      0
+    );
+    const initialPaidTotalForMeta = (exitKind === "credit" || exitKind === "sale") && input.paymentBreakdown
+      ? input.paymentBreakdown.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+      : 0;
+    const creditBalanceForMeta = Math.max(0, Math.round((saleTotalForMeta - initialPaidTotalForMeta) * 100) / 100);
+
     const metadata = {
       exitKind,
       customerName: customerName?.trim() || null,
@@ -823,6 +843,10 @@ export async function confirmExitDocument(
       paymentMethod: input.paymentMethod || null,
       paymentBreakdown:
         exitKind === "sale" || exitKind === "credit" ? input.paymentBreakdown || null : null,
+      isCredit: exitKind === "credit",
+      creditTotal: exitKind === "credit" ? saleTotalForMeta : null,
+      creditInitialPayment: exitKind === "credit" ? initialPaidTotalForMeta : null,
+      creditBalance: exitKind === "credit" ? creditBalanceForMeta : null,
       destinationWarehouseId: input.destinationWarehouseId || null,
       destinationWarehouseName,
       destinationWarehouseCode,
@@ -836,13 +860,19 @@ export async function confirmExitDocument(
 
     const invoiceNumber = await nextInvoiceNumber(client, warehouseId);
 
+    const finalReceiptUrls = (input.receiptUrls && input.receiptUrls.length > 0)
+      ? input.receiptUrls
+      : (input.receiptUrl ? [input.receiptUrl] : []);
+    const primaryReceiptUrl = finalReceiptUrls[0] || input.receiptUrl?.trim() || null;
+    const jsonReceiptUrls = JSON.stringify(finalReceiptUrls);
+
     const { rows: docRows } = await client.query<{ id: string }>(
       `
       INSERT INTO inventory_documents (
         warehouse_id, doc_type, status, notes, metadata, created_by, completed_at,
-        invoice_number, exit_kind, customer_id, reason, receipt_url, receipt_filename
+        invoice_number, exit_kind, customer_id, reason, receipt_url, receipt_filename, receipt_urls
       )
-      VALUES ($1::uuid, $2, 'completed', $3, $4::jsonb, $5::uuid, now(), $6, $7, $8::uuid, $9, $10, $11)
+      VALUES ($1::uuid, $2, 'completed', $3, $4::jsonb, $5::uuid, now(), $6, $7, $8::uuid, $9, $10, $11, $12::jsonb)
       RETURNING id::text
       `,
       [
@@ -855,8 +885,9 @@ export async function confirmExitDocument(
         exitKind,
         customerId,
         exitKindLabel(exitKind),
-        input.receiptUrl?.trim() || null,
+        primaryReceiptUrl,
         input.receiptFilename?.trim() || null,
+        jsonReceiptUrls,
       ]
     );
     const documentId = docRows[0]!.id;
@@ -1696,6 +1727,32 @@ export async function getDocument(
       unitCost: l.unit_cost != null ? Number(l.unit_cost) : null,
     })),
     events: await listDocumentEvents(pool, documentId),
+    receivable: await (async () => {
+      if (head.exit_kind !== "credit") return null;
+      const { rows: arRows } = await pool.query<{
+        id: string;
+        total_amount: string;
+        initial_payment: string;
+        paid_amount: string;
+        balance_amount: string;
+        status: string;
+        due_date: string | null;
+      }>(
+        `SELECT id::text, total_amount::text, initial_payment::text, paid_amount::text, balance_amount::text, status, due_date::text
+         FROM accounts_receivable WHERE document_id = $1::uuid LIMIT 1`,
+        [documentId]
+      );
+      if (!arRows[0]) return null;
+      return {
+        id: arRows[0].id,
+        totalAmount: Number(arRows[0].total_amount),
+        initialPayment: Number(arRows[0].initial_payment),
+        paidAmount: Number(arRows[0].paid_amount),
+        balanceAmount: Number(arRows[0].balance_amount),
+        status: arRows[0].status,
+        dueDate: arRows[0].due_date,
+      };
+    })(),
   };
 }
 

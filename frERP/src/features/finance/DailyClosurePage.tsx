@@ -13,7 +13,6 @@ import {
   History,
   Eye,
   ShieldCheck,
-  X,
   Wallet,
   TrendingDown,
   Clock,
@@ -34,6 +33,11 @@ import {
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { UploadReceiptModal } from "../../components/finance/UploadReceiptModal.js";
+import { ViewReceiptPhotosModal } from "../../components/common/ViewReceiptPhotosModal.js";
+import {
+  getTodayBogotaYmd,
+  getFirstDayOfMonthBogotaYmd,
+} from "../../lib/dateUtils.js";
 import { PrintDailyClosureModal } from "../../components/finance/PrintDailyClosureModal.js";
 import { PrintGeneralClosureModal } from "../../components/finance/PrintGeneralClosureModal.js";
 
@@ -46,13 +50,11 @@ function formatMoney(n: number): string {
 }
 
 function localTodayYmd(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return getTodayBogotaYmd();
 }
 
 function localFirstDayOfMonth(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  return getFirstDayOfMonthBogotaYmd();
 }
 
 export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "history" | "general" } = {}) {
@@ -137,7 +139,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
   const [uploadItem, setUploadItem] = useState<ReceiptAuditItem | null>(null);
   const [viewingClosure, setViewingClosure] = useState<DailyClosureRecord | null>(null);
   const [viewingGeneralClosure, setViewingGeneralClosure] = useState<GeneralClosureRecord | null>(null);
-  const [viewingReceiptUrl, setViewingReceiptUrl] = useState<string | null>(null);
+  const [viewingPhotos, setViewingPhotos] = useState<{ title: string; urls: string[] } | null>(null);
 
   // Cargar Hoja de Trabajo Cierre Diario
   const loadWorksheet = useCallback(async () => {
@@ -295,8 +297,6 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
       setSavingGeneral(false);
     }
   }
-
-  const apiBase = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
   // Cálculos dinámicos en vivo del arqueo diario
   const openingCashNum = parseFloat(openingCashInput) || 0;
@@ -851,9 +851,9 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                       </thead>
                       <tbody>
                         {worksheet.receiptAuditList.map((item) => {
-                          const fullUrl = item.receiptUrl
-                            ? (item.receiptUrl.startsWith("http") ? item.receiptUrl : `${apiBase}${item.receiptUrl}`)
-                            : null;
+                          const urls = (item.receiptUrls && item.receiptUrls.length > 0)
+                            ? item.receiptUrls
+                            : (item.receiptUrl ? [item.receiptUrl] : []);
 
                           return (
                             <tr key={`${item.type}-${item.id}`}>
@@ -869,19 +869,24 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                                   </span>
                                 ) : (
                                   <span className="fin-badge fin-badge--success">
-                                    ✓ Adjuntado
+                                    ✓ {urls.length > 1 ? `${urls.length} fotos` : "Adjuntado"}
                                   </span>
                                 )}
                               </td>
                               <td style={{ textAlign: "center" }}>
                                 <div style={{ display: "inline-flex", gap: "0.35rem" }}>
-                                  {fullUrl && (
+                                  {urls.length > 0 && (
                                     <button
                                       type="button"
                                       className="fin-btn fin-btn--ghost fin-btn--sm"
                                       style={{ padding: "0 8px" }}
-                                      onClick={() => setViewingReceiptUrl(fullUrl)}
-                                      title="Ver Comprobante"
+                                      onClick={() =>
+                                        setViewingPhotos({
+                                          title: `Soporte ${item.typeLabel} - ${item.reference}`,
+                                          urls,
+                                        })
+                                      }
+                                      title="Ver fotos / soporte"
                                     >
                                       <Eye size={14} />
                                     </button>
@@ -890,7 +895,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                                     type="button"
                                     className={`fin-btn fin-btn--sm ${item.isMissing ? "fin-btn--primary" : "fin-btn--ghost"}`}
                                     onClick={() => setUploadItem(item)}
-                                    title={item.isMissing ? "Subir soporte obligatorio" : "Reemplazar soporte"}
+                                    title={item.isMissing ? "Subir soporte obligatorio" : "Reemplazar o agregar fotos de soporte"}
                                   >
                                     <Upload size={13} />
                                     <span>{item.isMissing ? "Subir" : "Cambiar"}</span>
@@ -1449,62 +1454,14 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
         />
       )}
 
-      {/* Modal para Previsualizar Imagen de Comprobante */}
-      {viewingReceiptUrl && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            backgroundColor: "rgba(15, 23, 42, 0.75)",
-            backdropFilter: "blur(4px)",
-            zIndex: 1200,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "1rem",
-          }}
-          onClick={() => setViewingReceiptUrl(null)}
-        >
-          <div
-            style={{
-              maxWidth: 750,
-              width: "100%",
-              maxHeight: "90vh",
-              background: "#ffffff",
-              borderRadius: 16,
-              overflow: "hidden",
-              padding: "1.25rem",
-              boxShadow: "var(--fin-shadow-lg)",
-              position: "relative",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <span style={{ fontWeight: 700, fontSize: "0.95rem", color: "#0f172a" }}>Soporte de Pago</span>
-              <button
-                type="button"
-                className="fin-btn fin-btn--ghost fin-btn--sm"
-                onClick={() => setViewingReceiptUrl(null)}
-                style={{ padding: 4 }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            {viewingReceiptUrl.toLowerCase().endsWith(".pdf") ? (
-              <iframe
-                src={viewingReceiptUrl}
-                title="Comprobante PDF"
-                style={{ width: "100%", height: "70vh", border: "none", borderRadius: 8 }}
-              />
-            ) : (
-              <img
-                src={viewingReceiptUrl}
-                alt="Comprobante"
-                style={{ width: "100%", maxHeight: "75vh", objectFit: "contain", borderRadius: 8 }}
-              />
-            )}
-          </div>
-        </div>
+      {/* Modal para Visualizar Fotos / Comprobante */}
+      {viewingPhotos && (
+        <ViewReceiptPhotosModal
+          open={Boolean(viewingPhotos)}
+          onClose={() => setViewingPhotos(null)}
+          title={viewingPhotos.title}
+          urls={viewingPhotos.urls}
+        />
       )}
     </div>
   );

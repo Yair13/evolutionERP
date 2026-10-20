@@ -251,6 +251,7 @@ export type ConfirmExitPayload = {
   destinationWarehouseId?: string | null;
   layawayId?: string | null;
   receiptUrl?: string | null;
+  receiptUrls?: string[] | null;
   receiptFilename?: string | null;
 };
 

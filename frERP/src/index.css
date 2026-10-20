@@ -2281,15 +2281,28 @@ a {
   color: var(--muted);
 }
 
-.field input {
+.field input,
+.field select,
+.field textarea {
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 11px 12px;
-  font-size: 15px;
+  padding: 10px 12px;
+  font-size: 14px;
   font-family: inherit;
+  background: var(--surface);
+  color: var(--text);
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.field input:focus {
+.field select {
+  min-height: 42px;
+  cursor: pointer;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
   outline: 2px solid rgba(15, 110, 99, 0.35);
   outline-offset: 1px;
   border-color: rgba(15, 110, 99, 0.45);

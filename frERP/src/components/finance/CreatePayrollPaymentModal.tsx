@@ -1,19 +1,18 @@
 import { useState, useEffect } from "react";
 import {
   DollarSign,
-  Upload,
   AlertTriangle,
   X,
-  CreditCard,
-  CheckCircle2,
 } from "lucide-react";
 import {
   createPayrollPayment,
-  uploadPayrollReceiptFile,
+  uploadClosureReceiptFiles,
   type EmployeeItem,
   type PayrollPaymentItem,
 } from "../../api/finance.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
+import { getTodayBogotaYmd } from "../../lib/dateUtils.js";
+import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
 
 function formatMoney(n: number): string {
   return new Intl.NumberFormat("es-CO", {
@@ -24,8 +23,7 @@ function formatMoney(n: number): string {
 }
 
 function localTodayYmd(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return getTodayBogotaYmd();
 }
 
 type Props = {
@@ -51,15 +49,15 @@ export function CreatePayrollPaymentModal({
   );
   const [paymentDate, setPaymentDate] = useState(localTodayYmd);
 
-  // Período
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth() + 1;
-  const isSecondHalf = today.getDate() > 15;
-  const defaultStart = `${year}-${String(month).padStart(2, "0")}-${isSecondHalf ? "16" : "01"}`;
-  const lastDay = new Date(year, month, 0).getDate();
-  const defaultEnd = `${year}-${String(month).padStart(2, "0")}-${isSecondHalf ? String(lastDay) : "15"}`;
-  const defaultConcept = `${isSecondHalf ? "2da Quincena" : "1ra Quincena"} ${today.toLocaleString("es-CO", { month: "long" }).toUpperCase()} ${year}`;
+  // Período (calculado con la hora y fecha de Colombia)
+  const todayYmd = getTodayBogotaYmd();
+  const [yearNum, monthNum, dayNum] = todayYmd.split("-").map(Number);
+  const isSecondHalf = dayNum > 15;
+  const defaultStart = `${yearNum}-${String(monthNum).padStart(2, "0")}-${isSecondHalf ? "16" : "01"}`;
+  const lastDay = new Date(yearNum, monthNum, 0).getDate();
+  const defaultEnd = `${yearNum}-${String(monthNum).padStart(2, "0")}-${isSecondHalf ? String(lastDay) : "15"}`;
+  const monthName = new Intl.DateTimeFormat("es-CO", { timeZone: "America/Bogota", month: "long" }).format(new Date());
+  const defaultConcept = `${isSecondHalf ? "2da Quincena" : "1ra Quincena"} ${monthName.toUpperCase()} ${yearNum}`;
 
   const [periodStart, setPeriodStart] = useState(defaultStart);
   const [periodEnd, setPeriodEnd] = useState(defaultEnd);
@@ -73,7 +71,7 @@ export function CreatePayrollPaymentModal({
   // Método de pago
   const [paymentMethod, setPaymentMethod] = useState("efectivo");
   const [referenceCode, setReferenceCode] = useState("");
-  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [notes, setNotes] = useState("");
 
   const [saving, setSaving] = useState(false);
@@ -132,13 +130,22 @@ export function CreatePayrollPaymentModal({
 
     try {
       let receiptUrl: string | null = null;
+      let receiptUrls: string[] = [];
       let receiptFilename: string | null = null;
 
-      // Si es transferencia y se adjuntó archivo, subirlo primero
-      if (!isCash && receiptFile) {
-        const uploadRes = await uploadPayrollReceiptFile(token, receiptFile);
-        receiptUrl = uploadRes.publicUrl;
-        receiptFilename = uploadRes.filename;
+      // Si es transferencia y se adjuntaron fotos/archivos, subirlos primero
+      if (!isCash && receiptFiles.length > 0) {
+        try {
+          const uploads = await uploadClosureReceiptFiles(token, receiptFiles);
+          receiptUrls = uploads.map((u) => u.url);
+          receiptUrl = receiptUrls[0] || null;
+          receiptFilename = uploads[0]?.filename || null;
+        } catch (uploadErr) {
+          console.error("Error al subir soporte de nómina:", uploadErr);
+          setError("No se pudieron subir las fotos del soporte. Por favor reintenta.");
+          setSaving(false);
+          return;
+        }
       }
 
       const res = await createPayrollPayment(token, {
@@ -153,6 +160,7 @@ export function CreatePayrollPaymentModal({
         paymentMethod,
         paymentDate,
         transferReceiptUrl: receiptUrl,
+        transferReceiptUrls: receiptUrls,
         transferReceiptFilename: receiptFilename,
         referenceCode: referenceCode.trim() || null,
         notes: notes.trim() || null,
@@ -480,65 +488,13 @@ export function CreatePayrollPaymentModal({
                 </div>
               </div>
             ) : (
-              /* Soporte de transferencia bancaria enviado por Maicol */
-              <div
-                style={{
-                  padding: "0.85rem",
-                  background: "rgba(2, 132, 199, 0.05)",
-                  border: "1px solid var(--fin-cyan-border)",
-                  borderRadius: 10,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: 6 }}>
-                  <CreditCard size={16} color="var(--accent)" />
-                  <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "#0284c7" }}>
-                    Comprobante de Transferencia Bancaria (Tesorería)
-                  </span>
-                </div>
-                <p style={{ margin: "0 0 8px 0", fontSize: "0.75rem", color: "#64748b" }}>
-                  Sube la captura, foto o PDF del soporte bancario para respaldar la transacción.
-                </p>
-
-                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                  <label
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.4rem",
-                      padding: "6px 12px",
-                      background: "#ffffff",
-                      border: "1px solid var(--border-color)",
-                      borderRadius: 8,
-                      fontSize: "0.8rem",
-                      cursor: "pointer",
-                      fontWeight: 600,
-                      color: "#0f172a",
-                    }}
-                  >
-                    <Upload size={14} /> Seleccionar Archivo
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      style={{ display: "none" }}
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files[0]) {
-                          setReceiptFile(e.target.files[0]);
-                        }
-                      }}
-                    />
-                  </label>
-
-                  {receiptFile ? (
-                    <span style={{ fontSize: "0.8rem", color: "#059669", display: "flex", alignItems: "center", gap: "0.3rem" }}>
-                      <CheckCircle2 size={16} /> {receiptFile.name} ({(receiptFile.size / 1024).toFixed(0)} KB)
-                    </span>
-                  ) : (
-                    <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                      Ningún archivo seleccionado todavía
-                    </span>
-                  )}
-                </div>
-              </div>
+              <ReceiptPhotosUploader
+                files={receiptFiles}
+                onChange={setReceiptFiles}
+                disabled={saving}
+                label="Comprobantes / Fotos de Transferencia Bancaria (Tesorería)"
+                helperText="Puedes tomar fotos con la cámara o subir archivos (imágenes o PDF) del soporte de la transferencia."
+              />
             )}
           </div>
 

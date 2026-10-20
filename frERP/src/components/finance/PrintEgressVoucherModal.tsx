@@ -1,4 +1,5 @@
 import { Printer, X } from "lucide-react";
+import { formatBogotaDateTime } from "../../lib/dateUtils.js";
 import type { CashOutflowItem } from "../../api/finance.js";
 
 type Props = {
@@ -16,14 +17,7 @@ function formatMoney(n: number): string {
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("es-CO", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatBogotaDateTime(iso, { dateStyle: "long", timeStyle: "short" });
 }
 
 export function PrintEgressVoucherModal({ open, outflow, onClose }: Props) {

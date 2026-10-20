@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { X, Download, Upload, CheckCircle2, FileText, Image as ImageIcon } from "lucide-react";
+import { X, Download, FileText, Image as ImageIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { attachPayrollReceipt, type PayrollPaymentItem } from "../../api/finance.js";
+import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
 
 type Props = {
   token: string;
@@ -10,31 +11,33 @@ type Props = {
 };
 
 export function ViewReceiptModal({ token, payment, onClose, onUpdated }: Props) {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [referenceCode, setReferenceCode] = useState(payment.referenceCode || "");
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState(0);
 
   const apiBase = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
-  const fullUrl = payment.transferReceiptUrl
-    ? (payment.transferReceiptUrl.startsWith("http")
-        ? payment.transferReceiptUrl
-        : `${apiBase}${payment.transferReceiptUrl}`)
-    : null;
+  const rawUrls: string[] = (payment.transferReceiptUrls && payment.transferReceiptUrls.length > 0)
+    ? payment.transferReceiptUrls
+    : (payment.transferReceiptUrl ? [payment.transferReceiptUrl] : []);
 
-  const isPdf = payment.transferReceiptFilename?.toLowerCase().endsWith(".pdf") ||
-    payment.transferReceiptUrl?.toLowerCase().endsWith(".pdf");
+  const fullUrls = rawUrls.map((u) => (u.startsWith("http") ? u : `${apiBase}${u}`));
+  const currentUrl = fullUrls[selectedIndex] || fullUrls[0] || null;
+
+  const isPdf = currentUrl?.toLowerCase().includes(".pdf");
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
-    if (!file) {
-      setError("Selecciona un archivo.");
+    if (files.length === 0) {
+      setError("Por favor toma una foto con la cámara o selecciona al menos un archivo.");
       return;
     }
     setUploading(true);
     setError(null);
     try {
-      const res = await attachPayrollReceipt(token, payment.id, file, referenceCode.trim() || undefined);
+      const res = await attachPayrollReceipt(token, payment.id, files, referenceCode.trim() || undefined);
+      setFiles([]);
       onUpdated(res.item);
     } catch (err: any) {
       setError(err?.message || "Error al subir comprobante");
@@ -109,7 +112,7 @@ export function ViewReceiptModal({ token, payment, onClose, onUpdated }: Props) 
         )}
 
         {/* Visualización del comprobante existente */}
-        {fullUrl ? (
+        {currentUrl ? (
           <div style={{ marginBottom: "1.5rem" }}>
             <div
               style={{
@@ -121,8 +124,33 @@ export function ViewReceiptModal({ token, payment, onClose, onUpdated }: Props) 
                 flexDirection: "column",
                 alignItems: "center",
                 padding: "1rem",
+                position: "relative",
               }}
             >
+              {fullUrls.length > 1 && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", marginBottom: "0.75rem" }}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIndex((prev) => (prev > 0 ? prev - 1 : fullUrls.length - 1))}
+                    className="inv-btn inv-btn--ghost inv-btn--sm"
+                    style={{ color: "#fff", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <ChevronLeft size={16} /> Anterior
+                  </button>
+                  <span style={{ fontSize: "0.82rem", color: "#94a3b8", fontWeight: 600 }}>
+                    Foto {selectedIndex + 1} de {fullUrls.length}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIndex((prev) => (prev < fullUrls.length - 1 ? prev + 1 : 0))}
+                    className="inv-btn inv-btn--ghost inv-btn--sm"
+                    style={{ color: "#fff", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                  >
+                    Siguiente <ChevronRight size={16} />
+                  </button>
+                </div>
+              )}
+
               {isPdf ? (
                 <div style={{ padding: "2rem", textAlign: "center" }}>
                   <FileText size={48} className="text-sky-400" style={{ margin: "0 auto 1rem auto" }} />
@@ -131,7 +159,7 @@ export function ViewReceiptModal({ token, payment, onClose, onUpdated }: Props) 
                     {payment.transferReceiptFilename || "comprobante-transferencia.pdf"}
                   </p>
                   <a
-                    href={fullUrl}
+                    href={currentUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="inv-btn inv-btn--primary"
@@ -143,8 +171,8 @@ export function ViewReceiptModal({ token, payment, onClose, onUpdated }: Props) 
               ) : (
                 <>
                   <img
-                    src={fullUrl}
-                    alt="Comprobante de transferencia"
+                    src={currentUrl}
+                    alt={`Comprobante ${selectedIndex + 1}`}
                     style={{
                       maxWidth: "100%",
                       maxHeight: "50vh",
@@ -155,10 +183,10 @@ export function ViewReceiptModal({ token, payment, onClose, onUpdated }: Props) 
                   />
                   <div style={{ display: "flex", justifyContent: "space-between", width: "100%", alignItems: "center" }}>
                     <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                      {payment.transferReceiptFilename || "comprobante.jpg"}
+                      Foto {selectedIndex + 1} de {fullUrls.length}
                     </span>
                     <a
-                      href={fullUrl}
+                      href={currentUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="inv-btn inv-btn--ghost"
@@ -168,6 +196,38 @@ export function ViewReceiptModal({ token, payment, onClose, onUpdated }: Props) 
                     </a>
                   </div>
                 </>
+              )}
+
+              {fullUrls.length > 1 && (
+                <div style={{ display: "flex", gap: "6px", marginTop: "0.75rem", overflowX: "auto", maxWidth: "100%", padding: "4px 0" }}>
+                  {fullUrls.map((u, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setSelectedIndex(i)}
+                      style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: 6,
+                        overflow: "hidden",
+                        border: i === selectedIndex ? "2px solid #38bdf8" : "1px solid rgba(255,255,255,0.2)",
+                        opacity: i === selectedIndex ? 1 : 0.6,
+                        cursor: "pointer",
+                        padding: 0,
+                        background: "#000",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {u.toLowerCase().includes(".pdf") ? (
+                        <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#1e293b", color: "#38bdf8", fontSize: "0.6rem" }}>
+                          PDF
+                        </div>
+                      ) : (
+                        <img src={u} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      )}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
           </div>
@@ -199,69 +259,38 @@ export function ViewReceiptModal({ token, payment, onClose, onUpdated }: Props) 
             borderRadius: 8,
             display: "flex",
             flexDirection: "column",
-            gap: "0.75rem",
+            gap: "0.85rem",
           }}
         >
           <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>
-            {fullUrl ? "Reemplazar Comprobante Bancario" : "Subir Comprobante (Enviado por Maicol / Tesorería)"}
+            {currentUrl ? "Reemplazar / Agregar Comprobantes Bancarios" : "Subir Comprobante (Tesorería / Banco)"}
           </span>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-            <label className="field" style={{ margin: 0 }}>
-              <span>Referencia Bancaria</span>
-              <input
-                type="text"
-                value={referenceCode}
-                onChange={(e) => setReferenceCode(e.target.value)}
-                placeholder="Ej. REF-49201"
-              />
-            </label>
+          <label className="field" style={{ margin: 0 }}>
+            <span>Referencia Bancaria</span>
+            <input
+              type="text"
+              value={referenceCode}
+              onChange={(e) => setReferenceCode(e.target.value)}
+              placeholder="Ej. REF-49201"
+            />
+          </label>
 
-            <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
-              <label
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "0.4rem",
-                  padding: "8px 12px",
-                  background: "rgba(255, 255, 255, 0.08)",
-                  border: "1px solid var(--border-color, rgba(255, 255, 255, 0.15))",
-                  borderRadius: 6,
-                  fontSize: "0.8rem",
-                  cursor: "pointer",
-                  fontWeight: 600,
-                  height: 38,
-                }}
-              >
-                <Upload size={14} /> {file ? "Cambiar archivo" : "Seleccionar Archivo"}
-                <input
-                  type="file"
-                  accept="image/*,application/pdf"
-                  style={{ display: "none" }}
-                  onChange={(e) => {
-                    if (e.target.files && e.target.files[0]) {
-                      setFile(e.target.files[0]);
-                    }
-                  }}
-                />
-              </label>
-            </div>
-          </div>
-
-          {file && (
-            <div style={{ fontSize: "0.8rem", color: "#10b981", display: "flex", alignItems: "center", gap: "0.4rem" }}>
-              <CheckCircle2 size={16} /> {file.name} ({(file.size / 1024).toFixed(0)} KB)
-            </div>
-          )}
+          <ReceiptPhotosUploader
+            files={files}
+            onChange={setFiles}
+            disabled={uploading}
+            label="Fotos o comprobantes de la transferencia"
+            helperText="Puedes tomar fotos con la cámara o seleccionar archivos (imágenes o PDF)."
+          />
 
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.25rem" }}>
             <button
               type="submit"
               className="inv-btn inv-btn--primary"
-              disabled={uploading || !file}
+              disabled={uploading || files.length === 0}
             >
-              {uploading ? "Subiendo…" : "Guardar Soporte"}
+              {uploading ? "Subiendo…" : `Guardar Soporte (${files.length})`}
             </button>
           </div>
         </form>

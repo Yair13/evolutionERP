@@ -8,6 +8,7 @@ import {
 } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
+import { formatBogotaDate } from "../../lib/dateUtils.js";
 import { CreateSupplierModal } from "../../components/finance/CreateSupplierModal.js";
 import { CreatePayableModal } from "../../components/finance/CreatePayableModal.js";
 import { AddPayablePaymentModal } from "../../components/finance/AddPayablePaymentModal.js";
@@ -36,12 +37,7 @@ function formatMoney(n: number): string {
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("es-CO", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return formatBogotaDate(iso);
 }
 
 export function PayablesPage() {

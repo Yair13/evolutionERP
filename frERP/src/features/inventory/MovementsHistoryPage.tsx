@@ -38,18 +38,19 @@ import { useInventoryScope } from "../../hooks/useInventoryScope.js";
 import { clearScanCache } from "../../lib/scanCache.js";
 import { documentTypeLabel } from "./document-labels.js";
 import type { DocType, InventoryDocumentDetail, InventoryDocumentSummary } from "./inventory.types.js";
+import {
+  getTodayBogotaYmd,
+  getYesterdayBogotaYmd,
+  getDaysAgoBogotaYmd,
+  getFirstDayOfMonthBogotaYmd,
+  formatBogotaDateTimeShort,
+  isTodayBogota,
+} from "../../lib/dateUtils.js";
 
 type FilterDocType = "" | DocType | "adjustment";
 
 function formatDate(iso: string): string {
-  try {
-    return new Intl.DateTimeFormat("es-CO", {
-      dateStyle: "short",
-      timeStyle: "short",
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
+  return formatBogotaDateTimeShort(iso);
 }
 
 function formatMoney(n: number): string {
@@ -61,33 +62,23 @@ function formatMoney(n: number): string {
 }
 
 function localTodayYmd(): string {
-  return new Date().toLocaleDateString("en-CA");
+  return getTodayBogotaYmd();
 }
 
 function localYesterdayYmd(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return d.toLocaleDateString("en-CA");
+  return getYesterdayBogotaYmd();
 }
 
 function localSevenDaysAgoYmd(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 6);
-  return d.toLocaleDateString("en-CA");
+  return getDaysAgoBogotaYmd(6);
 }
 
 function localMonthStartYmd(): string {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1).toLocaleDateString("en-CA");
+  return getFirstDayOfMonthBogotaYmd();
 }
 
 function docIsToday(doc: { completedAt?: string | null; createdAt: string }): boolean {
-  const when = doc.completedAt ?? doc.createdAt;
-  try {
-    return new Date(when).toLocaleDateString("en-CA") === localTodayYmd();
-  } catch {
-    return false;
-  }
+  return isTodayBogota(doc.completedAt ?? doc.createdAt);
 }
 
 function isExitCategory(docType: string): boolean {

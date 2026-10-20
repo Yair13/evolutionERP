@@ -17,6 +17,9 @@ export interface CashOutflowItem {
   payableId: string | null;
   billNumber: string | null;
   referenceCode: string | null;
+  receiptUrl?: string | null;
+  receiptUrls?: string[];
+  receiptFilename?: string | null;
   notes: string | null;
   createdAt: string;
   createdByName: string | null;
@@ -40,6 +43,12 @@ export interface CashTransferItem {
   paymentMethod: string;
   status: TransferStatus;
   rejectionReason: string | null;
+  senderReceiptUrl?: string | null;
+  senderReceiptUrls?: string[];
+  senderReceiptFilename?: string | null;
+  receiverReceiptUrl?: string | null;
+  receiverReceiptUrls?: string[];
+  receiverReceiptFilename?: string | null;
   createdAt: string;
   createdByName: string | null;
   approvedAt: string | null;
@@ -110,6 +119,9 @@ export async function createCashOutflow(
     referenceCode?: string | null;
     notes?: string | null;
     userId?: string | null;
+    receiptUrl?: string | null;
+    receiptUrls?: string[] | null;
+    receiptFilename?: string | null;
   }
 ): Promise<CashOutflowItem> {
   const {
@@ -124,6 +136,9 @@ export async function createCashOutflow(
     referenceCode,
     notes,
     userId,
+    receiptUrl,
+    receiptUrls,
+    receiptFilename,
   } = params;
 
   if (amount <= 0) {
@@ -168,17 +183,23 @@ export async function createCashOutflow(
 
     const voucherNumber = await nextOutflowVoucherNumber(client, warehouseId);
 
+    const finalUrls = (receiptUrls && receiptUrls.length > 0)
+      ? receiptUrls
+      : (receiptUrl ? [receiptUrl] : []);
+    const primaryUrl = finalUrls[0] || receiptUrl || null;
+    const jsonUrls = JSON.stringify(finalUrls);
+
     const { rows } = await client.query<{ id: string }>(
       `
       INSERT INTO cash_outflows (
         voucher_number, warehouse_id, concept, beneficiary_name, beneficiary_doc,
         amount, payment_method, supplier_id, payable_id, reference_code,
-        notes, created_by
+        notes, created_by, receipt_url, receipt_filename, receipt_urls
       )
       VALUES (
         $1, $2::uuid, $3, $4, $5,
         $6, $7, $8::uuid, $9::uuid, $10,
-        $11, $12::uuid
+        $11, $12::uuid, $13, $14, $15::jsonb
       )
       RETURNING id::text
       `,
@@ -195,6 +216,9 @@ export async function createCashOutflow(
         referenceCode?.trim() || null,
         notes?.trim() || null,
         userId || null,
+        primaryUrl,
+        receiptFilename?.trim() || null,
+        jsonUrls,
       ]
     );
 
@@ -311,6 +335,9 @@ export async function listCashOutflows(
       co.payable_id::text AS "payableId",
       ap.bill_number AS "billNumber",
       co.reference_code AS "referenceCode",
+      co.receipt_url AS "receiptUrl",
+      co.receipt_filename AS "receiptFilename",
+      COALESCE(co.receipt_urls, '[]'::jsonb) AS "receiptUrls",
       co.notes,
       co.created_at AS "createdAt",
       u.full_name AS "createdByName"
@@ -352,6 +379,9 @@ export async function getCashOutflowDetail(
       co.payable_id::text AS "payableId",
       ap.bill_number AS "billNumber",
       co.reference_code AS "referenceCode",
+      co.receipt_url AS "receiptUrl",
+      co.receipt_filename AS "receiptFilename",
+      COALESCE(co.receipt_urls, '[]'::jsonb) AS "receiptUrls",
       co.notes,
       co.created_at AS "createdAt",
       u.full_name AS "createdByName"
@@ -381,6 +411,9 @@ export async function createCashTransfer(
     concept: string;
     paymentMethod?: string;
     userId?: string | null;
+    senderReceiptUrl?: string | null;
+    senderReceiptUrls?: string[] | null;
+    senderReceiptFilename?: string | null;
   }
 ): Promise<CashTransferItem> {
   const {
@@ -392,6 +425,9 @@ export async function createCashTransfer(
     concept,
     paymentMethod = "efectivo",
     userId,
+    senderReceiptUrl,
+    senderReceiptUrls,
+    senderReceiptFilename,
   } = params;
 
   if (amount <= 0) {
@@ -447,15 +483,23 @@ export async function createCashTransfer(
 
     const code = await nextTransferCode(client, originWarehouseId);
 
+    const finalUrls = (senderReceiptUrls && senderReceiptUrls.length > 0)
+      ? senderReceiptUrls
+      : (senderReceiptUrl ? [senderReceiptUrl] : []);
+    const primaryUrl = finalUrls[0] || senderReceiptUrl || null;
+    const jsonUrls = JSON.stringify(finalUrls);
+
     const { rows } = await client.query<{ id: string }>(
       `
       INSERT INTO cash_transfers (
         code, origin_warehouse_id, destination_warehouse_id, amount,
-        carrier_name, carrier_doc, concept, payment_method, status, created_by
+        carrier_name, carrier_doc, concept, payment_method, status, created_by,
+        sender_receipt_url, sender_receipt_filename, sender_receipt_urls
       )
       VALUES (
         $1, $2::uuid, $3::uuid, $4,
-        $5, $6, $7, $8, 'pending', $9::uuid
+        $5, $6, $7, $8, 'pending', $9::uuid,
+        $10, $11, $12::jsonb
       )
       RETURNING id::text
       `,
@@ -469,6 +513,9 @@ export async function createCashTransfer(
         concept.trim(),
         paymentMethod,
         userId || null,
+        primaryUrl,
+        senderReceiptFilename?.trim() || null,
+        jsonUrls,
       ]
     );
 
@@ -534,7 +581,12 @@ export async function createCashTransfer(
 export async function approveCashTransfer(
   pool: pg.Pool,
   transferId: string,
-  userId: string
+  userId: string,
+  receiptData?: {
+    receiverReceiptUrl?: string | null;
+    receiverReceiptUrls?: string[] | null;
+    receiverReceiptFilename?: string | null;
+  }
 ): Promise<CashTransferItem> {
   const client = await pool.connect();
   try {
@@ -564,15 +616,24 @@ export async function approveCashTransfer(
       });
     }
 
+    const finalUrls = (receiptData?.receiverReceiptUrls && receiptData.receiverReceiptUrls.length > 0)
+      ? receiptData.receiverReceiptUrls
+      : (receiptData?.receiverReceiptUrl ? [receiptData.receiverReceiptUrl] : []);
+    const primaryUrl = finalUrls[0] || receiptData?.receiverReceiptUrl || null;
+    const jsonUrls = JSON.stringify(finalUrls);
+
     await client.query(
       `
       UPDATE cash_transfers
       SET status = 'approved',
           approved_by = $1::uuid,
-          approved_at = now()
+          approved_at = now(),
+          receiver_receipt_url = COALESCE($3, receiver_receipt_url),
+          receiver_receipt_filename = COALESCE($4, receiver_receipt_filename),
+          receiver_receipt_urls = CASE WHEN $5::jsonb <> '[]'::jsonb THEN $5::jsonb ELSE receiver_receipt_urls END
       WHERE id = $2::uuid
       `,
-      [userId, transferId]
+      [userId, transferId, primaryUrl, receiptData?.receiverReceiptFilename?.trim() || null, jsonUrls]
     );
 
     // Notificar al usuario emisor si existe
@@ -749,6 +810,12 @@ export async function listCashTransfers(
       ct.payment_method AS "paymentMethod",
       ct.status,
       ct.rejection_reason AS "rejectionReason",
+      ct.sender_receipt_url AS "senderReceiptUrl",
+      ct.sender_receipt_filename AS "senderReceiptFilename",
+      COALESCE(ct.sender_receipt_urls, '[]'::jsonb) AS "senderReceiptUrls",
+      ct.receiver_receipt_url AS "receiverReceiptUrl",
+      ct.receiver_receipt_filename AS "receiverReceiptFilename",
+      COALESCE(ct.receiver_receipt_urls, '[]'::jsonb) AS "receiverReceiptUrls",
       ct.created_at AS "createdAt",
       u1.full_name AS "createdByName",
       ct.approved_at AS "approvedAt",
@@ -792,6 +859,12 @@ export async function getCashTransferDetail(
       ct.payment_method AS "paymentMethod",
       ct.status,
       ct.rejection_reason AS "rejectionReason",
+      ct.sender_receipt_url AS "senderReceiptUrl",
+      ct.sender_receipt_filename AS "senderReceiptFilename",
+      COALESCE(ct.sender_receipt_urls, '[]'::jsonb) AS "senderReceiptUrls",
+      ct.receiver_receipt_url AS "receiverReceiptUrl",
+      ct.receiver_receipt_filename AS "receiverReceiptFilename",
+      COALESCE(ct.receiver_receipt_urls, '[]'::jsonb) AS "receiverReceiptUrls",
       ct.created_at AS "createdAt",
       u1.full_name AS "createdByName",
       ct.approved_at AS "approvedAt",

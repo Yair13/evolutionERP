@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { InventoryDocumentDetail } from "../../features/inventory/inventory.types.js";
 import { documentTypeLabel } from "../../features/inventory/document-labels.js";
+import { formatBogotaDateTime } from "../../lib/dateUtils.js";
 
 const LOGO_SRC = "/logo-evolution.png?v=4";
 
@@ -29,12 +30,7 @@ function paymentMethodLabel(method: string): string {
 }
 
 function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  try {
-    return new Intl.DateTimeFormat("es-CO", { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
+  return formatBogotaDateTime(iso);
 }
 
 function eventLabel(status: string): string {
@@ -83,11 +79,19 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
   const isEntry = doc.docType === "entry";
   const isAdjustment = doc.docType === "adjustment";
   const kind = documentTypeLabel(doc);
+  const isCredit =
+    doc.exitKind === "credit" ||
+    doc.metadata?.exitKind === "credit" ||
+    doc.metadata?.isCredit === true ||
+    kind === "Crédito" ||
+    Boolean(doc.receivable);
   const title = isAdjustment
     ? "Comprobante de ajuste de inventario"
     : isEntry
       ? "Comprobante de entrada"
-      : "Comprobante de salida";
+      : isCredit
+        ? "Comprobante de salida · Venta a crédito"
+        : "Comprobante de salida";
   const isOp = Boolean(
     doc.productionOrderCode || doc.entryType === "production_order" || doc.metadata?.entryType === "production_order"
   );
@@ -99,6 +103,41 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
   const lineCount = doc.lines.length;
   const density =
     lineCount <= 3 ? "sparse" : lineCount <= 8 ? "cozy" : lineCount <= 16 ? "dense" : "packed";
+
+  const paymentBreakdown: { method: string; amount: number }[] = Array.isArray(
+    doc.metadata?.paymentBreakdown
+  )
+    ? doc.metadata.paymentBreakdown
+    : doc.metadata?.paymentMethod
+      ? [{ method: doc.metadata.paymentMethod, amount: doc.totalAmount ?? 0 }]
+      : [];
+
+  const breakdownPaidTotal = paymentBreakdown.reduce(
+    (sum, p) => sum + (Number(p.amount) || 0),
+    0
+  );
+
+  const totalSaleAmount = doc.totalAmount ?? 0;
+  const initialPaymentTotal =
+    doc.receivable?.initialPayment != null
+      ? doc.receivable.initialPayment
+      : doc.metadata?.creditInitialPayment != null
+        ? Number(doc.metadata.creditInitialPayment)
+        : breakdownPaidTotal;
+
+  const totalPaidToDate =
+    doc.receivable?.paidAmount != null
+      ? doc.receivable.paidAmount
+      : initialPaymentTotal;
+
+  const balancePending =
+    doc.receivable?.balanceAmount != null
+      ? doc.receivable.balanceAmount
+      : doc.metadata?.creditBalance != null
+        ? Number(doc.metadata.creditBalance)
+        : Math.max(0, totalSaleAmount - initialPaymentTotal);
+
+  const isFullyPaid = isCredit && balancePending <= 0.01;
 
   const modal = (
     <div className="inv-modal-backdrop inv-invoice-backdrop" role="presentation">
@@ -148,6 +187,12 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
                 <span>Fecha</span>
                 <strong>{formatDate(doc.completedAt ?? doc.createdAt)}</strong>
               </div>
+              {isCredit ? (
+                <div className="inv-invoice__meta-item">
+                  <span>Modalidad</span>
+                  <strong style={{ color: "#d97706" }}>Crédito</strong>
+                </div>
+              ) : null}
               {doc.productionOrderCode && doc.productionOrderCode !== doc.invoiceNumber ? (
                 <div className="inv-invoice__meta-item">
                   <span>Orden Prod.</span>
@@ -206,19 +251,41 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
                   <span>Registrado por</span> <strong>{doc.createdByName}</strong>
                 </p>
               ) : null}
-              {Array.isArray(doc.metadata?.paymentBreakdown) &&
-              doc.metadata.paymentBreakdown.length > 0 ? (
+              {isCredit ? (
                 <div className="inv-invoice__payments">
-                  <span className="inv-invoice__payments-label">Métodos de pago</span>
-                  <ul className="inv-invoice__payments-list">
-                    {doc.metadata.paymentBreakdown.map(
-                      (payment: { method: string; amount: number }, index: number) => (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "4px" }}>
+                    <span className="inv-invoice__payments-label">
+                      Abono inicial / Medios de pago
+                    </span>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "#059669" }}>
+                      Total abonado: {formatMoney(initialPaymentTotal)}
+                    </span>
+                  </div>
+                  {paymentBreakdown.length > 0 ? (
+                    <ul className="inv-invoice__payments-list">
+                      {paymentBreakdown.map((payment, index) => (
                         <li key={`${payment.method}-${index}`}>
                           <strong>{paymentMethodLabel(payment.method)}</strong>
                           <span>{formatMoney(Number(payment.amount))}</span>
                         </li>
-                      )
-                    )}
+                      ))}
+                    </ul>
+                  ) : (
+                    <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#64748b" }}>
+                      Sin abono inicial ($ 0) · Crédito por el 100% del valor
+                    </p>
+                  )}
+                </div>
+              ) : paymentBreakdown.length > 0 ? (
+                <div className="inv-invoice__payments">
+                  <span className="inv-invoice__payments-label">Métodos de pago</span>
+                  <ul className="inv-invoice__payments-list">
+                    {paymentBreakdown.map((payment, index) => (
+                      <li key={`${payment.method}-${index}`}>
+                        <strong>{paymentMethodLabel(payment.method)}</strong>
+                        <span>{formatMoney(Number(payment.amount))}</span>
+                      </li>
+                    ))}
                   </ul>
                 </div>
               ) : doc.metadata?.paymentMethod ? (
@@ -265,26 +332,105 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
                 })}
               </tbody>
               <tfoot>
-                <tr>
-                  {!showValues ? (
-                    <>
-                      <td colSpan={2}>Total</td>
+                {!showValues ? (
+                  <tr>
+                    <td colSpan={2}>Total</td>
+                    <td>
+                      <strong>{doc.totalQuantity} uds</strong>
+                    </td>
+                  </tr>
+                ) : isCredit ? (
+                  <>
+                    <tr className="inv-invoice__row-credit-subtotal">
+                      <td colSpan={4}>Total venta ({doc.totalQuantity} uds)</td>
                       <td>
-                        <strong>{doc.totalQuantity} uds</strong>
+                        <strong>{formatMoney(totalSaleAmount)}</strong>
                       </td>
-                    </>
-                  ) : (
-                    <>
-                      <td colSpan={4}>Total ({doc.totalQuantity} uds)</td>
+                    </tr>
+                    <tr className="inv-invoice__row-credit-paid">
+                      <td colSpan={4}>
+                        (-) Abono inicial recibido
+                        {doc.receivable && doc.receivable.paidAmount > initialPaymentTotal ? (
+                          <span style={{ fontSize: "11px", fontWeight: "normal", marginLeft: "6px", color: "#059669" }}>
+                            (Abonos acumulados a hoy: {formatMoney(totalPaidToDate)})
+                          </span>
+                        ) : null}
+                      </td>
                       <td>
-                        <strong>{formatMoney(doc.totalAmount ?? 0)}</strong>
+                        <strong style={{ color: "#059669" }}>
+                          - {formatMoney(initialPaymentTotal)}
+                        </strong>
                       </td>
-                    </>
-                  )}
-                </tr>
+                    </tr>
+                    <tr className="inv-invoice__row-credit-balance">
+                      <td colSpan={4}>
+                        <span style={{ textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 800 }}>
+                          SALDO PENDIENTE (POR COBRAR)
+                        </span>
+                      </td>
+                      <td>
+                        <strong
+                          style={{
+                            color: balancePending > 0 ? "#dc2626" : "#059669",
+                            fontSize: "1.15em",
+                            fontWeight: 800,
+                          }}
+                        >
+                          {formatMoney(balancePending)}
+                        </strong>
+                      </td>
+                    </tr>
+                  </>
+                ) : (
+                  <tr>
+                    <td colSpan={4}>Total ({doc.totalQuantity} uds)</td>
+                    <td>
+                      <strong>{formatMoney(doc.totalAmount ?? 0)}</strong>
+                    </td>
+                  </tr>
+                )}
               </tfoot>
             </table>
           </div>
+
+          {isCredit ? (
+            <section className="inv-invoice__credit-card" aria-label="Resumen de crédito">
+              <div className="inv-invoice__credit-title-row">
+                <span className="inv-invoice__credit-title">Resumen de cuenta por cobrar</span>
+                <span className={`inv-invoice__credit-badge ${isFullyPaid ? "is-paid" : "is-pending"}`}>
+                  {isFullyPaid ? "Crédito cancelado (Pagado)" : "Saldo pendiente de cobro"}
+                </span>
+              </div>
+              <div className="inv-invoice__credit-stats">
+                <div className="inv-invoice__credit-stat">
+                  <span>Total venta</span>
+                  <strong>{formatMoney(totalSaleAmount)}</strong>
+                </div>
+                <div className="inv-invoice__credit-stat">
+                  <span>Abono inicial</span>
+                  <strong className="is-paid-amount">{formatMoney(initialPaymentTotal)}</strong>
+                </div>
+                {doc.receivable && doc.receivable.paidAmount > initialPaymentTotal ? (
+                  <div className="inv-invoice__credit-stat">
+                    <span>Abonos acumulados</span>
+                    <strong className="is-paid-amount">{formatMoney(totalPaidToDate)}</strong>
+                  </div>
+                ) : null}
+                <div className="inv-invoice__credit-stat">
+                  <span>Saldo pendiente</span>
+                  <strong className={balancePending > 0 ? "is-balance" : "is-paid-amount"}>
+                    {formatMoney(balancePending)}
+                  </strong>
+                </div>
+                {doc.receivable?.dueDate ? (
+                  <div className="inv-invoice__credit-stat">
+                    <span>Fecha límite</span>
+                    <strong>{doc.receivable.dueDate}</strong>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
 
           {doc.notes ? (
             <p className="inv-invoice__notes">

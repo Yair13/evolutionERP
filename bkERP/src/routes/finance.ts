@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { getTodayBogotaYmd, getFirstDayOfMonthBogotaYmd } from "../lib/date-utils.js";
 import { getPool } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { isUuid } from "../lib/uuid.js";
@@ -63,6 +64,7 @@ import {
 } from "../services/finance/daily-closures.js";
 import {
   closureReceiptUpload,
+  closureReceiptsMultiUpload,
   saveClosureReceiptFile,
 } from "../lib/closure-uploads.js";
 import {
@@ -200,6 +202,11 @@ export function createFinanceRouter(): Router {
         : "efectivo";
 
     const notes = typeof req.body?.notes === "string" ? req.body.notes : null;
+    const receiptUrl = typeof req.body?.receiptUrl === "string" ? req.body.receiptUrl : null;
+    const receiptUrls = Array.isArray(req.body?.receiptUrls)
+      ? req.body.receiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
+      : null;
+    const receiptFilename = typeof req.body?.receiptFilename === "string" ? req.body.receiptFilename : null;
 
     try {
       const result = await addReceivablePayment(pool, {
@@ -209,6 +216,9 @@ export function createFinanceRouter(): Router {
         amount,
         notes,
         userId: req.auth!.userId,
+        receiptUrl,
+        receiptUrls,
+        receiptFilename,
       });
       res.status(201).json(result);
     } catch (err: any) {
@@ -422,6 +432,11 @@ export function createFinanceRouter(): Router {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     const expiryDate = typeof req.body?.expiryDate === "string" ? req.body.expiryDate : null;
     const notes = typeof req.body?.notes === "string" ? req.body.notes : null;
+    const receiptUrl = typeof req.body?.receiptUrl === "string" ? req.body.receiptUrl : null;
+    const receiptUrls = Array.isArray(req.body?.receiptUrls)
+      ? req.body.receiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
+      : null;
+    const receiptFilename = typeof req.body?.receiptFilename === "string" ? req.body.receiptFilename : null;
 
     try {
       const layaway = await createLayaway(pool, {
@@ -434,6 +449,9 @@ export function createFinanceRouter(): Router {
         expiryDate,
         notes,
         userId: req.auth!.userId,
+        receiptUrl,
+        receiptUrls,
+        receiptFilename,
       });
       res.status(201).json({ item: layaway });
     } catch (err: any) {
@@ -509,6 +527,11 @@ export function createFinanceRouter(): Router {
 
     const paymentMethod = typeof req.body?.paymentMethod === "string" ? req.body.paymentMethod : "efectivo";
     const notes = typeof req.body?.notes === "string" ? req.body.notes : null;
+    const receiptUrl = typeof req.body?.receiptUrl === "string" ? req.body.receiptUrl : null;
+    const receiptUrls = Array.isArray(req.body?.receiptUrls)
+      ? req.body.receiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
+      : null;
+    const receiptFilename = typeof req.body?.receiptFilename === "string" ? req.body.receiptFilename : null;
 
     try {
       const result = await addLayawayPayment(pool, {
@@ -518,6 +541,9 @@ export function createFinanceRouter(): Router {
         amount,
         notes,
         userId: req.auth!.userId,
+        receiptUrl,
+        receiptUrls,
+        receiptFilename,
       });
       res.status(201).json(result);
     } catch (err: any) {
@@ -906,6 +932,11 @@ export function createFinanceRouter(): Router {
     const paymentMethod = typeof req.body?.paymentMethod === "string" ? req.body.paymentMethod : "efectivo";
     const referenceCode = typeof req.body?.referenceCode === "string" ? req.body.referenceCode : null;
     const notes = typeof req.body?.notes === "string" ? req.body.notes : null;
+    const receiptUrl = typeof req.body?.receiptUrl === "string" ? req.body.receiptUrl : null;
+    const receiptUrls = Array.isArray(req.body?.receiptUrls)
+      ? req.body.receiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
+      : null;
+    const receiptFilename = typeof req.body?.receiptFilename === "string" ? req.body.receiptFilename : null;
 
     try {
       const result = await addPayablePayment(pool, {
@@ -916,6 +947,9 @@ export function createFinanceRouter(): Router {
         referenceCode,
         notes,
         userId: req.auth!.userId,
+        receiptUrl,
+        receiptUrls,
+        receiptFilename,
       });
       res.status(201).json(result);
     } catch (err: any) {
@@ -1061,6 +1095,11 @@ export function createFinanceRouter(): Router {
     const payableId = typeof req.body?.payableId === "string" && isUuid(req.body.payableId) ? req.body.payableId : null;
     const referenceCode = typeof req.body?.referenceCode === "string" ? req.body.referenceCode : null;
     const notes = typeof req.body?.notes === "string" ? req.body.notes : null;
+    const receiptUrl = typeof req.body?.receiptUrl === "string" ? req.body.receiptUrl : null;
+    const receiptUrls = Array.isArray(req.body?.receiptUrls)
+      ? req.body.receiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
+      : null;
+    const receiptFilename = typeof req.body?.receiptFilename === "string" ? req.body.receiptFilename : null;
 
     try {
       const item = await createCashOutflow(pool, {
@@ -1075,6 +1114,9 @@ export function createFinanceRouter(): Router {
         referenceCode,
         notes,
         userId: req.auth!.userId,
+        receiptUrl,
+        receiptUrls,
+        receiptFilename,
       });
       res.status(201).json({ item });
     } catch (err: any) {
@@ -1199,6 +1241,11 @@ export function createFinanceRouter(): Router {
     const carrierDoc = typeof req.body?.carrierDoc === "string" ? req.body.carrierDoc : null;
     const concept = typeof req.body?.concept === "string" ? req.body.concept : "";
     const paymentMethod = typeof req.body?.paymentMethod === "string" ? req.body.paymentMethod : "efectivo";
+    const senderReceiptUrl = typeof req.body?.senderReceiptUrl === "string" ? req.body.senderReceiptUrl : null;
+    const senderReceiptUrls = Array.isArray(req.body?.senderReceiptUrls)
+      ? req.body.senderReceiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
+      : null;
+    const senderReceiptFilename = typeof req.body?.senderReceiptFilename === "string" ? req.body.senderReceiptFilename : null;
 
     try {
       const item = await createCashTransfer(pool, {
@@ -1210,6 +1257,9 @@ export function createFinanceRouter(): Router {
         concept,
         paymentMethod,
         userId: req.auth!.userId,
+        senderReceiptUrl,
+        senderReceiptUrls,
+        senderReceiptFilename,
       });
       res.status(201).json({ item });
     } catch (err: any) {
@@ -1269,8 +1319,18 @@ export function createFinanceRouter(): Router {
       return;
     }
 
+    const receiverReceiptUrl = typeof req.body?.receiverReceiptUrl === "string" ? req.body.receiverReceiptUrl : null;
+    const receiverReceiptUrls = Array.isArray(req.body?.receiverReceiptUrls)
+      ? req.body.receiverReceiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
+      : null;
+    const receiverReceiptFilename = typeof req.body?.receiverReceiptFilename === "string" ? req.body.receiverReceiptFilename : null;
+
     try {
-      const item = await approveCashTransfer(pool, id, req.auth!.userId);
+      const item = await approveCashTransfer(pool, id, req.auth!.userId, {
+        receiverReceiptUrl,
+        receiverReceiptUrls,
+        receiverReceiptFilename,
+      });
       res.json({ item });
     } catch (err: any) {
       if (err.code === "transfer_not_found") {
@@ -1564,6 +1624,9 @@ export function createFinanceRouter(): Router {
         paymentMethod: body.paymentMethod,
         paymentDate: body.paymentDate,
         transferReceiptUrl: body.transferReceiptUrl,
+        transferReceiptUrls: Array.isArray(body.transferReceiptUrls)
+          ? body.transferReceiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
+          : null,
         transferReceiptFilename: body.transferReceiptFilename,
         referenceCode: body.referenceCode,
         notes: body.notes,
@@ -1582,7 +1645,7 @@ export function createFinanceRouter(): Router {
   /**
    * Adjuntar soporte de transferencia a un pago existente.
    */
-  r.post("/payroll/payments/:id/receipt", requireAuth, payrollReceiptUpload.single("file"), async (req, res, next) => {
+  r.post("/payroll/payments/:id/receipt", requireAuth, payrollReceiptUpload.any(), async (req, res, next) => {
     const pool = getPool();
     if (!pool) {
       res.status(503).json({ error: "database_not_configured" });
@@ -1595,17 +1658,22 @@ export function createFinanceRouter(): Router {
       return;
     }
 
-    if (!req.file) {
+    const files = (req.files as Express.Multer.File[]) || (req.file ? [req.file] : []);
+    if (files.length === 0) {
       res.status(400).json({ error: "no_file_uploaded" });
       return;
     }
 
     try {
-      const saved = await savePayrollReceiptFile(req.file.buffer, req.file.originalname);
+      const savedList = await Promise.all(
+        files.map((f) => savePayrollReceiptFile(f.buffer, f.originalname))
+      );
+      const urls = savedList.map((s) => s.publicUrl);
       const referenceCode = typeof req.body?.referenceCode === "string" ? req.body.referenceCode : undefined;
       const updated = await attachPayrollReceipt(pool, id, {
-        url: saved.publicUrl,
-        filename: saved.filename,
+        url: urls[0],
+        urls,
+        filename: savedList[0].filename,
         referenceCode,
       });
       res.json({ item: updated });
@@ -1669,7 +1737,7 @@ export function createFinanceRouter(): Router {
 
     const date = typeof req.query.date === "string" && req.query.date.trim()
       ? req.query.date.trim()
-      : new Date().toISOString().slice(0, 10);
+      : getTodayBogotaYmd();
 
     try {
       const worksheet = await getDailyClosureData(pool, targetWh, date);
@@ -1788,7 +1856,27 @@ export function createFinanceRouter(): Router {
   });
 
   /**
-   * Adjuntar comprobante directamente a una operación (venta, abono, egreso, remesa, nómina).
+   * Subir múltiples fotos / comprobantes a la vez.
+   */
+  r.post("/closures/upload-receipts", requireAuth, closureReceiptsMultiUpload.array("files", 10), async (req, res, next) => {
+    const files = (req.files as Express.Multer.File[]) || [];
+    if (!files || files.length === 0) {
+      res.status(400).json({ error: "no_files_uploaded" });
+      return;
+    }
+
+    try {
+      const saved = await Promise.all(
+        files.map((f) => saveClosureReceiptFile(f.buffer, f.originalname))
+      );
+      res.json({ files: saved });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * Adjuntar comprobante directamente a una operación (venta, abono cartera, abono apartado, egreso, pago proveedor, remesa, nómina).
    */
   r.post("/closures/attach-receipt", requireAuth, async (req, res, next) => {
     const pool = getPool();
@@ -1798,16 +1886,21 @@ export function createFinanceRouter(): Router {
     }
 
     const body = req.body || {};
-    if (!body.type || !body.id || !body.receiptUrl) {
+    if (!body.type || !body.id || (!body.receiptUrl && (!Array.isArray(body.receiptUrls) || body.receiptUrls.length === 0))) {
       res.status(400).json({ error: "missing_required_fields" });
       return;
     }
+
+    const receiptUrls = Array.isArray(body.receiptUrls)
+      ? body.receiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
+      : (body.receiptUrl ? [body.receiptUrl] : []);
 
     try {
       await attachReceiptToOperation(pool, {
         type: body.type,
         id: body.id,
-        receiptUrl: body.receiptUrl,
+        receiptUrl: receiptUrls[0] || body.receiptUrl,
+        receiptUrls,
         receiptFilename: body.receiptFilename || "comprobante.jpg",
       });
       res.json({ ok: true });
@@ -1834,11 +1927,11 @@ export function createFinanceRouter(): Router {
 
     const dateFrom = typeof req.query.dateFrom === "string" && req.query.dateFrom.trim()
       ? req.query.dateFrom.trim()
-      : new Date().toISOString().slice(0, 8) + "01";
+      : getFirstDayOfMonthBogotaYmd();
 
     const dateTo = typeof req.query.dateTo === "string" && req.query.dateTo.trim()
       ? req.query.dateTo.trim()
-      : new Date().toISOString().slice(0, 10);
+      : getTodayBogotaYmd();
 
     try {
       const data = await getGeneralClosureData(pool, { warehouseId, dateFrom, dateTo });

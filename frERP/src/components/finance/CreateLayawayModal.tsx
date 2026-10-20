@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { createLayaway } from "../../api/finance.js";
+import { createLayaway, uploadClosureReceiptFiles } from "../../api/finance.js";
 import { fetchCustomers, createCustomer, type Customer } from "../../api/inventory.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { Bookmark, X, UserCheck, PlusCircle } from "lucide-react";
+import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
 
 type Props = {
   open: boolean;
@@ -49,6 +50,7 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
   const [paymentMethod, setPaymentMethod] = useState<string>("efectivo");
   const [expiryDate, setExpiryDate] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
 
   // Búsqueda y creación de cliente
   const [searchQuery, setSearchQuery] = useState("");
@@ -74,6 +76,7 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
       setPaymentMethod("efectivo");
       setExpiryDate("");
       setNotes("");
+      setReceiptFiles([]);
       setSearchQuery("");
       setCustomerList([]);
       setSelectedCustomer(null);
@@ -166,6 +169,19 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
     setError(null);
 
     try {
+      let uploadedUrl: string | null = null;
+      let uploadedUrls: string[] = [];
+      let uploadedFilename: string | null = null;
+
+      if (initialPayment > 0 && receiptFiles.length > 0 && token) {
+        const upRes = await uploadClosureReceiptFiles(token, receiptFiles);
+        if (upRes.length > 0) {
+          uploadedUrl = upRes[0]?.publicUrl || null;
+          uploadedFilename = upRes[0]?.filename || null;
+          uploadedUrls = upRes.map((u) => u.publicUrl);
+        }
+      }
+
       await createLayaway(token, {
         warehouseId: selectedWarehouseId,
         customerId: selectedCustomer.id,
@@ -174,6 +190,9 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
         paymentMethod: initialPayment > 0 ? paymentMethod : undefined,
         expiryDate: expiryDate || null,
         notes: notes.trim() || null,
+        receiptUrl: uploadedUrl,
+        receiptUrls: uploadedUrls.length > 0 ? uploadedUrls : undefined,
+        receiptFilename: uploadedFilename,
       });
 
       onSuccess();
@@ -417,6 +436,19 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
               <div style={{ marginTop: "0.5rem", fontSize: "0.82rem", display: "flex", justifyContent: "space-between" }}>
                 <span>Abonado: <strong style={{ color: "#10b981" }}>{formatMoney(initialPaymentNum)}</strong></span>
                 <span>Saldo pendiente: <strong style={{ color: "#f59e0b" }}>{formatMoney(remaining)}</strong></span>
+              </div>
+            )}
+
+            {/* Soporte fotográfico si abono inicial es por banco */}
+            {initialPaymentNum > 0 && paymentMethod !== "efectivo" && paymentMethod !== "saldo_a_favor" && (
+              <div style={{ marginTop: "0.75rem" }}>
+                <ReceiptPhotosUploader
+                  files={receiptFiles}
+                  onChange={setReceiptFiles}
+                  disabled={submitting}
+                  label="Comprobantes / Fotos de Soporte (No Efectivo)"
+                  hint="Toma fotos con la cámara o sube comprobantes del abono inicial."
+                />
               </div>
             )}
           </div>

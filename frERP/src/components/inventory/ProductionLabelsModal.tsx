@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { markLabelsPrinted } from "../../api/inventory.js";
 import type { InventoryDocumentDetail } from "../../features/inventory/inventory.types.js";
+import { formatBogotaDate } from "../../lib/dateUtils.js";
 
 const LOGO_SRC = "/logo-evolution.png?v=4";
 
@@ -75,7 +76,7 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
   const orderCode = doc.productionOrderCode || doc.invoiceNumber || "—";
   const dateLabel = doc.completedAt
     ? doc.completedAt.slice(0, 10)
-    : new Date().toLocaleDateString("es-CO");
+    : formatBogotaDate(new Date().toISOString());
 
   const labelItems = useMemo<LabelItem[]>(
     () =>

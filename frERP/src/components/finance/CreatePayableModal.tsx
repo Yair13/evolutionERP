@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getTodayBogotaYmd } from "../../lib/dateUtils.js";
 import { createPayable, fetchSuppliers, type SupplierItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
@@ -46,7 +47,7 @@ export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
   const [billNumber, setBillNumber] = useState<string>("");
   const [description, setDescription] = useState<string>("");
   const [totalAmountStr, setTotalAmountStr] = useState<string>("");
-  const [issueDate, setIssueDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [issueDate, setIssueDate] = useState<string>(getTodayBogotaYmd());
   const [dueDate, setDueDate] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
@@ -71,7 +72,7 @@ export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
       setBillNumber("");
       setDescription("");
       setTotalAmountStr("");
-      setIssueDate(new Date().toISOString().split("T")[0]);
+      setIssueDate(getTodayBogotaYmd());
       setDueDate("");
       setNotes("");
       setInitialPaymentStr("");

@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { fetchPayableDetail, type PayableDetail, type PayableSummaryItem } from "../../api/finance.js";
+import { fetchPayableDetail, type PayableDetail, type PayableSummaryItem, type ReceiptAuditItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
-import { FileText, X, Wallet, CreditCard, Building2, Calendar } from "lucide-react";
+import { FileText, X, Wallet, CreditCard, Building2, Calendar, Camera, Image as ImageIcon } from "lucide-react";
+import { formatBogotaDateTime } from "../../lib/dateUtils.js";
+import { ViewReceiptPhotosModal } from "../common/ViewReceiptPhotosModal.js";
+import { UploadReceiptModal } from "./UploadReceiptModal.js";
 
 type Props = {
   open: boolean;
@@ -19,14 +22,7 @@ function formatMoney(n: number): string {
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("es-CO", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatBogotaDateTime(iso);
 }
 
 export function PayableDetailModal({ open, payableId, onClose, onAbonar }: Props) {
@@ -34,6 +30,8 @@ export function PayableDetailModal({ open, payableId, onClose, onAbonar }: Props
   const [detail, setDetail] = useState<PayableDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [viewingPhotos, setViewingPhotos] = useState<{ title: string; urls: string[] } | null>(null);
+  const [uploadingAuditItem, setUploadingAuditItem] = useState<ReceiptAuditItem | null>(null);
 
   const loadData = useCallback(async () => {
     if (!token || !payableId) return;
@@ -248,26 +246,90 @@ export function PayableDetailModal({ open, payableId, onClose, onAbonar }: Props
                           <th>Medio de Pago</th>
                           <th>Monto Salida</th>
                           <th>Ref. Transacción</th>
+                          <th>Soporte</th>
                           <th>Registrado por</th>
                           <th>Notas</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {detail.payments.map((p) => (
-                          <tr key={p.id}>
-                            <td>
-                              <strong style={{ color: "#818cf8" }}>{p.receiptNumber}</strong>
-                            </td>
-                            <td>{formatDate(p.createdAt)}</td>
-                            <td style={{ textTransform: "capitalize" }}>{p.paymentMethod}</td>
-                            <td style={{ fontWeight: 700, color: "#10b981" }}>
-                              {formatMoney(p.amount)}
-                            </td>
-                            <td>{p.referenceCode || "—"}</td>
-                            <td>{p.createdByName || "—"}</td>
-                            <td>{p.notes || "—"}</td>
-                          </tr>
-                        ))}
+                        {detail.payments.map((p) => {
+                          const urls = (p.receiptUrls && p.receiptUrls.length > 0)
+                            ? p.receiptUrls
+                            : (p.receiptUrl ? [p.receiptUrl] : []);
+                          return (
+                            <tr key={p.id}>
+                              <td>
+                                <strong style={{ color: "#818cf8" }}>{p.receiptNumber}</strong>
+                              </td>
+                              <td>{formatDate(p.createdAt)}</td>
+                              <td style={{ textTransform: "capitalize" }}>{p.paymentMethod}</td>
+                              <td style={{ fontWeight: 700, color: "#10b981" }}>
+                                {formatMoney(p.amount)}
+                              </td>
+                              <td>{p.referenceCode || "—"}</td>
+                              <td>
+                                {urls.length > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setViewingPhotos({
+                                        title: `Soporte ${p.receiptNumber} - ${detail.supplierName}`,
+                                        urls,
+                                      })
+                                    }
+                                    className="inv-btn inv-btn--ghost"
+                                    style={{
+                                      padding: "4px 8px",
+                                      fontSize: "0.78rem",
+                                      color: "#6366f1",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                    }}
+                                  >
+                                    <ImageIcon size={14} />
+                                    <span>{urls.length > 1 ? `${urls.length} fotos` : "Ver foto"}</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setUploadingAuditItem({
+                                        id: p.id,
+                                        type: "payable_payment",
+                                        typeLabel: "Pago a Proveedor",
+                                        reference: p.receiptNumber,
+                                        concept: `Pago a ${detail.supplierName}`,
+                                        paymentMethod: p.paymentMethod,
+                                        amount: p.amount,
+                                        warehouseId: p.warehouseId,
+                                        warehouseName: p.warehouseName || "",
+                                        createdAt: p.createdAt,
+                                        createdByName: p.createdByName || null,
+                                        receiptUrl: null,
+                                        receiptFilename: null,
+                                      })
+                                    }
+                                    className="inv-btn inv-btn--ghost"
+                                    style={{
+                                      padding: "4px 8px",
+                                      fontSize: "0.78rem",
+                                      color: "#f59e0b",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                    }}
+                                  >
+                                    <Camera size={14} />
+                                    <span>+ Adjuntar</span>
+                                  </button>
+                                )}
+                              </td>
+                              <td>{p.createdByName || "—"}</td>
+                              <td>{p.notes || "—"}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -296,6 +358,27 @@ export function PayableDetailModal({ open, payableId, onClose, onAbonar }: Props
           )}
         </div>
       </div>
+
+      {viewingPhotos && (
+        <ViewReceiptPhotosModal
+          open={Boolean(viewingPhotos)}
+          onClose={() => setViewingPhotos(null)}
+          title={viewingPhotos.title}
+          urls={viewingPhotos.urls}
+        />
+      )}
+
+      {uploadingAuditItem && token && (
+        <UploadReceiptModal
+          token={token}
+          item={uploadingAuditItem}
+          onClose={() => setUploadingAuditItem(null)}
+          onSuccess={() => {
+            setUploadingAuditItem(null);
+            void loadData();
+          }}
+        />
+      )}
     </div>
   );
 }

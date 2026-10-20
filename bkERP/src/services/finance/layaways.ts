@@ -43,6 +43,9 @@ export interface LayawayPaymentItem {
   receiptNumber: string;
   paymentMethod: string;
   amount: number;
+  receiptUrl?: string | null;
+  receiptUrls?: string[];
+  receiptFilename?: string | null;
   notes: string | null;
   createdAt: string;
   createdByName: string | null;
@@ -116,6 +119,9 @@ export async function createLayaway(
     expiryDate?: string | null;
     notes?: string | null;
     userId?: string | null;
+    receiptUrl?: string | null;
+    receiptUrls?: string[] | null;
+    receiptFilename?: string | null;
   }
 ): Promise<LayawayDetail> {
   const {
@@ -128,6 +134,9 @@ export async function createLayaway(
     expiryDate,
     notes,
     userId,
+    receiptUrl,
+    receiptUrls,
+    receiptFilename,
   } = params;
 
   const client = await pool.connect();
@@ -184,13 +193,20 @@ export async function createLayaway(
 
     if (initialPaid > 0) {
       const receiptNumber = await nextLayawayReceiptNumber(client, warehouseId);
+      const finalUrls = (receiptUrls && receiptUrls.length > 0)
+        ? receiptUrls
+        : (receiptUrl ? [receiptUrl] : []);
+      const primaryUrl = finalUrls[0] || receiptUrl || null;
+      const jsonUrls = JSON.stringify(finalUrls);
+
       await client.query(
         `
         INSERT INTO layaway_payments (
           layaway_id, customer_id, warehouse_id, receipt_number,
-          payment_method, amount, notes, created_by
+          payment_method, amount, notes, created_by,
+          receipt_url, receipt_filename, receipt_urls
         )
-        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8::uuid)
+        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8::uuid, $9, $10, $11::jsonb)
         `,
         [
           layawayId,
@@ -201,6 +217,9 @@ export async function createLayaway(
           initialPaid,
           "Abono inicial de apertura de apartado",
           userId || null,
+          primaryUrl,
+          receiptFilename?.trim() || null,
+          jsonUrls,
         ]
       );
     }
@@ -417,6 +436,9 @@ export async function getLayawayDetail(
       lp.receipt_number AS "receiptNumber",
       lp.payment_method AS "paymentMethod",
       lp.amount::float,
+      lp.receipt_url AS "receiptUrl",
+      lp.receipt_filename AS "receiptFilename",
+      COALESCE(lp.receipt_urls, '[]'::jsonb) AS "receiptUrls",
       lp.notes,
       lp.created_at AS "createdAt",
       u.full_name AS "createdByName"
@@ -448,6 +470,9 @@ export async function addLayawayPayment(
     amount: number;
     notes?: string | null;
     userId?: string | null;
+    receiptUrl?: string | null;
+    receiptUrls?: string[] | null;
+    receiptFilename?: string | null;
   }
 ): Promise<{
   payment: LayawayPaymentItem;
@@ -455,7 +480,17 @@ export async function addLayawayPayment(
   newRemainingAmount: number;
   customerCreditBalance: number;
 }> {
-  const { layawayId, warehouseId, paymentMethod, amount, notes, userId } = params;
+  const {
+    layawayId,
+    warehouseId,
+    paymentMethod,
+    amount,
+    notes,
+    userId,
+    receiptUrl,
+    receiptUrls,
+    receiptFilename,
+  } = params;
 
   if (!Number.isFinite(amount) || amount <= 0) {
     throw Object.assign(new Error("invalid_payment_amount"), { code: "invalid_payment_amount" });
@@ -519,13 +554,20 @@ export async function addLayawayPayment(
 
     const receiptNumber = await nextLayawayReceiptNumber(client, warehouseId);
 
+    const finalUrls = (receiptUrls && receiptUrls.length > 0)
+      ? receiptUrls
+      : (receiptUrl ? [receiptUrl] : []);
+    const primaryUrl = finalUrls[0] || receiptUrl || null;
+    const jsonUrls = JSON.stringify(finalUrls);
+
     const { rows: payRows } = await client.query<LayawayPaymentItem>(
       `
       INSERT INTO layaway_payments (
         layaway_id, customer_id, warehouse_id, receipt_number,
-        payment_method, amount, notes, created_by
+        payment_method, amount, notes, created_by,
+        receipt_url, receipt_filename, receipt_urls
       )
-      VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8::uuid)
+      VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8::uuid, $9, $10, $11::jsonb)
       RETURNING
         id::text,
         layaway_id::text AS "layawayId",
@@ -534,6 +576,9 @@ export async function addLayawayPayment(
         receipt_number AS "receiptNumber",
         payment_method AS "paymentMethod",
         amount::float,
+        receipt_url AS "receiptUrl",
+        receipt_filename AS "receiptFilename",
+        receipt_urls AS "receiptUrls",
         notes,
         created_at AS "createdAt"
       `,
@@ -546,6 +591,9 @@ export async function addLayawayPayment(
         amount,
         notes?.trim() || null,
         userId || null,
+        primaryUrl,
+        receiptFilename?.trim() || null,
+        jsonUrls,
       ]
     );
 

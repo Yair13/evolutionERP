@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { addLayawayPayment, type LayawaySummaryItem } from "../../api/finance.js";
+import { addLayawayPayment, uploadClosureReceiptFiles, type LayawaySummaryItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { Wallet, X, CheckCircle2 } from "lucide-react";
+import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
 
 type Props = {
   open: boolean;
@@ -46,6 +47,7 @@ export function AddLayawayPaymentModal({
   const [amountStr, setAmountStr] = useState<string>("");
   const [method, setMethod] = useState<string>("efectivo");
   const [notes, setNotes] = useState<string>("");
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receiptResult, setReceiptResult] = useState<any | null>(null);
@@ -76,11 +78,27 @@ export function AddLayawayPaymentModal({
     setError(null);
 
     try {
+      let uploadedUrl: string | null = null;
+      let uploadedUrls: string[] = [];
+      let uploadedFilename: string | null = null;
+
+      if (receiptFiles.length > 0 && token) {
+        const upRes = await uploadClosureReceiptFiles(token, receiptFiles);
+        if (upRes.length > 0) {
+          uploadedUrl = upRes[0]?.publicUrl || null;
+          uploadedFilename = upRes[0]?.filename || null;
+          uploadedUrls = upRes.map((u) => u.publicUrl);
+        }
+      }
+
       const res = await addLayawayPayment(token, layaway.id, {
         warehouseId: targetWh,
         paymentMethod: method,
         amount,
         notes: notes.trim() || null,
+        receiptUrl: uploadedUrl,
+        receiptUrls: uploadedUrls.length > 0 ? uploadedUrls : undefined,
+        receiptFilename: uploadedFilename,
       });
 
       setReceiptResult(res);
@@ -297,6 +315,17 @@ export function AddLayawayPaymentModal({
                   </div>
                 )}
               </div>
+            )}
+
+            {/* Soporte fotográfico si paga con banco / transferencia */}
+            {method !== "efectivo" && method !== "saldo_a_favor" && (
+              <ReceiptPhotosUploader
+                files={receiptFiles}
+                onChange={setReceiptFiles}
+                disabled={submitting}
+                label="Comprobantes / Fotos de Soporte (No Efectivo)"
+                hint="Toma una o varias fotos con la cámara o sube capturas del comprobante de abono."
+              />
             )}
 
             <label className="field">

@@ -10,6 +10,7 @@ import {
 import { fetchCustomers, type Customer } from "../../api/inventory.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
+import { formatBogotaDate } from "../../lib/dateUtils.js";
 import { AddPaymentModal } from "../../components/finance/AddPaymentModal.js";
 import { ReceivableDetailModal } from "../../components/finance/ReceivableDetailModal.js";
 import {
@@ -33,15 +34,7 @@ function formatMoney(n: number): string {
 }
 
 function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString("es-CO", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  } catch {
-    return iso;
-  }
+  return formatBogotaDate(iso);
 }
 
 type TabMode = "credits" | "customer" | "report";

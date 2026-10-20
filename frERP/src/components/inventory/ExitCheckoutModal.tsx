@@ -4,8 +4,8 @@ import { EXIT_KIND_OPTIONS } from "../../features/inventory/exit-labels.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { fetchCustomers, createCustomer, type Customer } from "../../api/inventory.js";
-import { Camera, Upload, CheckCircle2 } from "lucide-react";
-import { fetchCustomerActiveLayaway, type LayawaySummaryItem, uploadClosureReceiptFile } from "../../api/finance.js";
+import { fetchCustomerActiveLayaway, type LayawaySummaryItem, uploadClosureReceiptFiles } from "../../api/finance.js";
+import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
 
 export type ExitCheckoutData = {
   exitKind: ExitKind;
@@ -18,6 +18,7 @@ export type ExitCheckoutData = {
   destinationWarehouseId?: string | null;
   layawayId?: string | null;
   receiptUrl?: string | null;
+  receiptUrls?: string[] | null;
   receiptFilename?: string | null;
 };
 
@@ -112,8 +113,7 @@ export function ExitCheckoutModal({
   const [destinationWarehouseId, setDestinationWarehouseId] = useState("");
   const [activeLayaway, setActiveLayaway] = useState<LayawaySummaryItem | null>(null);
   const [selectedLayawayId, setSelectedLayawayId] = useState<string | null>(null);
-  const [receiptFile, setReceiptFile] = useState<File | null>(null);
-  const [receiptPreviewUrl, setReceiptPreviewUrl] = useState<string | null>(null);
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
 
   const destOptions = warehouses.filter((w) => {
@@ -137,8 +137,7 @@ export function ExitCheckoutModal({
     setActiveLayaway(null);
     setSelectedLayawayId(null);
     setShowCreateNew(false);
-    setReceiptFile(null);
-    setReceiptPreviewUrl(null);
+    setReceiptFiles([]);
     setUploadingReceipt(false);
     if (initKind === "credit") {
       setPayments([{ id: 1, method: "efectivo", amount: "" }]);
@@ -219,18 +218,6 @@ export function ExitCheckoutModal({
     }
   }
 
-  function handleReceiptChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) {
-      setReceiptFile(file);
-      if (file.type.startsWith("image/")) {
-        setReceiptPreviewUrl(URL.createObjectURL(file));
-      } else {
-        setReceiptPreviewUrl(null);
-      }
-    }
-  }
-
   async function submit() {
     if ((exitKind === "sale" || exitKind === "credit") && !customerId) {
       setError("Debes seleccionar un cliente existente o registrar uno nuevo.");
@@ -305,16 +292,20 @@ export function ExitCheckoutModal({
     }
 
     let uploadedUrl: string | null = null;
+    let uploadedUrls: string[] = [];
     let uploadedFilename: string | null = null;
 
-    if (receiptFile && token) {
+    if (receiptFiles.length > 0 && token) {
       setUploadingReceipt(true);
       try {
-        const upRes = await uploadClosureReceiptFile(token, receiptFile);
-        uploadedUrl = upRes.publicUrl;
-        uploadedFilename = upRes.filename;
+        const upRes = await uploadClosureReceiptFiles(token, receiptFiles);
+        if (upRes.length > 0) {
+          uploadedUrl = upRes[0]?.publicUrl || null;
+          uploadedFilename = upRes[0]?.filename || null;
+          uploadedUrls = upRes.map((u) => u.publicUrl);
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Error al subir comprobante de consignación");
+        setError(err instanceof Error ? err.message : "Error al subir comprobante(s)");
         setUploadingReceipt(false);
         return;
       } finally {
@@ -342,6 +333,7 @@ export function ExitCheckoutModal({
           : null,
       layawayId: selectedLayawayId || null,
       receiptUrl: uploadedUrl,
+      receiptUrls: uploadedUrls.length > 0 ? uploadedUrls : null,
       receiptFilename: uploadedFilename,
     });
   }
@@ -766,78 +758,13 @@ export function ExitCheckoutModal({
             {payments.some(
               (p) => Number(p.amount) > 0 && p.method !== "efectivo" && p.method !== "saldo_a_favor"
             ) && (
-              <div
-                style={{
-                  marginTop: "0.85rem",
-                  padding: "0.85rem 1rem",
-                  border: "1px dashed #6366f1",
-                  borderRadius: "8px",
-                  background: "rgba(99, 102, 241, 0.04)",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.35rem" }}>
-                  <Camera size={18} color="#6366f1" />
-                  <strong style={{ fontSize: "0.9rem", color: "#1e293b" }}>
-                    Comprobante de Consignación / Transferencia (No Efectivo)
-                  </strong>
-                </div>
-                <p style={{ fontSize: "0.8rem", color: "#64748b", margin: "0 0 0.65rem 0" }}>
-                  Toma una foto o adjunta la captura del pago por Bancolombia, Nequi u otro banco para registrarla en el sistema y cierre de caja.
-                </p>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-                  <label
-                    className="inv-btn inv-btn--ghost"
-                    style={{
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.4rem",
-                      margin: 0,
-                      fontSize: "0.85rem",
-                    }}
-                  >
-                    <Upload size={15} />
-                    <span>{receiptFile ? "Cambiar foto" : "Tomar foto / Subir comprobante"}</span>
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      capture="environment"
-                      style={{ display: "none" }}
-                      onChange={handleReceiptChange}
-                    />
-                  </label>
-                  {receiptFile && (
-                    <span
-                      style={{
-                        fontSize: "0.85rem",
-                        color: "#10b981",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "0.3rem",
-                        fontWeight: 500,
-                      }}
-                    >
-                      <CheckCircle2 size={16} />
-                      {receiptFile.name}
-                    </span>
-                  )}
-                </div>
-                {receiptPreviewUrl && (
-                  <div style={{ marginTop: "0.6rem" }}>
-                    <img
-                      src={receiptPreviewUrl}
-                      alt="Vista previa comprobante"
-                      style={{
-                        maxWidth: "160px",
-                        maxHeight: "120px",
-                        objectFit: "contain",
-                        borderRadius: "6px",
-                        border: "1px solid #cbd5e1",
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
+              <ReceiptPhotosUploader
+                files={receiptFiles}
+                onChange={setReceiptFiles}
+                disabled={confirming || uploadingReceipt}
+                label="Comprobantes / Fotos de Soporte (No Efectivo)"
+                hint="Toma una o varias fotos con la cámara o adjunta comprobantes para registrarlos en la venta y cierre de caja."
+              />
             )}
           </section>
         )}

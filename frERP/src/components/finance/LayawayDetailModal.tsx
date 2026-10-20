@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { fetchLayawayDetail, cancelLayaway, type LayawayDetail, type LayawaySummaryItem } from "../../api/finance.js";
+import { fetchLayawayDetail, cancelLayaway, type LayawayDetail, type LayawaySummaryItem, type ReceiptAuditItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
-import { Bookmark, X, Calendar, Wallet, AlertCircle, Ban } from "lucide-react";
+import { Bookmark, X, Calendar, Wallet, AlertCircle, Ban, Camera, Upload } from "lucide-react";
+import { formatBogotaDateTime } from "../../lib/dateUtils.js";
+import { ViewReceiptPhotosModal } from "../common/ViewReceiptPhotosModal.js";
+import { UploadReceiptModal } from "./UploadReceiptModal.js";
 
 type Props = {
   open: boolean;
@@ -20,14 +23,7 @@ function formatMoney(n: number): string {
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("es-CO", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatBogotaDateTime(iso);
 }
 
 export function LayawayDetailModal({
@@ -47,6 +43,9 @@ export function LayawayDetailModal({
   const [refundToBalance, setRefundToBalance] = useState(true);
   const [cancelNotes, setCancelNotes] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [viewingUrls, setViewingUrls] = useState<string[] | null>(null);
+  const [viewingRef, setViewingRef] = useState<string>("");
+  const [uploadItem, setUploadItem] = useState<ReceiptAuditItem | null>(null);
 
   const loadData = useCallback(async () => {
     if (!token || !layawayId) return;
@@ -255,25 +254,94 @@ export function LayawayDetailModal({
                           <th>Fecha</th>
                           <th>Medio</th>
                           <th>Monto</th>
+                          <th style={{ textAlign: "center" }}>Soporte</th>
                           <th>Registrado por</th>
                           <th>Notas</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {detail.payments.map((p) => (
-                          <tr key={p.id}>
-                            <td>
-                              <strong>{p.receiptNumber}</strong>
-                            </td>
-                            <td>{formatDate(p.createdAt)}</td>
-                            <td style={{ textTransform: "capitalize" }}>{p.paymentMethod}</td>
-                            <td style={{ fontWeight: 700, color: "#10b981" }}>
-                              {formatMoney(p.amount)}
-                            </td>
-                            <td>{p.createdByName || "—"}</td>
-                            <td>{p.notes || "—"}</td>
-                          </tr>
-                        ))}
+                        {detail.payments.map((p) => {
+                          const urls = (p.receiptUrls && p.receiptUrls.length > 0)
+                            ? p.receiptUrls
+                            : (p.receiptUrl ? [p.receiptUrl] : []);
+                          const hasReceipt = urls.length > 0;
+                          const isBank = p.paymentMethod.toLowerCase() !== "efectivo" && p.paymentMethod.toLowerCase() !== "saldo_a_favor";
+
+                          return (
+                            <tr key={p.id}>
+                              <td>
+                                <strong>{p.receiptNumber}</strong>
+                              </td>
+                              <td>{formatDate(p.createdAt)}</td>
+                              <td style={{ textTransform: "capitalize" }}>{p.paymentMethod}</td>
+                              <td style={{ fontWeight: 700, color: "#10b981" }}>
+                                {formatMoney(p.amount)}
+                              </td>
+                              <td style={{ textAlign: "center" }}>
+                                {hasReceipt ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setViewingUrls(urls);
+                                      setViewingRef(p.receiptNumber);
+                                    }}
+                                    className="inv-btn inv-btn--ghost"
+                                    style={{
+                                      fontSize: "0.72rem",
+                                      padding: "2px 6px",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "0.25rem",
+                                      color: "#38bdf8",
+                                      border: "1px solid rgba(56, 189, 248, 0.3)",
+                                    }}
+                                    title="Ver foto(s) del soporte"
+                                  >
+                                    <Camera size={13} />
+                                    <span>{urls.length === 1 ? "Ver foto" : `${urls.length} fotos`}</span>
+                                  </button>
+                                ) : isBank ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setUploadItem({
+                                        id: p.id,
+                                        type: "layaway_payment",
+                                        typeLabel: "Abono Apartado por Banco",
+                                        reference: p.receiptNumber,
+                                        concept: `Abono a apartado ${detail.code}`,
+                                        amount: p.amount,
+                                        paymentMethod: p.paymentMethod,
+                                        receiptUrl: null,
+                                        receiptFilename: null,
+                                        isMissing: true,
+                                        createdAt: p.createdAt,
+                                      })
+                                    }
+                                    className="inv-btn inv-btn--ghost"
+                                    style={{
+                                      fontSize: "0.72rem",
+                                      padding: "2px 6px",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "0.25rem",
+                                      color: "#f59e0b",
+                                      border: "1px dashed rgba(245, 158, 11, 0.4)",
+                                    }}
+                                    title="Adjuntar soporte con cámara o archivo"
+                                  >
+                                    <Upload size={12} />
+                                    <span>+ Foto</span>
+                                  </button>
+                                ) : (
+                                  <span style={{ color: "var(--inv-text-muted)", fontSize: "0.75rem" }}>—</span>
+                                )}
+                              </td>
+                              <td>{p.createdByName || "—"}</td>
+                              <td>{p.notes || "—"}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -375,6 +443,30 @@ export function LayawayDetailModal({
           )}
         </div>
       </div>
+
+      {/* Modal para ver fotos de soporte */}
+      {viewingUrls && viewingUrls.length > 0 && (
+        <ViewReceiptPhotosModal
+          open={Boolean(viewingUrls)}
+          onClose={() => setViewingUrls(null)}
+          urls={viewingUrls}
+          title="Soporte de Abono a Apartado"
+          reference={viewingRef}
+        />
+      )}
+
+      {/* Modal para adjuntar soporte con cámara o fotos si faltaba */}
+      {uploadItem && token && (
+        <UploadReceiptModal
+          token={token}
+          item={uploadItem}
+          onClose={() => setUploadItem(null)}
+          onSuccess={() => {
+            setUploadItem(null);
+            loadData();
+          }}
+        />
+      )}
     </div>
   );
 }

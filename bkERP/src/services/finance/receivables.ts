@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { getTodayBogotaYmd } from "../../lib/date-utils.js";
 
 export type ReceivableStatus = "open" | "partial" | "paid" | "cancelled";
 
@@ -51,6 +52,9 @@ export interface ReceivablePaymentItem {
   amount: number;
   appliedToDebt: number;
   excessToFavour: number;
+  receiptUrl?: string | null;
+  receiptUrls?: string[];
+  receiptFilename?: string | null;
   notes: string | null;
   createdAt: string;
   createdByName: string | null;
@@ -438,6 +442,9 @@ export async function getReceivableDetail(
       rp.amount::float,
       rp.applied_to_debt::float AS "appliedToDebt",
       rp.excess_to_favour::float AS "excessToFavour",
+      rp.receipt_url AS "receiptUrl",
+      rp.receipt_filename AS "receiptFilename",
+      COALESCE(rp.receipt_urls, '[]'::jsonb) AS "receiptUrls",
       rp.notes,
       rp.created_at AS "createdAt",
       u.full_name AS "createdByName"
@@ -500,6 +507,9 @@ export async function addReceivablePayment(
     amount: number;
     notes?: string | null;
     userId?: string | null;
+    receiptUrl?: string | null;
+    receiptUrls?: string[] | null;
+    receiptFilename?: string | null;
   }
 ): Promise<{
   payment: ReceivablePaymentItem;
@@ -509,7 +519,17 @@ export async function addReceivablePayment(
   newStatus: ReceivableStatus;
   customerCreditBalance: number;
 }> {
-  const { receivableId, warehouseId, paymentMethod, amount, notes, userId } = params;
+  const {
+    receivableId,
+    warehouseId,
+    paymentMethod,
+    amount,
+    notes,
+    userId,
+    receiptUrl,
+    receiptUrls,
+    receiptFilename,
+  } = params;
 
   if (!Number.isFinite(amount) || amount <= 0) {
     throw Object.assign(new Error("invalid_payment_amount"), { code: "invalid_payment_amount" });
@@ -602,14 +622,20 @@ export async function addReceivablePayment(
     // Generar recibo de caja
     const receiptNumber = await nextReceiptNumber(client, warehouseId);
 
+    const finalUrls = (receiptUrls && receiptUrls.length > 0)
+      ? receiptUrls
+      : (receiptUrl ? [receiptUrl] : []);
+    const primaryUrl = finalUrls[0] || receiptUrl || null;
+    const jsonUrls = JSON.stringify(finalUrls);
+
     const { rows: payRows } = await client.query<ReceivablePaymentItem>(
       `
       INSERT INTO receivable_payments (
         receivable_id, customer_id, warehouse_id, receipt_number,
         payment_method, amount, applied_to_debt, excess_to_favour,
-        notes, created_by
+        notes, created_by, receipt_url, receipt_filename, receipt_urls
       )
-      VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10::uuid)
+      VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10::uuid, $11, $12, $13::jsonb)
       RETURNING
         id::text,
         receivable_id::text AS "receivableId",
@@ -620,6 +646,9 @@ export async function addReceivablePayment(
         amount::float,
         applied_to_debt::float AS "appliedToDebt",
         excess_to_favour::float AS "excessToFavour",
+        receipt_url AS "receiptUrl",
+        receipt_filename AS "receiptFilename",
+        receipt_urls AS "receiptUrls",
         notes,
         created_at AS "createdAt"
       `,
@@ -634,6 +663,9 @@ export async function addReceivablePayment(
         excessToFavour,
         notes?.trim() || null,
         userId || null,
+        primaryUrl,
+        receiptFilename?.trim() || null,
+        jsonUrls,
       ]
     );
 
@@ -1095,8 +1127,8 @@ export async function getPaymentsCashSummary(
   const netCashInDrawer = cashCollected - cashPayrollAmount - cashOutflowsAmount;
 
   return {
-    dateFrom: opts.dateFrom || new Date().toISOString().slice(0, 10),
-    dateTo: opts.dateTo || new Date().toISOString().slice(0, 10),
+    dateFrom: opts.dateFrom || getTodayBogotaYmd(),
+    dateTo: opts.dateTo || getTodayBogotaYmd(),
     warehouseId: opts.warehouseId || null,
     totalCollected,
     cashCollected,

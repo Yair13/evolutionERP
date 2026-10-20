@@ -2,6 +2,7 @@ import JsBarcode from "jsbarcode";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Printer } from "lucide-react";
+import { formatBogotaDate } from "../../lib/dateUtils.js";
 
 const LOGO_SRC = "/logo-evolution.png?v=4";
 
@@ -65,7 +66,7 @@ export function BarcodeLabel({ value, title, subtitle, salePrice, productionOrde
     setPortalReady(true);
   }, []);
 
-  const displayDate = date || new Date().toLocaleDateString("es-CO");
+  const displayDate = date || formatBogotaDate(new Date().toISOString());
   const displayOP = productionOrder || "—";
   const priceLabel = salePrice != null && salePrice > 0 ? formatMoney(salePrice) : null;
   const copies = quantity && Number.isFinite(quantity) ? Math.max(1, Math.floor(quantity)) : 1;

@@ -26,6 +26,9 @@ import { CreateEmployeeModal } from "../../components/finance/CreateEmployeeModa
 import { CreatePayrollPaymentModal } from "../../components/finance/CreatePayrollPaymentModal.js";
 import { PrintPayrollVoucherModal } from "../../components/finance/PrintPayrollVoucherModal.js";
 import { ViewReceiptModal } from "../../components/finance/ViewReceiptModal.js";
+import {
+  getTodayBogotaYmd,
+} from "../../lib/dateUtils.js";
 
 function formatMoney(n: number): string {
   return new Intl.NumberFormat("es-CO", {
@@ -36,11 +39,11 @@ function formatMoney(n: number): string {
 }
 
 function localMonthRange(): { from: string; to: string } {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = d.getMonth() + 1;
-  const from = `${y}-${String(m).padStart(2, "0")}-01`;
-  const to = `${y}-${String(m).padStart(2, "0")}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+  const todayYmd = getTodayBogotaYmd();
+  const [y, m] = todayYmd.split("-");
+  const from = `${y}-${m}-01`;
+  const lastDay = new Date(Number(y), Number(m), 0).getDate();
+  const to = `${y}-${m}-${String(lastDay).padStart(2, "0")}`;
   return { from, to };
 }
 
@@ -123,12 +126,8 @@ export function PayrollPage() {
 
   // Atajos de fecha
   function setPeriodPreset(type: "month" | "today" | "all") {
-    const today = new Date();
-    const ymd = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
     if (type === "today") {
-      const t = ymd(today);
+      const t = getTodayBogotaYmd();
       setDateFrom(t);
       setDateTo(t);
     } else if (type === "month") {
