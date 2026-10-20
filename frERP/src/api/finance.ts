@@ -1087,6 +1087,9 @@ export interface DailyClosureWorksheet {
   warehouseCode: string;
   warehouseName: string;
   closureDate: string;
+  shiftNumber?: number;
+  startedAt?: string | null;
+  closedAt?: string | null;
   openingCash: number;
   suggestedOpeningCash: number;
   hasPreviousClosure?: boolean;
@@ -1097,6 +1100,14 @@ export interface DailyClosureWorksheet {
   existingCountedCash: number | null;
   existingNotes: string | null;
   existingCashierName: string | null;
+  dayShifts?: {
+    id: string;
+    voucherNumber: string;
+    shiftNumber: number;
+    closedAt: string;
+    countedCash: number;
+    cashierName?: string | null;
+  }[];
 
   // Entradas de Efectivo
   cashSales: number;
@@ -1135,6 +1146,9 @@ export interface DailyClosureRecord {
   warehouseCode?: string;
   warehouseName?: string;
   closureDate: string;
+  shiftNumber?: number;
+  startedAt?: string | null;
+  closedAt?: string | null;
   status: string;
   closingVoucherNumber: string;
   openingCash: number;
@@ -1162,9 +1176,15 @@ export interface DailyClosureRecord {
 export async function fetchDailyClosureWorksheet(
   token: string,
   warehouseId: string,
-  date: string
+  dateOrOpts?: string | { date?: string; closureId?: string }
 ) {
-  const qry = new URLSearchParams({ warehouseId, date });
+  const qry = new URLSearchParams({ warehouseId });
+  if (typeof dateOrOpts === "string") {
+    qry.set("date", dateOrOpts);
+  } else if (dateOrOpts) {
+    if (dateOrOpts.date) qry.set("date", dateOrOpts.date);
+    if (dateOrOpts.closureId) qry.set("closureId", dateOrOpts.closureId);
+  }
   return apiGet<DailyClosureWorksheet>(`/finance/closures/worksheet?${qry.toString()}`, token);
 }
 
@@ -1316,6 +1336,11 @@ export interface GeneralClosureWorksheet {
   totalTransfersReceived: number;
   totalTransfersSent: number;
 
+  // Base inicial y efectivo total
+  openingCash: number;
+  suggestedOpeningCash: number;
+  totalCashAvailable: number;
+
   // Efectivo Neto Acumulado en el Período
   totalNetCash: number;
 
@@ -1329,6 +1354,8 @@ export interface GeneralClosureWorksheet {
     dateFrom: string;
     dateTo: string;
     createdAt: string;
+    startedAt?: string | null;
+    closedAt?: string | null;
   } | null;
   suggestedDateFrom?: string;
   hasPreviousClosure?: boolean;
@@ -1350,6 +1377,8 @@ export interface GeneralClosureRecord {
   warehouseName?: string;
   dateFrom: string;
   dateTo: string;
+  startedAt?: string | null;
+  closedAt?: string | null;
   totalSales: number;
   totalCashSales: number;
   totalBankSales: number;
@@ -1357,7 +1386,9 @@ export interface GeneralClosureRecord {
   totalLayawayPayments: number;
   totalOutflows: number;
   totalPayroll: number;
+  openingCash: number;
   totalNetCash: number;
+  totalCashAvailable?: number;
   cashToKeep: number;
   cashToWithdraw: number;
   paymentBreakdown: MethodBreakdownItem[];
@@ -1390,6 +1421,7 @@ export async function saveGeneralClosure(
     warehouseId?: string | null;
     dateFrom: string;
     dateTo: string;
+    openingCash?: number;
     cashToKeep: number;
     notes?: string | null;
   }

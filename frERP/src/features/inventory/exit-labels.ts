@@ -15,7 +15,7 @@ export const EXIT_KIND_OPTIONS: { value: ExitKind; label: string; description: s
   {
     value: "credit",
     label: "Crédito",
-    description: "Salida a crédito. Puedes indicar el cliente.",
+    description: "Salida a crédito. El cliente es obligatorio para registrar la cuenta por cobrar.",
   },
   {
     value: "warranty",

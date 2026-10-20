@@ -230,12 +230,14 @@ export function PrintGeneralClosureModal({ closure, onClose }: Props) {
                 background: "rgba(99, 102, 241, 0.05)",
               }}
             >
-              <div style={{ fontSize: "0.75rem", color: "#4f46e5", fontWeight: 600 }}>FONDO EN CAJA / RETIRO</div>
-              <div style={{ fontSize: "0.8rem", color: "#334155", marginTop: 4 }}>
+              <div style={{ fontSize: "0.75rem", color: "#4f46e5", fontWeight: 700 }}>LIQUIDACIÓN DE CAJA / RETIRO</div>
+              <div style={{ fontSize: "0.75rem", color: "#334155", marginTop: 4, lineHeight: "1.35" }}>
+                Base Inicial: <strong>{formatMoney(closure.openingCash ?? 0)}</strong><br />
+                Total en Caja: <strong>{formatMoney(closure.totalCashAvailable ?? ((closure.openingCash ?? 0) + closure.totalNetCash))}</strong><br />
                 Fondo dejado en sede: <strong>{formatMoney(closure.cashToKeep)}</strong>
               </div>
-              <div style={{ fontSize: "1.05rem", fontWeight: 800, color: "#16a34a", marginTop: 4 }}>
-                Retirar / Consignar: {formatMoney(closure.cashToWithdraw)}
+              <div style={{ fontSize: "1rem", fontWeight: 800, color: "#16a34a", marginTop: 4 }}>
+                Retirar: {formatMoney(closure.cashToWithdraw)}
               </div>
             </div>
           </div>

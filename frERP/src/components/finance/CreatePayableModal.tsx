@@ -20,7 +20,7 @@ const PAYMENT_METHODS = [
   { value: "daviplata", label: "Daviplata 🔴" },
   { value: "bold", label: "Bold 🔵" },
   { value: "addi", label: "Addi 🟢" },
-  { value: "saldo_a_favor", label: "Usar Saldo a Favor con Proveedor 💰" },
+  { value: "saldo_a_favor", label: "Saldo a Favor Proveedor 💰" },
 ] as const;
 
 function formatMoney(n: number): string {
@@ -54,7 +54,6 @@ export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
   // Abono inicial
   const [initialPaymentStr, setInitialPaymentStr] = useState<string>("");
   const [paymentMethod, setPaymentMethod] = useState<string>("efectivo");
-  const [referenceCode, setReferenceCode] = useState<string>("");
 
   // Proveedores
   const [searchQuery, setSearchQuery] = useState("");
@@ -77,7 +76,6 @@ export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
       setNotes("");
       setInitialPaymentStr("");
       setPaymentMethod("efectivo");
-      setReferenceCode("");
       setSearchQuery("");
       setSupplierList([]);
       setSelectedSupplier(null);
@@ -156,7 +154,6 @@ export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
         notes: notes.trim() || null,
         initialPayment,
         paymentMethod: initialPayment > 0 ? paymentMethod : undefined,
-        referenceCode: referenceCode.trim() || null,
       });
 
       onSuccess();
@@ -184,7 +181,7 @@ export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
           role="dialog"
           aria-labelledby="create-payable-title"
           onClick={(e) => e.stopPropagation()}
-          style={{ maxWidth: 640, maxHeight: "90vh", overflowY: "auto" }}
+          style={{ maxWidth: 640, maxHeight: "90vh", overflowY: "auto", overflowX: "hidden" }}
         >
           <div className="inv-modal__header">
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -306,30 +303,32 @@ export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
             </div>
 
             {/* Factura y Concepto */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "0.75rem" }}>
-              <label className="field">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "0.75rem" }}>
+              <label className="field" style={{ minWidth: 0 }}>
                 <span>N° Factura / Remisión</span>
                 <input
                   value={billNumber}
                   onChange={(e) => setBillNumber(e.target.value)}
                   placeholder="Ej: FE-12345"
+                  style={{ width: "100%", boxSizing: "border-box" }}
                 />
               </label>
 
-              <label className="field">
+              <label className="field" style={{ minWidth: 0 }}>
                 <span>Concepto / Descripción *</span>
                 <input
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Ej: Compra de materia prima / rollos tela"
                   required
+                  style={{ width: "100%", boxSizing: "border-box" }}
                 />
               </label>
             </div>
 
             {/* Fechas y Monto Total */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem" }}>
-              <label className="field">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "0.75rem" }}>
+              <label className="field" style={{ minWidth: 0 }}>
                 <span>Valor Total Deuda *</span>
                 <input
                   type="number"
@@ -339,24 +338,27 @@ export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
                   onChange={(e) => setTotalAmountStr(e.target.value)}
                   placeholder="$ 0"
                   required
+                  style={{ width: "100%", boxSizing: "border-box" }}
                 />
               </label>
 
-              <label className="field">
+              <label className="field" style={{ minWidth: 0 }}>
                 <span>Fecha Factura</span>
                 <input
                   type="date"
                   value={issueDate}
                   onChange={(e) => setIssueDate(e.target.value)}
+                  style={{ width: "100%", boxSizing: "border-box" }}
                 />
               </label>
 
-              <label className="field">
+              <label className="field" style={{ minWidth: 0 }}>
                 <span>Fecha Vencimiento</span>
                 <input
                   type="date"
                   value={dueDate}
                   onChange={(e) => setDueDate(e.target.value)}
+                  style={{ width: "100%", boxSizing: "border-box" }}
                 />
               </label>
             </div>
@@ -367,8 +369,8 @@ export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
                 Abono o Pago Inmediato (Opcional - Salida de Caja)
               </span>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr", gap: "0.6rem", marginTop: "0.5rem" }}>
-                <label className="field">
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0.75rem", marginTop: "0.5rem" }}>
+                <label className="field" style={{ minWidth: 0 }}>
                   <span>Monto Pagado</span>
                   <input
                     type="number"
@@ -377,15 +379,17 @@ export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
                     value={initialPaymentStr}
                     onChange={(e) => setInitialPaymentStr(e.target.value)}
                     placeholder="$ 0"
+                    style={{ width: "100%", boxSizing: "border-box" }}
                   />
                 </label>
 
-                <label className="field">
+                <label className="field" style={{ minWidth: 0 }}>
                   <span>Medio de Pago</span>
                   <select
                     value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value)}
                     disabled={initialNum <= 0}
+                    style={{ width: "100%", boxSizing: "border-box" }}
                   >
                     {PAYMENT_METHODS.map((m) => (
                       <option key={m.value} value={m.value}>
@@ -393,16 +397,6 @@ export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
                       </option>
                     ))}
                   </select>
-                </label>
-
-                <label className="field">
-                  <span>N° Comprobante / Ref</span>
-                  <input
-                    value={referenceCode}
-                    onChange={(e) => setReferenceCode(e.target.value)}
-                    placeholder="Ref. transacción"
-                    disabled={initialNum <= 0}
-                  />
                 </label>
               </div>
 

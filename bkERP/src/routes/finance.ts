@@ -134,8 +134,8 @@ export function createFinanceRouter(): Router {
       });
       res.json(result);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -166,8 +166,8 @@ export function createFinanceRouter(): Router {
       }
       res.json({ item: detail });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -272,8 +272,8 @@ export function createFinanceRouter(): Router {
       }
       res.json(profile);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -294,8 +294,8 @@ export function createFinanceRouter(): Router {
       const report = await getReceivablesByWarehouseReport(pool);
       res.json(report);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -345,8 +345,8 @@ export function createFinanceRouter(): Router {
       });
       res.json(summary);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -415,8 +415,8 @@ export function createFinanceRouter(): Router {
       });
       res.json(result);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -515,8 +515,8 @@ export function createFinanceRouter(): Router {
       }
       res.json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -615,8 +615,8 @@ export function createFinanceRouter(): Router {
       const result = await cancelLayaway(pool, id, { refundToCreditBalance, notes });
       res.json(result);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -643,8 +643,8 @@ export function createFinanceRouter(): Router {
       const item = await getActiveLayawayForCustomer(pool, customerId);
       res.json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -672,8 +672,8 @@ export function createFinanceRouter(): Router {
       const result = await listSuppliers(pool, { q, activeOnly, limit, offset });
       res.json(result);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -712,8 +712,8 @@ export function createFinanceRouter(): Router {
       });
       res.status(201).json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -744,8 +744,8 @@ export function createFinanceRouter(): Router {
       }
       res.json(profile);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -838,8 +838,8 @@ export function createFinanceRouter(): Router {
       });
       res.json(result);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -947,8 +947,8 @@ export function createFinanceRouter(): Router {
       }
       res.json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1066,8 +1066,8 @@ export function createFinanceRouter(): Router {
       });
       res.json(result);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1124,8 +1124,8 @@ export function createFinanceRouter(): Router {
       });
       res.json(result);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1224,8 +1224,8 @@ export function createFinanceRouter(): Router {
       }
       res.json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1273,8 +1273,8 @@ export function createFinanceRouter(): Router {
       });
       res.json(result);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1372,8 +1372,8 @@ export function createFinanceRouter(): Router {
       }
       res.json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1476,8 +1476,8 @@ export function createFinanceRouter(): Router {
       const items = await listEmployees(pool, { warehouseId, search, isActive });
       res.json({ items });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1508,8 +1508,8 @@ export function createFinanceRouter(): Router {
       }
       res.json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1559,8 +1559,8 @@ export function createFinanceRouter(): Router {
       });
       res.status(201).json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1587,8 +1587,8 @@ export function createFinanceRouter(): Router {
       const item = await updateEmployee(pool, id, req.body || {});
       res.json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1608,8 +1608,8 @@ export function createFinanceRouter(): Router {
       const saved = await savePayrollReceiptFile(req.file.buffer, req.file.originalname);
       res.json(saved);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1644,8 +1644,8 @@ export function createFinanceRouter(): Router {
       });
       res.json({ items });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1676,8 +1676,8 @@ export function createFinanceRouter(): Router {
       }
       res.json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1783,8 +1783,8 @@ export function createFinanceRouter(): Router {
       });
       res.json({ item: updated });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1809,8 +1809,8 @@ export function createFinanceRouter(): Router {
       const summary = await getPayrollSummary(pool, { warehouseId, dateFrom, dateTo });
       res.json(summary);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1851,9 +1851,12 @@ export function createFinanceRouter(): Router {
     const date = typeof req.query.date === "string" && req.query.date.trim()
       ? req.query.date.trim()
       : getTodayBogotaYmd();
+    const closureId = typeof req.query.closureId === "string" && req.query.closureId.trim()
+      ? req.query.closureId.trim()
+      : undefined;
 
     try {
-      const worksheet = await getDailyClosureData(pool, targetWh, date);
+      const worksheet = await getDailyClosureData(pool, targetWh, { date, closureId });
       res.json(worksheet);
     } catch (err: any) {
       if (err.message === "warehouse_not_found") {
@@ -1898,8 +1901,8 @@ export function createFinanceRouter(): Router {
 
       res.status(201).json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1924,8 +1927,8 @@ export function createFinanceRouter(): Router {
       const items = await listDailyClosures(pool, { warehouseId, dateFrom, dateTo });
       res.json({ items });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1956,8 +1959,8 @@ export function createFinanceRouter(): Router {
       }
       res.json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -1977,8 +1980,8 @@ export function createFinanceRouter(): Router {
       const saved = await saveClosureReceiptFile(req.file.buffer, req.file.originalname);
       res.json(saved);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -2001,8 +2004,8 @@ export function createFinanceRouter(): Router {
       );
       res.json({ files: saved });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -2039,8 +2042,8 @@ export function createFinanceRouter(): Router {
       });
       res.json({ ok: true });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -2103,8 +2106,8 @@ export function createFinanceRouter(): Router {
       const data = await getGeneralClosureData(pool, { warehouseId, dateFrom, dateTo });
       res.json(data);
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -2136,14 +2139,15 @@ export function createFinanceRouter(): Router {
         warehouseId,
         dateFrom: body.dateFrom,
         dateTo: body.dateTo,
+        openingCash: body.openingCash !== undefined ? Number(body.openingCash) : undefined,
         cashToKeep: Number(body.cashToKeep ?? 0),
         notes: body.notes,
       }, req.auth!.userId);
 
       res.status(201).json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -2168,8 +2172,8 @@ export function createFinanceRouter(): Router {
       const items = await listGeneralClosures(pool, { warehouseId });
       res.json({ items });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);
@@ -2200,8 +2204,8 @@ export function createFinanceRouter(): Router {
       }
       res.json({ item });
     } catch (err: any) {
-      if (err?.statusCode === 400 || err?.code === "PENDING_RECEIPTS") {
-        res.status(400).json({ error: err.message });
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
       next(err);

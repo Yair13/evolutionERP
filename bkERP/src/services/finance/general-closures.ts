@@ -1,5 +1,5 @@
 import type pg from "pg";
-import { addDaysYmd, getFirstDayOfMonthBogotaYmd } from "../../lib/date-utils.js";
+import { getFirstDayOfMonthBogotaYmd } from "../../lib/date-utils.js";
 
 export interface MethodBreakdownItem {
   method: string;
@@ -33,6 +33,11 @@ export interface GeneralClosureWorksheet {
   totalTransfersReceived: number;
   totalTransfersSent: number;
 
+  // Base inicial y efectivo total
+  openingCash: number;
+  suggestedOpeningCash: number;
+  totalCashAvailable: number;
+
   // Efectivo Neto Acumulado en el Período
   totalNetCash: number;
 
@@ -46,6 +51,8 @@ export interface GeneralClosureWorksheet {
     dateFrom: string;
     dateTo: string;
     createdAt: string;
+    startedAt?: string | null;
+    closedAt?: string | null;
   } | null;
   suggestedDateFrom: string;
   hasPreviousClosure: boolean;
@@ -67,6 +74,8 @@ export interface GeneralClosureRecord {
   warehouseName?: string;
   dateFrom: string;
   dateTo: string;
+  startedAt?: string | null;
+  closedAt?: string | null;
   totalSales: number;
   totalCashSales: number;
   totalBankSales: number;
@@ -74,7 +83,9 @@ export interface GeneralClosureRecord {
   totalLayawayPayments: number;
   totalOutflows: number;
   totalPayroll: number;
+  openingCash: number;
   totalNetCash: number;
+  totalCashAvailable?: number;
   cashToKeep: number;
   cashToWithdraw: number;
   paymentBreakdown: MethodBreakdownItem[];
@@ -134,6 +145,8 @@ export async function getLastGeneralClosure(
   cashToKeep: number;
   cashToWithdraw: number;
   createdAt: string;
+  startedAt?: string | null;
+  closedAt?: string | null;
 } | null> {
   const whCondition = warehouseId ? `gc.warehouse_id = $1::uuid` : `gc.warehouse_id IS NULL`;
   const params: any[] = warehouseId ? [warehouseId] : [];
@@ -148,7 +161,9 @@ export async function getLastGeneralClosure(
       gc.date_to::text AS "dateTo",
       gc.cash_to_keep::float AS "cashToKeep",
       gc.cash_to_withdraw::float AS "cashToWithdraw",
-      gc.created_at AS "createdAt"
+      gc.created_at AS "createdAt",
+      gc.started_at AS "startedAt",
+      COALESCE(gc.closed_at, gc.created_at) AS "closedAt"
     FROM global_closures gc
     WHERE ${whCondition}
       AND gc.status <> 'voided'
@@ -188,7 +203,72 @@ export async function getGeneralClosureData(
 
   // Último cierre previo para esta sede
   const lastClosure = await getLastGeneralClosure(pool, opts.warehouseId);
-  const suggestedDateFrom = lastClosure ? addDaysYmd(lastClosure.dateTo, 1) : getFirstDayOfMonthBogotaYmd();
+  const suggestedDateFrom = lastClosure ? lastClosure.dateTo : getFirstDayOfMonthBogotaYmd();
+
+  const fromTime = (lastClosure && opts.dateFrom <= lastClosure.dateTo)
+    ? (lastClosure.closedAt || lastClosure.createdAt)
+    : null;
+
+  const timeFilterDoc = fromTime
+    ? `AND COALESCE(d.completed_at, d.created_at) > '${new Date(fromTime).toISOString()}'::timestamptz AND (COALESCE(d.completed_at, d.created_at) AT TIME ZONE 'America/Bogota')::date <= $2::date`
+    : `AND (COALESCE(d.completed_at, d.created_at) AT TIME ZONE 'America/Bogota')::date >= $1::date AND (COALESCE(d.completed_at, d.created_at) AT TIME ZONE 'America/Bogota')::date <= $2::date`;
+
+  const timeFilterRp = fromTime
+    ? `AND rp.created_at > '${new Date(fromTime).toISOString()}'::timestamptz AND (rp.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`
+    : `AND (rp.created_at AT TIME ZONE 'America/Bogota')::date >= $1::date AND (rp.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`;
+
+  const timeFilterLp = fromTime
+    ? `AND lp.created_at > '${new Date(fromTime).toISOString()}'::timestamptz AND (lp.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`
+    : `AND (lp.created_at AT TIME ZONE 'America/Bogota')::date >= $1::date AND (lp.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`;
+
+  const timeFilterCo = fromTime
+    ? `AND co.created_at > '${new Date(fromTime).toISOString()}'::timestamptz AND (co.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`
+    : `AND (co.created_at AT TIME ZONE 'America/Bogota')::date >= $1::date AND (co.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`;
+
+  const timeFilterPp = fromTime
+    ? `AND pp.created_at > '${new Date(fromTime).toISOString()}'::timestamptz AND (pp.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`
+    : `AND pp.payment_date >= $1::date AND pp.payment_date <= $2::date`;
+
+  const timeFilterDestCt = fromTime
+    ? `AND ct.approved_at > '${new Date(fromTime).toISOString()}'::timestamptz AND (ct.approved_at AT TIME ZONE 'America/Bogota')::date <= $2::date`
+    : `AND (ct.approved_at AT TIME ZONE 'America/Bogota')::date >= $1::date AND (ct.approved_at AT TIME ZONE 'America/Bogota')::date <= $2::date`;
+
+  const timeFilterOrigCt = fromTime
+    ? `AND ct.created_at > '${new Date(fromTime).toISOString()}'::timestamptz AND (ct.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`
+    : `AND (ct.created_at AT TIME ZONE 'America/Bogota')::date >= $1::date AND (ct.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`;
+
+  // Saldo de arranque (base inicial) sugerido:
+  // Si hay cierre general previo: es el fondo que se dejó en sede (cash_to_keep) de ese cierre
+  // Si no hay cierre general previo: buscamos la base del primer cierre diario registrado en el rango
+  let suggestedOpeningCash = 0;
+  if (lastClosure) {
+    suggestedOpeningCash = Number(lastClosure.cashToKeep || 0);
+  } else if (opts.warehouseId) {
+    const { rows: firstDc } = await pool.query<{ opening_cash: string }>(
+      `SELECT opening_cash FROM daily_closures
+       WHERE warehouse_id = $1::uuid AND closure_date >= $2::date AND status <> 'voided'
+       ORDER BY closure_date ASC LIMIT 1`,
+      [opts.warehouseId, opts.dateFrom]
+    );
+    if (firstDc[0]) {
+      suggestedOpeningCash = Number(firstDc[0].opening_cash || 0);
+    }
+  } else {
+    // Consolidado
+    const { rows: firstDcAll } = await pool.query<{ total_opening: string }>(
+      `SELECT COALESCE(SUM(opening_cash), 0)::text AS total_opening
+       FROM (
+         SELECT DISTINCT ON (warehouse_id) opening_cash
+         FROM daily_closures
+         WHERE closure_date >= $1::date AND status <> 'voided'
+         ORDER BY warehouse_id, closure_date ASC
+       ) sub`,
+      [opts.dateFrom]
+    );
+    if (firstDcAll[0]) {
+      suggestedOpeningCash = Number(firstDcAll[0].total_opening || 0);
+    }
+  }
 
   const whFilterDoc = opts.warehouseId ? `AND d.warehouse_id = '${opts.warehouseId}'::uuid` : "";
   const whFilterRp = opts.warehouseId ? `AND rp.warehouse_id = '${opts.warehouseId}'::uuid` : "";
@@ -216,8 +296,7 @@ export async function getGeneralClosureData(
     WHERE d.status = 'completed'
       AND d.doc_type IN ('exit', 'sale')
       ${whFilterDoc}
-      AND (COALESCE(d.completed_at, d.created_at) AT TIME ZONE 'America/Bogota')::date >= $1::date
-      AND (COALESCE(d.completed_at, d.created_at) AT TIME ZONE 'America/Bogota')::date <= $2::date
+      ${timeFilterDoc}
     GROUP BY LOWER(TRIM(p->>'method'))
     `,
     [opts.dateFrom, opts.dateTo]
@@ -233,8 +312,7 @@ export async function getGeneralClosureData(
     FROM receivable_payments rp
     WHERE 1=1
       ${whFilterRp}
-      AND (rp.created_at AT TIME ZONE 'America/Bogota')::date >= $1::date
-      AND (rp.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date
+      ${timeFilterRp}
     GROUP BY LOWER(TRIM(rp.payment_method))
     `,
     [opts.dateFrom, opts.dateTo]
@@ -250,8 +328,7 @@ export async function getGeneralClosureData(
     FROM layaway_payments lp
     WHERE 1=1
       ${whFilterLp}
-      AND (lp.created_at AT TIME ZONE 'America/Bogota')::date >= $1::date
-      AND (lp.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date
+      ${timeFilterLp}
     GROUP BY LOWER(TRIM(lp.payment_method))
     `,
     [opts.dateFrom, opts.dateTo]
@@ -266,15 +343,14 @@ export async function getGeneralClosureData(
     FROM cash_outflows co
     WHERE 1=1
       ${whFilterCo}
-      AND (co.created_at AT TIME ZONE 'America/Bogota')::date >= $1::date
-      AND (co.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date
+      ${timeFilterCo}
     `,
     [opts.dateFrom, opts.dateTo]
   );
   const totalOutflows = Number(outflowRows[0]?.total || 0);
   const totalCashOutflows = Number(outflowRows[0]?.cash_total || 0);
 
-  // 5. Nómina (payment_date ya es de tipo DATE)
+  // 5. Nómina
   const { rows: payrollRows } = await pool.query<{ total: string; cash_total: string }>(
     `
     SELECT
@@ -283,8 +359,7 @@ export async function getGeneralClosureData(
     FROM payroll_payments pp
     WHERE 1=1
       ${whFilterPp}
-      AND pp.payment_date >= $1::date
-      AND pp.payment_date <= $2::date
+      ${timeFilterPp}
     `,
     [opts.dateFrom, opts.dateTo]
   );
@@ -301,8 +376,7 @@ export async function getGeneralClosureData(
       FROM cash_transfers ct
       WHERE ct.status = 'approved'
         ${whFilterDestCt}
-        AND (ct.approved_at AT TIME ZONE 'America/Bogota')::date >= $1::date
-        AND (ct.approved_at AT TIME ZONE 'America/Bogota')::date <= $2::date
+        ${timeFilterDestCt}
         AND LOWER(ct.payment_method) = 'efectivo'
       `,
       [opts.dateFrom, opts.dateTo]
@@ -315,8 +389,7 @@ export async function getGeneralClosureData(
       FROM cash_transfers ct
       WHERE ct.status <> 'rejected'
         ${whFilterOrigCt}
-        AND (ct.created_at AT TIME ZONE 'America/Bogota')::date >= $1::date
-        AND (ct.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date
+        ${timeFilterOrigCt}
         AND LOWER(ct.payment_method) = 'efectivo'
       `,
       [opts.dateFrom, opts.dateTo]
@@ -386,12 +459,19 @@ export async function getGeneralClosureData(
   );
   const existing = existingRows[0] || null;
 
+  // Saldo de arranque (base inicial) y efectivo total a liquidar
+  const openingCash = existing && existing.opening_cash !== null ? Number(existing.opening_cash) : suggestedOpeningCash;
+  const totalCashAvailable = openingCash + totalNetCash;
+
   return {
     warehouseId: opts.warehouseId || null,
     warehouseCode,
     warehouseName,
     dateFrom: opts.dateFrom,
     dateTo: opts.dateTo,
+    openingCash,
+    suggestedOpeningCash,
+    totalCashAvailable,
     totalSales,
     totalCashSales,
     totalBankSales,
@@ -410,6 +490,8 @@ export async function getGeneralClosureData(
       dateFrom: lastClosure.dateFrom,
       dateTo: lastClosure.dateTo,
       createdAt: lastClosure.createdAt,
+      startedAt: lastClosure.startedAt || null,
+      closedAt: lastClosure.closedAt || lastClosure.createdAt,
     } : null,
     suggestedDateFrom,
     hasPreviousClosure: Boolean(lastClosure),
@@ -431,6 +513,7 @@ export async function saveGeneralClosure(
     warehouseId?: string | null;
     dateFrom: string;
     dateTo: string;
+    openingCash?: number;
     cashToKeep: number;
     notes?: string | null;
   },
@@ -446,15 +529,17 @@ export async function saveGeneralClosure(
     dateTo: data.dateTo,
   });
 
-  // Si no es actualización de un cierre ya existente en ese rango, y hay un cierre previo, validar no solapamiento
-  if (!ws.isExisting && ws.hasPreviousClosure && ws.lastClosure && data.dateFrom <= ws.lastClosure.dateTo) {
+  // Si no es actualización de un cierre ya existente en ese rango, y hay un cierre previo, validar no solapamiento hacia el pasado
+  if (!ws.isExisting && ws.hasPreviousClosure && ws.lastClosure && data.dateFrom < ws.lastClosure.dateTo) {
     throw new Error(
-      `La fecha de inicio (${data.dateFrom}) debe ser posterior a la fecha del último cierre general (${ws.lastClosure.closureCode} hasta ${ws.lastClosure.dateTo}).`
+      `La fecha de inicio (${data.dateFrom}) no puede ser anterior a la fecha del último cierre general (${ws.lastClosure.closureCode} hasta ${ws.lastClosure.dateTo}).`
     );
   }
 
+  const openingCash = Math.max(0, Number(data.openingCash !== undefined ? data.openingCash : ws.openingCash));
   const cashToKeep = Math.max(0, data.cashToKeep);
-  const cashToWithdraw = Math.max(0, ws.totalNetCash - cashToKeep);
+  const totalCashAvailable = openingCash + ws.totalNetCash;
+  const cashToWithdraw = Math.max(0, totalCashAvailable - cashToKeep);
 
   let closureCode = ws.existingCode;
   if (!closureCode) {
@@ -462,6 +547,8 @@ export async function saveGeneralClosure(
   }
 
   let closureId: string;
+  const startedAt = ws.lastClosure ? new Date(ws.lastClosure.closedAt || ws.lastClosure.createdAt) : new Date(data.dateFrom);
+  const closedAt = new Date();
 
   if (ws.existingId) {
     closureId = ws.existingId;
@@ -469,22 +556,25 @@ export async function saveGeneralClosure(
       `
       UPDATE global_closures
       SET
-        total_sales = $1,
-        total_cash_sales = $2,
-        total_bank_sales = $3,
-        total_credit_payments = $4,
-        total_layaway_payments = $5,
-        total_outflows = $6,
-        total_payroll = $7,
-        total_net_cash = $8,
-        cash_to_keep = $9,
-        cash_to_withdraw = $10,
-        payment_breakdown = $11::jsonb,
-        notes = $12,
-        status = 'approved'
-      WHERE id = $13::uuid
+        opening_cash = $1,
+        total_sales = $2,
+        total_cash_sales = $3,
+        total_bank_sales = $4,
+        total_credit_payments = $5,
+        total_layaway_payments = $6,
+        total_outflows = $7,
+        total_payroll = $8,
+        total_net_cash = $9,
+        cash_to_keep = $10,
+        cash_to_withdraw = $11,
+        payment_breakdown = $12::jsonb,
+        notes = $13,
+        status = 'approved',
+        closed_at = now()
+      WHERE id = $14::uuid
       `,
       [
+        openingCash,
         ws.totalSales,
         ws.totalCashSales,
         ws.totalBankSales,
@@ -509,6 +599,9 @@ export async function saveGeneralClosure(
         period_date,
         date_from,
         date_to,
+        started_at,
+        closed_at,
+        opening_cash,
         total_sales,
         total_cash_sales,
         total_bank_sales,
@@ -524,7 +617,7 @@ export async function saveGeneralClosure(
         created_by,
         status
       ) VALUES (
-        $1, $2, $3::date, $4::date, $5::date, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, $18, 'approved'
+        $1, $2, $3::date, $4::date, $5::date, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, 'approved'
       )
       RETURNING id
       `,
@@ -534,6 +627,9 @@ export async function saveGeneralClosure(
         data.dateTo,
         data.dateFrom,
         data.dateTo,
+        startedAt,
+        closedAt,
+        openingCash,
         ws.totalSales,
         ws.totalCashSales,
         ws.totalBankSales,
@@ -573,6 +669,10 @@ export async function getGeneralClosureDetail(
       w.name AS "warehouseName",
       gc.date_from::text AS "dateFrom",
       gc.date_to::text AS "dateTo",
+      gc.started_at AS "startedAt",
+      COALESCE(gc.closed_at, gc.created_at) AS "closedAt",
+      COALESCE(gc.opening_cash, 0)::float AS "openingCash",
+      ((COALESCE(gc.opening_cash, 0) + gc.total_net_cash))::float AS "totalCashAvailable",
       gc.total_sales::float AS "totalSales",
       gc.total_cash_sales::float AS "totalCashSales",
       gc.total_bank_sales::float AS "totalBankSales",
@@ -628,6 +728,10 @@ export async function listGeneralClosures(
       w.name AS "warehouseName",
       gc.date_from::text AS "dateFrom",
       gc.date_to::text AS "dateTo",
+      gc.started_at AS "startedAt",
+      COALESCE(gc.closed_at, gc.created_at) AS "closedAt",
+      COALESCE(gc.opening_cash, 0)::float AS "openingCash",
+      ((COALESCE(gc.opening_cash, 0) + gc.total_net_cash))::float AS "totalCashAvailable",
       gc.total_sales::float AS "totalSales",
       gc.total_cash_sales::float AS "totalCashSales",
       gc.total_bank_sales::float AS "totalBankSales",

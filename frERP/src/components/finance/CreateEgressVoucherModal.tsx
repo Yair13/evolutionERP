@@ -1,8 +1,16 @@
 import { useState, useEffect } from "react";
-import { createCashOutflow, uploadClosureReceiptFiles, type CashOutflowItem } from "../../api/finance.js";
+import {
+  createCashOutflow,
+  uploadClosureReceiptFiles,
+  fetchSuppliers,
+  fetchPayables,
+  type CashOutflowItem,
+  type SupplierItem,
+  type PayableSummaryItem,
+} from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
-import { FileMinus, X, AlertCircle, Check, Loader2 } from "lucide-react";
+import { FileMinus, X, AlertCircle, Check, Loader2, Building2 } from "lucide-react";
 import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
 
 type Props = {
@@ -19,6 +27,14 @@ const BANK_PAYMENT_METHODS = [
   { value: "daviplata", label: "Daviplata 🔴" },
   { value: "bold", label: "Bold 🔵" },
 ] as const;
+
+function formatMoney(n: number): string {
+  return new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  }).format(n);
+}
 
 export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
   const { token } = useAuth();
@@ -38,6 +54,16 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
   const [amountStr, setAmountStr] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("efectivo");
   const [notes, setNotes] = useState("");
+
+  // Opciones de Proveedor y Enlace a Cuenta por Pagar
+  const [isSupplierPayment, setIsSupplierPayment] = useState(false);
+  const [supplierSearch, setSupplierSearch] = useState("");
+  const [supplierList, setSupplierList] = useState<SupplierItem[]>([]);
+  const [searchingSuppliers, setSearchingSuppliers] = useState(false);
+  const [selectedSupplier, setSelectedSupplier] = useState<SupplierItem | null>(null);
+  const [payablesList, setPayablesList] = useState<PayableSummaryItem[]>([]);
+  const [loadingPayables, setLoadingPayables] = useState(false);
+  const [selectedPayableId, setSelectedPayableId] = useState("");
 
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -59,9 +85,61 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
       setPaymentMethod("efectivo");
       setNotes("");
       setReceiptFiles([]);
+      setIsSupplierPayment(false);
+      setSupplierSearch("");
+      setSupplierList([]);
+      setSelectedSupplier(null);
+      setPayablesList([]);
+      setSelectedPayableId("");
       setError(null);
     }
   }, [open, warehouseId, warehouses]);
+
+  // Búsqueda de proveedores
+  useEffect(() => {
+    if (!token || !supplierSearch.trim() || selectedSupplier) {
+      setSupplierList([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      setSearchingSuppliers(true);
+      try {
+        const res = await fetchSuppliers(token, { q: supplierSearch.trim(), activeOnly: true, limit: 10 });
+        setSupplierList(res.items);
+      } catch {
+        setSupplierList([]);
+      } finally {
+        setSearchingSuppliers(false);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [token, supplierSearch, selectedSupplier]);
+
+  // Carga de facturas / cuentas por pagar pendientes del proveedor seleccionado
+  useEffect(() => {
+    if (!token || !selectedSupplier) {
+      setPayablesList([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingPayables(true);
+    fetchPayables(token, { supplierId: selectedSupplier.id, limit: 50 })
+      .then((res) => {
+        if (cancelled) return;
+        const openBills = res.items.filter((p) => p.status === "open" || p.status === "partial");
+        setPayablesList(openBills);
+      })
+      .catch((err) => {
+        console.error("Error al cargar cuentas por pagar del proveedor:", err);
+        if (!cancelled) setPayablesList([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPayables(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, selectedSupplier]);
 
   // Si cambia a una sede que no es la principal, forzar a efectivo
   useEffect(() => {
@@ -143,7 +221,8 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
         beneficiaryDoc: null,
         amount,
         paymentMethod,
-        supplierId: null,
+        supplierId: isSupplierPayment && selectedSupplier ? selectedSupplier.id : null,
+        payableId: isSupplierPayment && selectedPayableId ? selectedPayableId : null,
         referenceCode: null,
         notes: notes.trim() || null,
         receiptUrl: uploadedReceiptUrl,
@@ -347,6 +426,233 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
               <span>
                 <strong>Bodega Principal (Secretaría):</strong> Autorizada para egresos en efectivo y giros bancarios directos.
               </span>
+            </div>
+          )}
+
+          {/* Selector de Tipo de Egreso: General o Proveedor */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            <span style={{ fontWeight: 600, fontSize: "0.88rem", color: "#334155" }}>
+              Destino o Tipo de Egreso *
+            </span>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSupplierPayment(false);
+                  setSelectedSupplier(null);
+                  setSelectedPayableId("");
+                  setPayablesList([]);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "0.5rem",
+                  padding: "10px",
+                  borderRadius: "8px",
+                  border: !isSupplierPayment ? "2px solid #0f766e" : "1px solid #cbd5e1",
+                  background: !isSupplierPayment ? "rgba(15, 118, 110, 0.08)" : "#ffffff",
+                  color: !isSupplierPayment ? "#0f766e" : "#475569",
+                  fontWeight: 600,
+                  fontSize: "0.88rem",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <span>📦</span> Gasto Operativo / General
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsSupplierPayment(true)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "0.5rem",
+                  padding: "10px",
+                  borderRadius: "8px",
+                  border: isSupplierPayment ? "2px solid #6366f1" : "1px solid #cbd5e1",
+                  background: isSupplierPayment ? "rgba(99, 102, 241, 0.08)" : "#ffffff",
+                  color: isSupplierPayment ? "#4f46e5" : "#475569",
+                  fontWeight: 600,
+                  fontSize: "0.88rem",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <Building2 size={16} /> Pago a Proveedor
+              </button>
+            </div>
+          </div>
+
+          {/* Bloque para asociar Proveedor y Factura / Cuenta por Pagar */}
+          {isSupplierPayment && (
+            <div
+              style={{
+                padding: "0.95rem",
+                borderRadius: "10px",
+                border: "1px solid rgba(99, 102, 241, 0.28)",
+                background: "rgba(99, 102, 241, 0.04)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.75rem",
+              }}
+            >
+              <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#4338ca", display: "flex", alignItems: "center", gap: 6 }}>
+                <Building2 size={16} /> Proveedor y Factura Asociada
+              </span>
+
+              {selectedSupplier ? (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    background: "#ffffff",
+                    padding: "0.75rem 0.9rem",
+                    borderRadius: "8px",
+                    border: "1px solid #e2e8f0",
+                  }}
+                >
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                      <Building2 size={16} color="#6366f1" />
+                      <strong>{selectedSupplier.name}</strong>
+                    </div>
+                    <div style={{ fontSize: "0.8rem", color: "#64748b" }}>
+                      NIT: {selectedSupplier.taxId || "—"} · Tel: {selectedSupplier.phone || "—"}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="inv-btn inv-btn--ghost"
+                    onClick={() => {
+                      setSelectedSupplier(null);
+                      setSelectedPayableId("");
+                      setPayablesList([]);
+                    }}
+                    style={{ fontSize: "0.8rem", padding: "4px 8px" }}
+                  >
+                    Cambiar
+                  </button>
+                </div>
+              ) : (
+                <div style={{ position: "relative" }}>
+                  <input
+                    value={supplierSearch}
+                    onChange={(e) => setSupplierSearch(e.target.value)}
+                    placeholder="Buscar proveedor por nombre o NIT..."
+                    style={{
+                      width: "100%",
+                      padding: "9px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      background: "#ffffff",
+                      fontSize: "0.88rem",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  {searchingSuppliers && (
+                    <span style={{ fontSize: "0.75rem", color: "#64748b", marginTop: 4, display: "block" }}>
+                      Buscando proveedores...
+                    </span>
+                  )}
+                  {supplierList.length > 0 && (
+                    <ul
+                      style={{
+                        position: "absolute",
+                        top: "100%",
+                        left: 0,
+                        right: 0,
+                        zIndex: 20,
+                        background: "#ffffff",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "8px",
+                        boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
+                        maxHeight: "180px",
+                        overflowY: "auto",
+                        listStyle: "none",
+                        padding: "4px 0",
+                        margin: "4px 0 0",
+                      }}
+                    >
+                      {supplierList.map((s) => (
+                        <li
+                          key={s.id}
+                          onClick={() => {
+                            setSelectedSupplier(s);
+                            setSupplierSearch("");
+                            setSupplierList([]);
+                            if (!beneficiaryName.trim()) {
+                              setBeneficiaryName(s.name);
+                            }
+                            if (!concept.trim()) {
+                              setConcept(`Pago a proveedor - ${s.name}`);
+                            }
+                          }}
+                          style={{
+                            padding: "8px 12px",
+                            cursor: "pointer",
+                            fontSize: "0.85rem",
+                            borderBottom: "1px solid #f1f5f9",
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                        >
+                          <strong>{s.name}</strong> - NIT: {s.taxId || "—"}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {/* Selector de cuenta por pagar pendiente */}
+              {selectedSupplier && (
+                <div>
+                  <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#334155", display: "block", marginBottom: 4 }}>
+                    Factura o Deuda a Abonar:
+                  </span>
+                  {loadingPayables ? (
+                    <span style={{ fontSize: "0.78rem", color: "#64748b" }}>Cargando facturas pendientes...</span>
+                  ) : payablesList.length > 0 ? (
+                    <select
+                      value={selectedPayableId}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSelectedPayableId(val);
+                        if (val) {
+                          const p = payablesList.find((item) => item.id === val);
+                          if (p) {
+                            setConcept(`Pago factura ${p.billNumber ? p.billNumber : "s/n"} - ${selectedSupplier.name}`);
+                            if (!amountStr) {
+                              setAmountStr(String(p.balanceAmount));
+                            }
+                          }
+                        }
+                      }}
+                      style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+                    >
+                      <option value="">Abono general al proveedor (Sin factura específica)</option>
+                      {payablesList.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.billNumber ? `Factura ${p.billNumber}` : "Cuenta"} · Saldo por pagar: {formatMoney(p.balanceAmount)} · {p.description || "Sin descripción"}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div style={{ fontSize: "0.82rem", color: "#64748b", padding: "6px 8px", background: "#f8fafc", borderRadius: 6 }}>
+                      Este proveedor no tiene facturas pendientes con saldo. El egreso se registrará como abono libre al proveedor.
+                    </div>
+                  )}
+
+                  {selectedPayableId && (
+                    <div style={{ marginTop: "0.4rem", fontSize: "0.78rem", color: "#10b981", fontWeight: 600 }}>
+                      ✓ Este egreso descontará automáticamente el valor de la cuenta por pagar en Sede Administrativa.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

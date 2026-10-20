@@ -170,8 +170,13 @@ export function PrintDailyClosureModal({ closure, onClose }: Props) {
                 {closure.closingVoucherNumber}
               </div>
               <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: 4 }}>
-                Fecha Cierre: <strong>{closure.closureDate}</strong>
+                Fecha Cierre: <strong>{closure.closureDate}</strong> {closure.shiftNumber ? `· Turno ${closure.shiftNumber}` : ""}
               </div>
+              {closure.startedAt && (
+                <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                  Horario: {new Date(closure.startedAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })} → {closure.closedAt ? new Date(closure.closedAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) : "Cierre"}
+                </div>
+              )}
               <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
                 Cajero: {closure.cashierName ?? closure.createdByName ?? "—"}
               </div>

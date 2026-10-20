@@ -73,7 +73,6 @@ export default function App() {
             <Route path="finanzas/cartera" element={<ReceivablesPage />} />
             <Route path="finanzas/caja" element={<PaymentsCashPage />} />
             <Route path="finanzas/apartados" element={<LayawaysPage />} />
-            <Route path="finanzas/proveedores" element={<PayablesPage />} />
             <Route path="finanzas/egresos" element={<CashOutflowsPage />} />
             <Route path="finanzas/nomina" element={<PayrollPage />} />
             <Route path="finanzas/cierre-diario" element={<DailyClosurePage />} />
@@ -81,6 +80,7 @@ export default function App() {
             <Route path="finanzas/cierre-general" element={<DailyClosurePage defaultTab="general" />} />
 
             <Route element={<RequireAdminHeadquarters />}>
+              <Route path="finanzas/proveedores" element={<PayablesPage />} />
               <Route path="productos" element={<ProductsCatalogPage />} />
               <Route path="productos/nuevo" element={<ProductNewPage />} />
               <Route path="productos/cargue-masivo" element={<ProductBulkUploadPage />} />

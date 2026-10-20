@@ -222,6 +222,84 @@ export async function createCashOutflow(
       ]
     );
 
+    // Si el egreso está enlazado a una cuenta por pagar / factura de proveedor,
+    // aplicar automáticamente el abono a la deuda y registrar el pago en payable_payments
+    if (payableId) {
+      const { rows: pRows } = await client.query<{
+        id: string;
+        supplier_id: string;
+        balance_amount: string;
+        paid_amount: string;
+        status: string;
+      }>(
+        `SELECT id::text, supplier_id::text, balance_amount::text, paid_amount::text, status
+         FROM accounts_payable WHERE id = $1::uuid FOR UPDATE`,
+        [payableId]
+      );
+
+      if (pRows[0] && pRows[0].status !== "paid" && pRows[0].status !== "cancelled") {
+        const payable = pRows[0];
+        const currentBalance = Number(payable.balance_amount);
+        const appliedToDebt = Math.min(amount, currentBalance);
+        const excessToFavour = Math.max(0, Math.round((amount - currentBalance) * 100) / 100);
+        const newBalance = Math.max(0, Math.round((currentBalance - appliedToDebt) * 100) / 100);
+        const newPaid = Math.round((Number(payable.paid_amount) + appliedToDebt) * 100) / 100;
+        const newStatus = newBalance === 0 ? "paid" : "partial";
+
+        if (excessToFavour > 0) {
+          await client.query(
+            `UPDATE suppliers SET credit_balance = credit_balance + $1 WHERE id = $2::uuid`,
+            [excessToFavour, payable.supplier_id]
+          );
+        }
+
+        await client.query(
+          `
+          UPDATE accounts_payable
+          SET balance_amount = $1,
+              paid_amount = $2,
+              status = $3,
+              paid_at = CASE WHEN $3 = 'paid' THEN now() ELSE NULL END
+          WHERE id = $4::uuid
+          `,
+          [newBalance, newPaid, newStatus, payableId]
+        );
+
+        await client.query(
+          `
+          INSERT INTO payable_payments (
+            payable_id, supplier_id, warehouse_id, receipt_number,
+            payment_method, amount, applied_to_debt, excess_to_favour,
+            reference_code, notes, created_by,
+            receipt_url, receipt_filename, receipt_urls
+          )
+          VALUES (
+            $1::uuid, $2::uuid, $3::uuid, $4,
+            $5, $6, $7, $8,
+            $9, $10, $11::uuid,
+            $12, $13, $14::jsonb
+          )
+          `,
+          [
+            payableId,
+            payable.supplier_id,
+            warehouseId,
+            voucherNumber,
+            paymentMethod,
+            amount,
+            appliedToDebt,
+            excessToFavour,
+            referenceCode?.trim() || null,
+            notes?.trim() || `Egreso de caja ${voucherNumber}`,
+            userId || null,
+            primaryUrl,
+            receiptFilename?.trim() || null,
+            jsonUrls,
+          ]
+        );
+      }
+    }
+
     await client.query("COMMIT");
 
     const detail = await getCashOutflowDetail(pool, rows[0]!.id);

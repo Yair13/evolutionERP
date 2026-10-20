@@ -219,7 +219,11 @@ export function ExitCheckoutModal({
   }
 
   async function submit() {
-    if ((exitKind === "sale" || exitKind === "credit") && !customerId) {
+    if (exitKind === "credit" && !customerId) {
+      setError("El cliente es estrictamente obligatorio para registrar una salida a crédito.");
+      return;
+    }
+    if (exitKind === "sale" && !customerId) {
       setError("Debes seleccionar un cliente existente o registrar uno nuevo.");
       return;
     }
@@ -435,7 +439,26 @@ export function ExitCheckoutModal({
         {/* Clientes para Ventas / Crédito / Cambio */}
         {(exitKind === "sale" || exitKind === "credit" || exitKind === "exchange") && (
           <div className="inv-checkout-customer">
-            <h3 className="inv-checkout-customer__title">Información del Cliente</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem", flexWrap: "wrap", gap: "0.5rem" }}>
+              <h3 className="inv-checkout-customer__title" style={{ margin: 0 }}>
+                Información del Cliente {(exitKind === "credit" || exitKind === "sale") && <span style={{ color: "#ef4444" }}>*</span>}
+              </h3>
+              {(exitKind === "credit" || exitKind === "sale") && (
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: 999,
+                    background: selectedCustomer ? "#dcfce7" : "#fee2e2",
+                    color: selectedCustomer ? "#166534" : "#991b1b",
+                    border: `1px solid ${selectedCustomer ? "#bbf7d0" : "#fecaca"}`,
+                  }}
+                >
+                  {selectedCustomer ? "✓ Cliente asignado" : "Obligatorio *"}
+                </span>
+              )}
+            </div>
 
             {selectedCustomer ? (
               <div className="inv-checkout-customer__selected">
@@ -588,13 +611,44 @@ export function ExitCheckoutModal({
             ) : (
               <div>
                 <label className="field inv-checkout-customer__search">
-                  <span>Buscar cliente existente (Nombre / Cédula / Teléfono)</span>
+                  <span>
+                    Buscar cliente existente (Nombre / Cédula / Teléfono){" "}
+                    {(exitKind === "credit" || exitKind === "sale") && <span style={{ color: "#ef4444" }}>*</span>}
+                  </span>
                   <input
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Escribe para buscar..."
+                    style={
+                      (exitKind === "credit" || exitKind === "sale") && !selectedCustomer
+                        ? { borderColor: "rgba(239, 68, 68, 0.5)" }
+                        : undefined
+                    }
                   />
                 </label>
+                {(exitKind === "credit" || exitKind === "sale") && !selectedCustomer && (
+                  <div
+                    style={{
+                      margin: "0.4rem 0 0.6rem 0",
+                      padding: "0.4rem 0.65rem",
+                      borderRadius: 6,
+                      background: "rgba(239, 68, 68, 0.08)",
+                      border: "1px solid rgba(239, 68, 68, 0.2)",
+                      fontSize: "0.8rem",
+                      color: "#f87171",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.4rem",
+                    }}
+                  >
+                    <span>⚠️</span>
+                    <span>
+                      {exitKind === "credit"
+                        ? "Para ventas a crédito es obligatorio seleccionar un cliente existente o registrar uno nuevo para generar la cuenta por cobrar."
+                        : "Para emitir la venta debes seleccionar un cliente registrado o registrar uno nuevo."}
+                    </span>
+                  </div>
+                )}
                 {searching && <span className="inv-checkout-customer__hint">Buscando...</span>}
                 {customerList.length > 0 && (
                   <ul className="inv-checkout-customer__list">

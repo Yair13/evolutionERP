@@ -380,13 +380,13 @@ export function Sidebar({ open, pinned = false, onTogglePin, onNavigate }: Sideb
               label: "Apartados (Separe)",
               hint: "Plan separe de clientes y control de abonos",
             },
-            {
+            ...(isAllWarehouses ? [{
               to: "/app/finanzas/proveedores",
               end: true,
               icon: Truck,
               label: "Proveedores y Pagos",
               hint: "Cuentas por pagar a proveedores y saldos a favor",
-            },
+            }] : []),
             {
               to: "/app/finanzas/egresos",
               end: true,
