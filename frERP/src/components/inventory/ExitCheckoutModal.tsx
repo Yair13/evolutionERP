@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { X } from "lucide-react";
 import type { ExitKind } from "../../features/inventory/inventory.types.js";
 import { EXIT_KIND_OPTIONS } from "../../features/inventory/exit-labels.js";
 import { useAuth } from "../../context/AuthContext.js";
@@ -122,31 +123,36 @@ export function ExitCheckoutModal({
     return true;
   });
 
+  const prevOpenRef = useRef(false);
+
   useEffect(() => {
-    if (!open) return;
-    const initKind = lockedKind ?? "sale";
-    setExitKind(initKind);
-    setCustomerName("");
-    setRelatedInvoiceNumber("");
-    setNotes("");
-    setError(null);
-    setSearchQuery("");
-    setCustomerList([]);
-    setSelectedCustomer(null);
-    setCustomerId(null);
-    setActiveLayaway(null);
-    setSelectedLayawayId(null);
-    setShowCreateNew(false);
-    setReceiptFiles([]);
-    setUploadingReceipt(false);
-    if (initKind === "credit") {
-      setPayments([{ id: 1, method: "efectivo", amount: "" }]);
-    } else {
-      setPayments([{ id: 1, method: "efectivo", amount: String(totalValue) }]);
+    // Solo inicializar cuando el modal pasa de cerrado a abierto
+    if (open && !prevOpenRef.current) {
+      const initKind = lockedKind ?? "sale";
+      setExitKind(initKind);
+      setCustomerName("");
+      setRelatedInvoiceNumber("");
+      setNotes("");
+      setError(null);
+      setSearchQuery("");
+      setCustomerList([]);
+      setSelectedCustomer(null);
+      setCustomerId(null);
+      setActiveLayaway(null);
+      setSelectedLayawayId(null);
+      setShowCreateNew(false);
+      setReceiptFiles([]);
+      setUploadingReceipt(false);
+      if (initKind === "credit") {
+        setPayments([{ id: 1, method: "efectivo", amount: "" }]);
+      } else {
+        setPayments([{ id: 1, method: "efectivo", amount: String(totalValue) }]);
+      }
+      setNextPaymentId(2);
+      setDestinationWarehouseId("");
     }
-    setNextPaymentId(2);
-    setDestinationWarehouseId("");
-  }, [open, totalValue, lockedKind]);
+    prevOpenRef.current = open;
+  }, [open, lockedKind]);
 
   // Consulta si el cliente tiene un apartado activo con saldo acumulado
   useEffect(() => {
@@ -383,14 +389,35 @@ export function ExitCheckoutModal({
   }
 
   return (
-    <div className="inv-modal-backdrop" role="presentation" onClick={() => !confirming && onClose()}>
+    <div className="inv-modal-backdrop" role="presentation">
       <div
         className="inv-modal inv-modal--checkout"
         role="dialog"
         aria-labelledby="exit-checkout-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="exit-checkout-title">Finalizar salida</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "1rem", marginBottom: "0.25rem" }}>
+          <h2 id="exit-checkout-title" style={{ margin: 0 }}>Finalizar salida</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={confirming || uploadingReceipt}
+            aria-label="Cerrar modal"
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--inv-text-muted, #94a3b8)",
+              cursor: "pointer",
+              padding: "4px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: "6px",
+            }}
+          >
+            <X size={22} />
+          </button>
+        </div>
         <p className="inv-modal__summary">
           {exitKind === "transfer" || exitKind === "distribution" || exitKind === "return_to_factory" ? (
             <>

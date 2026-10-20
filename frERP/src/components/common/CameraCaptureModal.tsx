@@ -5,9 +5,10 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onPhotosCaptured: (files: File[]) => void;
+  onFallbackNative?: () => void;
 };
 
-export function CameraCaptureModal({ open, onClose, onPhotosCaptured }: Props) {
+export function CameraCaptureModal({ open, onClose, onPhotosCaptured, onFallbackNative }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -321,6 +322,33 @@ export function CameraCaptureModal({ open, onClose, onPhotosCaptured }: Props) {
             >
               <AlertCircle size={36} />
               <p style={{ margin: 0, fontSize: "0.9rem", maxWidth: 400 }}>{error}</p>
+              {onFallbackNative && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopStream();
+                    onClose();
+                    onFallbackNative();
+                  }}
+                  className="inv-btn"
+                  style={{
+                    marginTop: "0.5rem",
+                    background: "#38bdf8",
+                    color: "#0f172a",
+                    fontWeight: 700,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                    padding: "8px 16px",
+                    borderRadius: "8px",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  <Camera size={18} />
+                  <span>Tomar foto con la cámara del dispositivo</span>
+                </button>
+              )}
             </div>
           ) : (
             <>

@@ -2,6 +2,83 @@ import { useState, useRef, useEffect } from "react";
 import { Camera, Upload, X, FileText, Image as ImageIcon } from "lucide-react";
 import { CameraCaptureModal } from "./CameraCaptureModal.js";
 
+function canUseWebcamStream(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  return Boolean(
+    window.isSecureContext &&
+      navigator.mediaDevices &&
+      typeof navigator.mediaDevices.getUserMedia === "function"
+  );
+}
+
+function isMobileOrTablet(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const isTouch = typeof navigator.maxTouchPoints === "number" && navigator.maxTouchPoints > 1;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) || (isTouch && /Tablet|Mobile/i.test(ua));
+}
+
+async function compressImageFile(file: File): Promise<File> {
+  if (!file.type.startsWith("image/") || file.type.includes("svg") || file.type.includes("gif")) {
+    return file;
+  }
+  // Si pesa menos de 800 KB, no requiere compresión
+  if (file.size < 800 * 1024) {
+    return file;
+  }
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const maxDim = 1920;
+      let width = img.width;
+      let height = img.height;
+
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            resolve(file);
+            return;
+          }
+          const compressed = new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), {
+            type: "image/jpeg",
+            lastModified: Date.now(),
+          });
+          resolve(compressed);
+        },
+        "image/jpeg",
+        0.85
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+    img.src = url;
+  });
+}
+
 type Props = {
   files: File[];
   onChange: (files: File[]) => void;
@@ -29,7 +106,9 @@ export function ReceiptPhotosUploader({
   const [cameraOpen, setCameraOpen] = useState(false);
   const [previews, setPreviews] = useState<string[]>([]);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
+  const [compressing, setCompressing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   const apiBase = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
@@ -50,24 +129,58 @@ export function ReceiptPhotosUploader({
     };
   }, [files]);
 
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const selected = e.target.files;
     if (!selected || selected.length === 0) return;
 
-    const newFiles = Array.from(selected);
-    // Añadir a los existentes evitando duplicados por nombre
-    const existingNames = new Set(files.map((f) => f.name));
-    const combined = [...files];
-    for (const f of newFiles) {
-      if (!existingNames.has(f.name)) {
-        combined.push(f);
-        existingNames.add(f.name);
-      }
-    }
+    setCompressing(true);
+    try {
+      const rawFiles = Array.from(selected);
+      const processed: File[] = [];
 
-    onChange(combined);
-    // Limpiar input para permitir seleccionar el mismo archivo si se desea
-    e.target.value = "";
+      for (const f of rawFiles) {
+        try {
+          const comp = await compressImageFile(f);
+          processed.push(comp);
+        } catch (err) {
+          console.warn("No se pudo comprimir la imagen, usando original:", err);
+          processed.push(f);
+        }
+      }
+
+      // Añadir a los existentes evitando duplicados o resolviendo nombres genéricos (ej. image.jpg de cámaras)
+      const existingNames = new Set(files.map((f) => f.name));
+      const combined = [...files];
+      for (const f of processed) {
+        if (!existingNames.has(f.name)) {
+          combined.push(f);
+          existingNames.add(f.name);
+        } else {
+          const uniqueName = `soporte-${Date.now()}-${f.name}`;
+          const renamed = new File([f], uniqueName, { type: f.type });
+          combined.push(renamed);
+          existingNames.add(uniqueName);
+        }
+      }
+
+      onChange(combined);
+    } finally {
+      setCompressing(false);
+      // Limpiar input para permitir seleccionar el mismo archivo si se desea
+      e.target.value = "";
+    }
+  }
+
+  function handleCameraClick() {
+    if (disabled || compressing) return;
+    // En móviles/tablets o sin HTTPS (donde getUserMedia está bloqueado por el navegador):
+    // Usar directamente la cámara nativa del dispositivo mediante capture="environment"
+    if (isMobileOrTablet() || !canUseWebcamStream()) {
+      cameraInputRef.current?.click();
+      return;
+    }
+    // En PC de escritorio con HTTPS/localhost, abrir modal con visor web
+    setCameraOpen(true);
   }
 
   function handleCameraPhotos(newPhotos: File[]) {
@@ -135,8 +248,8 @@ export function ReceiptPhotosUploader({
       <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
         <button
           type="button"
-          onClick={() => setCameraOpen(true)}
-          disabled={disabled}
+          onClick={handleCameraClick}
+          disabled={disabled || compressing}
           className="inv-btn"
           style={{
             background: "#4f46e5",
@@ -153,13 +266,13 @@ export function ReceiptPhotosUploader({
           }}
         >
           <Camera size={16} />
-          <span>Tomar foto con cámara</span>
+          <span>{compressing ? "Procesando foto..." : "Tomar foto con cámara"}</span>
         </button>
 
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={disabled}
+          disabled={disabled || compressing}
           className="inv-btn inv-btn--ghost"
           style={{
             fontSize: "0.82rem",
@@ -178,7 +291,18 @@ export function ReceiptPhotosUploader({
           <span>Seleccionar archivo(s)</span>
         </button>
 
-        {/* Input file oculto */}
+        {/* Input directo a cámara nativa (ideal para tablets/móviles y entornos HTTP) */}
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          style={{ display: "none" }}
+          onChange={handleFileSelect}
+          disabled={disabled || compressing}
+        />
+
+        {/* Input selector de archivos/galería */}
         <input
           ref={fileInputRef}
           type="file"
@@ -186,7 +310,7 @@ export function ReceiptPhotosUploader({
           accept="image/*,application/pdf"
           style={{ display: "none" }}
           onChange={handleFileSelect}
-          disabled={disabled}
+          disabled={disabled || compressing}
         />
       </div>
 
@@ -379,6 +503,7 @@ export function ReceiptPhotosUploader({
           open={cameraOpen}
           onClose={() => setCameraOpen(false)}
           onPhotosCaptured={handleCameraPhotos}
+          onFallbackNative={() => cameraInputRef.current?.click()}
         />
       )}
 
