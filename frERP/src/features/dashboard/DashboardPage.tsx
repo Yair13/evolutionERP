@@ -76,7 +76,7 @@ export function DashboardPage() {
 
             <p className="welcome-stage__lead">
               Sistema integral de gestión operativa, inventario y control corporativo de{" "}
-              <strong>Colchones Evolution S.A.S</strong>. Selecciona cualquier módulo en el menú lateral para comenzar.
+              <strong>Colchones Evolution S.A.S</strong>. Selecciona cualquier módulo en el menú para comenzar.
             </p>
 
             <div className="welcome-stage__pills" aria-label="Estado de la sesión">
