@@ -63,15 +63,19 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
       (user?.hasAdminAccess ?? (user?.roles ?? []).some((r) => UNRESTRICTED_ROLES.has(r)))
   );
 
+  const warehouseIdsKey = Array.isArray(user?.warehouseIds)
+    ? user.warehouseIds.slice().sort().join(",")
+    : "";
+
   const assignedWarehouses = useMemo(() => {
     if (canViewAllWarehouses || user?.warehouseIds === null || user?.warehouseIds === undefined) {
       return warehouses;
     }
     const allowed = new Set(user.warehouseIds);
     return warehouses.filter((w) => allowed.has(w.id));
-  }, [warehouses, canViewAllWarehouses, user?.warehouseIds]);
+  }, [warehouses, canViewAllWarehouses, warehouseIdsKey]);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (opts?: { silent?: boolean }) => {
     if (!token) {
       setWarehouses([]);
       setWarehouseIdState(null);
@@ -79,7 +83,8 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    // NUNCA poner loading=true en recargas posteriores para no desmontar los modales en pantalla
+    setLoading((prevLoading) => (opts?.silent ? false : prevLoading));
     setError(null);
     try {
       const data = await apiGet<{ items: WarehouseOption[] }>("/warehouses", token);
@@ -91,7 +96,7 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
           ? active
           : active.filter((w) => new Set(user.warehouseIds).has(w.id));
 
-      setWarehouseIdState(() => {
+      setWarehouseIdState((prev) => {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored === ALL_SENTINEL && canViewAllWarehouses) {
           setAllMode(true);
@@ -101,6 +106,10 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
           setAllMode(false);
           return stored;
         }
+        // Conservar la sede actual si sigue siendo válida para el usuario
+        if (prev && assigned.some((w) => w.id === prev)) {
+          return prev;
+        }
         // Usuario normal con una sola sede asignada: entrar directo a esa sede
         if (!canViewAllWarehouses && assigned.length === 1) {
           const onlyId = assigned[0]!.id;
@@ -108,17 +117,20 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
           setAllMode(false);
           return onlyId;
         }
-        // Si es admin o tiene varias sedes y no ha elegido en esta sesión, pedir selección en pantalla intermedia
-        localStorage.removeItem(STORAGE_KEY);
-        setAllMode(false);
-        return null;
+        // Si no se encuentra la sede, solo resetear si no había previa
+        if (!prev) {
+          localStorage.removeItem(STORAGE_KEY);
+          setAllMode(false);
+          return null;
+        }
+        return prev;
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error");
     } finally {
       setLoading(false);
     }
-  }, [token, canViewAllWarehouses, user?.warehouseIds]);
+  }, [token, canViewAllWarehouses, warehouseIdsKey]);
 
   useEffect(() => {
     void reload();

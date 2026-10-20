@@ -48,8 +48,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const me = await apiGet<AuthUser>("/auth/me", activeToken);
       if (me?.id && me.email) {
-        localStorage.setItem(USER_KEY, JSON.stringify(me));
-        setUser(me);
+        const nextJson = JSON.stringify(me);
+        const stored = localStorage.getItem(USER_KEY);
+        if (stored !== nextJson) {
+          localStorage.setItem(USER_KEY, nextJson);
+          setUser(me);
+        }
       }
     } catch {
       /* ignore transient network errors */
