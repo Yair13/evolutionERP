@@ -611,6 +611,24 @@ a.inv-alert:hover {
   border-color: var(--border);
 }
 
+.inv-btn--danger {
+  color: #ffffff;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  border-color: #b91c1c;
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.25);
+}
+
+.inv-btn--danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(220, 38, 38, 0.35);
+}
+
+.inv-btn--danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .inv-back {
   display: inline-flex;
   align-items: center;
@@ -657,6 +675,7 @@ a.inv-alert:hover {
 }
 
 .inv-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -671,6 +690,34 @@ a.inv-alert:hover {
 .inv-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.1);
+}
+
+.inv-card__delete-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(255, 255, 255, 0.95);
+  color: #dc2626;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.inv-card__delete-btn:hover {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #dc2626;
+  transform: scale(1.08);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.35);
 }
 
 .inv-card__link {

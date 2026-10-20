@@ -1,6 +1,25 @@
 import type { CartLine, DocType, ExitKind } from "../features/inventory/inventory.types.js";
 
-type PosDraft = {
+export type CachedPhoto = {
+  name: string;
+  type: string;
+  base64: string;
+};
+
+export type CheckoutDraft = {
+  open: boolean;
+  customerName?: string;
+  customerId?: string | null;
+  selectedCustomer?: any;
+  payments?: Array<{ id: number; method: string; amount: string }>;
+  notes?: string;
+  relatedInvoiceNumber?: string;
+  destinationWarehouseId?: string;
+  selectedLayawayId?: string | null;
+  cachedPhotos?: CachedPhoto[];
+};
+
+export type PosDraft = {
   v: 1;
   mode: DocType;
   warehouseId: string;
@@ -11,6 +30,7 @@ type PosDraft = {
   originInvoiceNumber?: string;
   scannedByProduct?: Record<string, number>;
   savedAt: number;
+  checkoutDraft?: CheckoutDraft;
 };
 
 const PREFIX = "inv-pos-draft:v1:";
@@ -44,6 +64,26 @@ export function savePosDraft(draft: Omit<PosDraft, "v" | "savedAt">): void {
 export function clearPosDraft(mode: DocType, warehouseId: string): void {
   try {
     localStorage.removeItem(key(mode, warehouseId));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function saveCheckoutDraft(warehouseId: string, checkout: CheckoutDraft): void {
+  try {
+    const draft = loadPosDraft("exit", warehouseId);
+    if (!draft) return;
+    savePosDraft({ ...draft, checkoutDraft: checkout });
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearCheckoutDraft(warehouseId: string): void {
+  try {
+    const draft = loadPosDraft("exit", warehouseId);
+    if (!draft) return;
+    savePosDraft({ ...draft, checkoutDraft: undefined });
   } catch {
     /* ignore */
   }

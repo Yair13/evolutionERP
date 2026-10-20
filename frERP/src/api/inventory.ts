@@ -168,6 +168,34 @@ export async function deleteProductImage(token: string, productId: string, image
   }
 }
 
+export type DeleteProductResponse = {
+  ok: boolean;
+  action: "deleted" | "deactivated";
+  message: string;
+};
+
+export async function deleteProduct(
+  token: string,
+  productId: string
+): Promise<DeleteProductResponse> {
+  const base = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  const res = await fetch(`${base}/inventory/products/${productId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      const data = await res.json();
+      if (data?.error) msg = String(data.error);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg);
+  }
+  return res.json() as Promise<DeleteProductResponse>;
+}
+
 export type CreateProductPayload = {
   name: string;
   referenceCode: string;

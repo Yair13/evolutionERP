@@ -33,6 +33,7 @@ import { getUtilitiesSummary } from "../services/inventory/utilities.js";
 import {
   createCategory,
   createProduct,
+  deleteProduct,
   getProductDetail,
   listCategories,
   updateProduct,
@@ -990,6 +991,30 @@ export function createInventoryRouter(): Router {
       const e = err as { code?: string };
       if (e?.code === "23505") {
         res.status(409).json({ error: "duplicate_code_or_barcode" });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  r.delete("/products/:id", manageInventory, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+    const id = firstPathParam(req.params.id);
+    if (!id || !isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+    try {
+      const result = await deleteProduct(pool, req.auth!, id);
+      res.json(result);
+    } catch (err: unknown) {
+      const e = err as { code?: string };
+      if (e?.code === "product_not_found") {
+        res.status(404).json({ error: "product_not_found" });
         return;
       }
       next(err);

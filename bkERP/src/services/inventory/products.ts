@@ -1,4 +1,6 @@
+import { rm } from "node:fs/promises";
 import type pg from "pg";
+import { productUploadDir } from "../../lib/product-uploads.js";
 import { generateProductBarcode } from "../../lib/barcode.js";
 import { canSeeProductionCost } from "../../lib/inventory-permissions.js";
 import type { AuthContext } from "../auth-context.js";
@@ -459,4 +461,83 @@ export async function createCategory(pool: pg.Pool, name: string) {
     [name.trim()]
   );
   return rows[0]!;
+}
+
+export type DeleteProductResult = {
+  ok: boolean;
+  action: "deleted" | "deactivated";
+  message: string;
+};
+
+export async function deleteProduct(
+  pool: pg.Pool,
+  _auth: AuthContext,
+  productId: string
+): Promise<DeleteProductResult> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: prodRows } = await client.query<{ id: string; name: string }>(
+      `SELECT id::text, name FROM products WHERE id = $1::uuid FOR UPDATE`,
+      [productId]
+    );
+    if (!prodRows[0]) {
+      await client.query("ROLLBACK");
+      throw Object.assign(new Error("product_not_found"), { code: "product_not_found" });
+    }
+
+    const { rows: usageRows } = await client.query<{
+      movements: string;
+      documents: string;
+      counts: string;
+    }>(
+      `
+      SELECT
+        (SELECT COUNT(*)::text FROM stock_movements WHERE product_id = $1::uuid) AS movements,
+        (SELECT COUNT(*)::text FROM inventory_document_lines WHERE product_id = $1::uuid) AS documents,
+        (SELECT COUNT(*)::text FROM inventory_count_lines WHERE product_id = $1::uuid) AS counts
+      `,
+      [productId]
+    );
+
+    const movements = Number(usageRows[0]?.movements ?? 0);
+    const documents = Number(usageRows[0]?.documents ?? 0);
+    const counts = Number(usageRows[0]?.counts ?? 0);
+
+    if (movements > 0 || documents > 0 || counts > 0) {
+      await client.query(
+        `UPDATE products SET is_active = false, updated_at = now() WHERE id = $1::uuid`,
+        [productId]
+      );
+      await client.query("COMMIT");
+      return {
+        ok: true,
+        action: "deactivated",
+        message:
+          "El producto tiene movimientos o documentos en el historial, por lo que fue desactivado y ocultado del catálogo para proteger la contabilidad.",
+      };
+    }
+
+    await client.query(`DELETE FROM products WHERE id = $1::uuid`, [productId]);
+    await client.query("COMMIT");
+
+    try {
+      const dir = productUploadDir(productId);
+      await rm(dir, { recursive: true, force: true });
+    } catch {
+      /* ignore file cleanup errors */
+    }
+
+    return {
+      ok: true,
+      action: "deleted",
+      message: "Producto eliminado definitivamente.",
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }

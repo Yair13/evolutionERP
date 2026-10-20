@@ -50,7 +50,7 @@ import { InventoryPageHeader } from "../../components/inventory/InventoryPageHea
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { resolveLightMediaUrl, resolveMediaUrl } from "../../lib/mediaUrl.js";
-import { clearPosDraft, loadPosDraft, savePosDraft } from "../../lib/posDraft.js";
+import { clearPosDraft, loadPosDraft, savePosDraft, clearCheckoutDraft } from "../../lib/posDraft.js";
 import { clearScanCache, warmScanCache } from "../../lib/scanCache.js";
 import type { ScanMatchable } from "../../lib/scanMatch.js";
 import { isUnitSalePriceValid } from "../../lib/salePrice.js";
@@ -431,6 +431,9 @@ export function MovementPosPage({ mode }: Props) {
     if (!isEntry && draft.exitKind) {
       setExitKind(draft.exitKind);
     }
+    if (!isEntry && draft.checkoutDraft?.open) {
+      setShowExitCheckout(true);
+    }
   }, [mode, warehouseId, isEntry, refreshCartStock]);
 
   // Persistir borrador (carrito + verificación) para no perder trabajo con internet intermitente
@@ -441,6 +444,7 @@ export function MovementPosPage({ mode }: Props) {
       return;
     }
     const t = window.setTimeout(() => {
+      const currentDraft = loadPosDraft(mode, warehouseId);
       savePosDraft({
         mode,
         warehouseId,
@@ -450,6 +454,7 @@ export function MovementPosPage({ mode }: Props) {
         exitKind: !isEntry ? exitKind : undefined,
         originInvoiceNumber: isEntry ? originInvoiceNumber : undefined,
         scannedByProduct: verifyMode ? scannedByProduct : undefined,
+        checkoutDraft: currentDraft?.checkoutDraft,
       });
     }, 400);
     return () => window.clearTimeout(t);
@@ -927,6 +932,7 @@ export function MovementPosPage({ mode }: Props) {
       setCartOpen(false);
       setInvoiceDoc(item);
       clearPosDraft(mode, warehouseId);
+      clearCheckoutDraft(warehouseId);
       clearScanCache(warehouseId);
       if (data.destinationWarehouseId) {
         clearScanCache(data.destinationWarehouseId);
@@ -1637,7 +1643,12 @@ export function MovementPosPage({ mode }: Props) {
           totalUnits={cart.reduce((s, l) => s + l.quantity, 0)}
           totalValue={cartTotalValue}
           confirming={confirming}
-          onClose={() => !confirming && setShowExitCheckout(false)}
+          onClose={() => {
+            if (!confirming) {
+              if (warehouseId) clearCheckoutDraft(warehouseId);
+              setShowExitCheckout(false);
+            }
+          }}
           onConfirm={(data) => void onConfirmExit(data)}
           isFactory={isFactory}
           serverError={error}

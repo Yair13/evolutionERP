@@ -1,4 +1,4 @@
-import { Gauge, Package, Tag } from "lucide-react";
+import { Gauge, Package, Tag, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { resolveMediaUrl } from "../../lib/mediaUrl.js";
 import type { CatalogItem } from "../../features/inventory/inventory.types.js";
@@ -18,6 +18,7 @@ type Props = {
   showStock?: boolean;
   showSemaphoreTag?: boolean;
   returnTo?: string;
+  onDelete?: (item: CatalogItem) => void;
 };
 
 export function ProductCard({
@@ -26,6 +27,7 @@ export function ProductCard({
   showStock = linkBase === "/app/inventario",
   showSemaphoreTag = false,
   returnTo,
+  onDelete,
 }: Props) {
   const imgSrc = resolveMediaUrl(item.imageUrl);
   const href =
@@ -36,6 +38,21 @@ export function ProductCard({
 
   return (
     <article className="inv-card">
+      {onDelete ? (
+        <button
+          type="button"
+          className="inv-card__delete-btn"
+          title="Eliminar producto"
+          aria-label={`Eliminar ${item.name}`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onDelete(item);
+          }}
+        >
+          <Trash2 size={15} strokeWidth={2.2} />
+        </button>
+      ) : null}
       <Link to={href} state={navState} className="inv-card__link">
         <div className="inv-card__media">
           {imgSrc ? (

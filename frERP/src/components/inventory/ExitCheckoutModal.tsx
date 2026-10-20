@@ -7,6 +7,32 @@ import { useWarehouse } from "../../context/WarehouseContext.js";
 import { fetchCustomers, createCustomer, type Customer } from "../../api/inventory.js";
 import { fetchCustomerActiveLayaway, type LayawaySummaryItem, uploadClosureReceiptFiles } from "../../api/finance.js";
 import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
+import {
+  loadPosDraft,
+  saveCheckoutDraft,
+  clearCheckoutDraft,
+  type CachedPhoto,
+} from "../../lib/posDraft.js";
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function base64ToFile(base64: string, filename: string, mimeType: string): File {
+  const parts = base64.split(",");
+  const byteString = atob(parts[1] || parts[0]);
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i);
+  }
+  return new File([ab], filename, { type: mimeType });
+}
 
 export type ExitCheckoutData = {
   exitKind: ExitKind;
@@ -128,31 +154,106 @@ export function ExitCheckoutModal({
   useEffect(() => {
     // Solo inicializar cuando el modal pasa de cerrado a abierto
     if (open && !prevOpenRef.current) {
+      const existingDraft = currentWarehouseId
+        ? loadPosDraft("exit", currentWarehouseId)?.checkoutDraft
+        : undefined;
+
       const initKind = lockedKind ?? "sale";
       setExitKind(initKind);
-      setCustomerName("");
-      setRelatedInvoiceNumber("");
-      setNotes("");
+      setCustomerName(existingDraft?.customerName ?? "");
+      setRelatedInvoiceNumber(existingDraft?.relatedInvoiceNumber ?? "");
+      setNotes(existingDraft?.notes ?? "");
       setError(null);
       setSearchQuery("");
       setCustomerList([]);
-      setSelectedCustomer(null);
-      setCustomerId(null);
+      setSelectedCustomer(existingDraft?.selectedCustomer ?? null);
+      setCustomerId(existingDraft?.customerId ?? null);
       setActiveLayaway(null);
-      setSelectedLayawayId(null);
+      setSelectedLayawayId(existingDraft?.selectedLayawayId ?? null);
       setShowCreateNew(false);
-      setReceiptFiles([]);
-      setUploadingReceipt(false);
-      if (initKind === "credit") {
-        setPayments([{ id: 1, method: "efectivo", amount: "" }]);
+      setDestinationWarehouseId(existingDraft?.destinationWarehouseId ?? "");
+
+      // Restaurar fotos previamente seleccionadas si la tablet se recargó
+      if (existingDraft?.cachedPhotos && existingDraft.cachedPhotos.length > 0) {
+        try {
+          const restored = existingDraft.cachedPhotos.map((p) =>
+            base64ToFile(p.base64, p.name, p.type)
+          );
+          setReceiptFiles(restored);
+        } catch {
+          setReceiptFiles([]);
+        }
       } else {
-        setPayments([{ id: 1, method: "efectivo", amount: String(totalValue) }]);
+        setReceiptFiles([]);
       }
-      setNextPaymentId(2);
-      setDestinationWarehouseId("");
+      setUploadingReceipt(false);
+
+      if (existingDraft?.payments && existingDraft.payments.length > 0) {
+        setPayments(existingDraft.payments);
+        const maxId = existingDraft.payments.reduce((m, p) => Math.max(m, p.id), 1);
+        setNextPaymentId(maxId + 1);
+      } else {
+        if (initKind === "credit") {
+          setPayments([{ id: 1, method: "efectivo", amount: "" }]);
+        } else {
+          setPayments([{ id: 1, method: "efectivo", amount: String(totalValue) }]);
+        }
+        setNextPaymentId(2);
+      }
     }
     prevOpenRef.current = open;
-  }, [open, lockedKind]);
+  }, [open, lockedKind, currentWarehouseId, totalValue]);
+
+  // Guardar estado del checkout en borrador local por si la tablet recarga al usar la cámara
+  useEffect(() => {
+    if (!open || !currentWarehouseId) return;
+    let cancelled = false;
+
+    const t = window.setTimeout(async () => {
+      let cachedPhotos: CachedPhoto[] = [];
+      try {
+        for (const file of receiptFiles) {
+          if (file.size < 2 * 1024 * 1024) {
+            const base64 = await fileToBase64(file);
+            cachedPhotos.push({ name: file.name, type: file.type, base64 });
+          }
+        }
+      } catch {
+        /* ignore storage errors */
+      }
+      if (cancelled) return;
+
+      saveCheckoutDraft(currentWarehouseId, {
+        open: true,
+        customerName,
+        customerId,
+        selectedCustomer,
+        payments,
+        notes,
+        relatedInvoiceNumber,
+        destinationWarehouseId,
+        selectedLayawayId,
+        cachedPhotos,
+      });
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [
+    open,
+    currentWarehouseId,
+    customerName,
+    customerId,
+    selectedCustomer,
+    payments,
+    notes,
+    relatedInvoiceNumber,
+    destinationWarehouseId,
+    selectedLayawayId,
+    receiptFiles,
+  ]);
 
   // Consulta si el cliente tiene un apartado activo con saldo acumulado
   useEffect(() => {
@@ -323,6 +424,7 @@ export function ExitCheckoutModal({
       }
     }
 
+    if (currentWarehouseId) clearCheckoutDraft(currentWarehouseId);
     setError(null);
     onConfirm({
       exitKind,
@@ -359,6 +461,12 @@ export function ExitCheckoutModal({
     return sum + (Number.isFinite(amount) ? amount : 0);
   }, 0);
   const paymentDifference = totalValue - paidTotal;
+
+  function handleClose() {
+    if (confirming || uploadingReceipt) return;
+    if (currentWarehouseId) clearCheckoutDraft(currentWarehouseId);
+    onClose();
+  }
 
   function updatePayment(id: number, patch: Partial<Pick<PaymentDraft, "method" | "amount">>) {
     setPayments((current) =>
@@ -400,7 +508,7 @@ export function ExitCheckoutModal({
           <h2 id="exit-checkout-title" style={{ margin: 0 }}>Finalizar salida</h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             disabled={confirming || uploadingReceipt}
             aria-label="Cerrar modal"
             style={{
@@ -883,7 +991,7 @@ export function ExitCheckoutModal({
         ) : null}
 
         <div className="inv-modal__actions inv-modal__actions--spaced">
-          <button type="button" className="inv-btn inv-btn--ghost" disabled={confirming || uploadingReceipt} onClick={onClose}>
+          <button type="button" className="inv-btn inv-btn--ghost" disabled={confirming || uploadingReceipt} onClick={handleClose}>
             Cancelar
           </button>
           <button type="button" className="inv-btn inv-btn--primary" disabled={confirming || uploadingReceipt} onClick={submit}>

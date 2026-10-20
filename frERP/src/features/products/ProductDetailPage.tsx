@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import JsBarcode from "jsbarcode";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Barcode, Pencil, Trash2 } from "lucide-react";
 import {
+  deleteProduct,
   deleteProductImage,
   fetchProductMaster,
   uploadProductImages,
 } from "../../api/inventory.js";
 import { ImageDropzone, type PendingFile } from "../../components/inventory/ImageDropzone.js";
+import { Modal } from "../../components/ui/Modal.js";
 
 import { ProductPageHeader } from "../../components/products/ProductPageHeader.js";
 import { useAuth } from "../../context/AuthContext.js";
@@ -64,6 +66,7 @@ function DetailBarcodeCanvas({ value }: { value: string }) {
 
 export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { token, user } = useAuth();
   const showCost = user?.roles.includes("super_admin") ?? false;
   const canEdit = user?.roles.some((r) =>
@@ -75,6 +78,9 @@ export function ProductDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingProduct, setDeletingProduct] = useState(false);
+  const [deleteProductError, setDeleteProductError] = useState<string | null>(null);
 
 
 
@@ -128,6 +134,20 @@ export function ProductDetailPage() {
     }
   }
 
+  async function handleConfirmDelete() {
+    if (!token || !id) return;
+    setDeletingProduct(true);
+    setDeleteProductError(null);
+    try {
+      await deleteProduct(token, id);
+      navigate("/app/productos", { replace: true });
+    } catch (err) {
+      setDeleteProductError(err instanceof Error ? err.message : "Error al eliminar producto");
+    } finally {
+      setDeletingProduct(false);
+    }
+  }
+
   if (loading) {
     return <p className="inv-page__desc">Cargando producto…</p>;
   }
@@ -169,10 +189,20 @@ export function ProductDetailPage() {
         actions={
           <>
             {canEdit ? (
-              <Link to={`/app/productos/${id}/editar`} className="inv-btn inv-btn--primary">
-                <Pencil size={18} strokeWidth={2} aria-hidden />
-                Editar
-              </Link>
+              <>
+                <Link to={`/app/productos/${id}/editar`} className="inv-btn inv-btn--primary">
+                  <Pencil size={18} strokeWidth={2} aria-hidden />
+                  Editar
+                </Link>
+                <button
+                  type="button"
+                  className="inv-btn inv-btn--danger"
+                  onClick={() => setShowDeleteModal(true)}
+                >
+                  <Trash2 size={18} strokeWidth={2} aria-hidden />
+                  Eliminar
+                </button>
+              </>
             ) : null}
             <Link to={`/app/inventario/producto/${id}`} className="inv-btn inv-btn--ghost">
               Ver stock por sede
@@ -318,6 +348,81 @@ export function ProductDetailPage() {
           ) : null}
         </div>
       </div>
+
+      <Modal
+        open={showDeleteModal}
+        title="Eliminar producto"
+        onClose={() => {
+          if (!deletingProduct) {
+            setShowDeleteModal(false);
+            setDeleteProductError(null);
+          }
+        }}
+      >
+        <div>
+          <p style={{ margin: "0 0 12px", color: "var(--text)", fontSize: "14px", lineHeight: "1.5" }}>
+            ¿Estás seguro de que deseas eliminar el producto <strong>{item.name}</strong>
+            {item.referenceCode ? (
+              <> (Ref: <code>{item.referenceCode}</code>)</>
+            ) : null}
+            ?
+          </p>
+
+          <div
+            style={{
+              padding: "12px 14px",
+              background: "#fef2f2",
+              border: "1px solid #fecaca",
+              borderRadius: "8px",
+              fontSize: "13px",
+              color: "#991b1b",
+              lineHeight: "1.5",
+              marginBottom: "16px",
+            }}
+          >
+            <strong>Información importante:</strong>
+            <ul style={{ margin: "6px 0 0", paddingLeft: "18px" }}>
+              <li>
+                Si el producto <strong>no tiene movimientos</strong> ni documentos registrados, se
+                eliminará completamente de la base de datos.
+              </li>
+              <li>
+                Si el producto <strong>ya tiene ventas, entradas o documentos</strong> asociados, se
+                desactivará y ocultará del catálogo para salvaguardar el historial contable.
+              </li>
+            </ul>
+          </div>
+
+          {deleteProductError ? (
+            <p className="form-error" role="alert" style={{ marginBottom: "14px" }}>
+              {deleteProductError}
+            </p>
+          ) : null}
+
+          <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <button
+              type="button"
+              className="inv-btn inv-btn--ghost"
+              disabled={deletingProduct}
+              onClick={() => {
+                setShowDeleteModal(false);
+                setDeleteProductError(null);
+              }}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="inv-btn inv-btn--danger"
+              disabled={deletingProduct}
+              onClick={handleConfirmDelete}
+            >
+              <Trash2 size={16} strokeWidth={2} aria-hidden />
+              {deletingProduct ? "Eliminando…" : "Sí, eliminar producto"}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
