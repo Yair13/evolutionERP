@@ -647,6 +647,12 @@ export function createInventoryRouter(): Router {
           ? req.body.receiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
           : null,
         receiptFilename: typeof req.body?.receiptFilename === "string" ? req.body.receiptFilename : null,
+        discountAmount:
+          req.body?.discountAmount != null && Number.isFinite(Number(req.body?.discountAmount))
+            ? Math.max(0, Math.round(Number(req.body.discountAmount)))
+            : 0,
+        discountReason:
+          typeof req.body?.discountReason === "string" ? req.body.discountReason.trim() || null : null,
       });
       res.status(201).json({ item });
     } catch (err: unknown) {
@@ -662,6 +668,7 @@ export function createInventoryRouter(): Router {
         "insufficient_stock",
         "customer_name_required",
         "payment_total_mismatch",
+        "discount_exceeds_subtotal",
         "related_invoice_required",
         "destination_warehouse_required",
         "destination_warehouse_not_found",

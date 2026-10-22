@@ -17,6 +17,8 @@ export type CheckoutDraft = {
   destinationWarehouseId?: string;
   selectedLayawayId?: string | null;
   cachedPhotos?: CachedPhoto[];
+  discountAmount?: number;
+  discountReason?: string;
 };
 
 export type PosDraft = {

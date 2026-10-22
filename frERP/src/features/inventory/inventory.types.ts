@@ -166,10 +166,14 @@ export type InventoryDocumentDetail = {
   customerAddress?: string | null;
   relatedInvoiceNumber?: string | null;
   productionOrderCode?: string | null;
+  purchaseOrderCode?: string | null;
   entryType?: string | null;
   labelsPrintedAt?: string | null;
   warehouseName?: string | null;
   warehouseCode?: string | null;
+  subtotalAmount?: number;
+  discountAmount?: number;
+  discountReason?: string | null;
   totalAmount?: number;
   editCount?: number;
   lastEditObservation?: string | null;

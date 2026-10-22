@@ -47,6 +47,8 @@ export type ExitCheckoutData = {
   receiptUrl?: string | null;
   receiptUrls?: string[] | null;
   receiptFilename?: string | null;
+  discountAmount?: number;
+  discountReason?: string | null;
 };
 
 export type PaymentPart = {
@@ -132,6 +134,13 @@ export function ExitCheckoutModal({
   const [newPhone, setNewPhone] = useState("");
   const [newAddress, setNewAddress] = useState("");
 
+  // Descuento a la factura (en pesos COP)
+  const [discountAmount, setDiscountAmount] = useState<number>(0);
+  const [discountReason, setDiscountReason] = useState<string>("");
+
+  const subtotal = totalValue;
+  const netTotal = Math.max(0, subtotal - discountAmount);
+
   // Métodos de pago y destinos
   const [payments, setPayments] = useState<PaymentDraft[]>([
     { id: 1, method: "efectivo", amount: String(totalValue) },
@@ -173,6 +182,12 @@ export function ExitCheckoutModal({
       setShowCreateNew(false);
       setDestinationWarehouseId(existingDraft?.destinationWarehouseId ?? "");
 
+      const initDiscount = existingDraft?.discountAmount ?? 0;
+      const initDiscountReason = existingDraft?.discountReason ?? "";
+      setDiscountAmount(initDiscount);
+      setDiscountReason(initDiscountReason);
+      const initialNetTotal = Math.max(0, totalValue - initDiscount);
+
       // Restaurar fotos previamente seleccionadas si la tablet se recargó
       if (existingDraft?.cachedPhotos && existingDraft.cachedPhotos.length > 0) {
         try {
@@ -196,7 +211,7 @@ export function ExitCheckoutModal({
         if (initKind === "credit") {
           setPayments([{ id: 1, method: "efectivo", amount: "" }]);
         } else {
-          setPayments([{ id: 1, method: "efectivo", amount: String(totalValue) }]);
+          setPayments([{ id: 1, method: "efectivo", amount: String(initialNetTotal) }]);
         }
         setNextPaymentId(2);
       }
@@ -234,6 +249,8 @@ export function ExitCheckoutModal({
         destinationWarehouseId,
         selectedLayawayId,
         cachedPhotos,
+        discountAmount,
+        discountReason,
       });
     }, 400);
 
@@ -253,6 +270,8 @@ export function ExitCheckoutModal({
     destinationWarehouseId,
     selectedLayawayId,
     receiptFiles,
+    discountAmount,
+    discountReason,
   ]);
 
   // Consulta si el cliente tiene un apartado activo con saldo acumulado
@@ -371,32 +390,34 @@ export function ExitCheckoutModal({
         : [];
 
     if (exitKind === "sale") {
-      if (
-        paymentBreakdown.length === 0 ||
-        paymentBreakdown.some(
-          (payment) => !payment.method || !Number.isFinite(payment.amount) || payment.amount <= 0
-        )
-      ) {
-        setError("Cada método de pago debe tener un valor mayor que $0.");
-        return;
-      }
-      const paidTotal = paymentBreakdown.reduce((sum, payment) => sum + payment.amount, 0);
-      if (Math.abs(paidTotal - totalValue) >= 0.01) {
-        const difference = totalValue - paidTotal;
-        setError(
-          difference > 0
-            ? `Faltan ${formatMoney(difference)} por asignar en los métodos de pago.`
-            : `Los pagos superan el total por ${formatMoney(Math.abs(difference))}.`
-        );
-        return;
+      if (netTotal > 0) {
+        if (
+          paymentBreakdown.length === 0 ||
+          paymentBreakdown.some(
+            (payment) => !payment.method || !Number.isFinite(payment.amount) || payment.amount <= 0
+          )
+        ) {
+          setError("Cada método de pago debe tener un valor mayor que $0.");
+          return;
+        }
+        const paidTotal = paymentBreakdown.reduce((sum, payment) => sum + payment.amount, 0);
+        if (Math.abs(paidTotal - netTotal) >= 0.01) {
+          const difference = netTotal - paidTotal;
+          setError(
+            difference > 0
+              ? `Faltan ${formatMoney(difference)} por asignar en los métodos de pago.`
+              : `Los pagos superan el total neto por ${formatMoney(Math.abs(difference))}.`
+          );
+          return;
+        }
       }
     }
 
     if (exitKind === "credit") {
       const paidTotal = paymentBreakdown.reduce((sum, payment) => sum + payment.amount, 0);
-      if (paidTotal > totalValue + 0.01) {
+      if (paidTotal > netTotal + 0.01) {
         setError(
-          `El abono inicial (${formatMoney(paidTotal)}) no puede superar el total de la venta (${formatMoney(totalValue)}).`
+          `El abono inicial (${formatMoney(paidTotal)}) no puede superar el total neto de la venta (${formatMoney(netTotal)}).`
         );
         return;
       }
@@ -433,7 +454,9 @@ export function ExitCheckoutModal({
       notes: notes.trim(),
       customerId,
       paymentMethod:
-        paymentBreakdown.length === 1
+        netTotal === 0
+          ? "obsequio"
+          : paymentBreakdown.length === 1
           ? paymentBreakdown[0].method
           : paymentBreakdown.length > 1
           ? "mixto"
@@ -447,6 +470,8 @@ export function ExitCheckoutModal({
       receiptUrl: uploadedUrl,
       receiptUrls: uploadedUrls.length > 0 ? uploadedUrls : null,
       receiptFilename: uploadedFilename,
+      discountAmount: discountAmount > 0 ? discountAmount : 0,
+      discountReason: discountAmount > 0 ? discountReason.trim() || null : null,
     });
   }
 
@@ -460,7 +485,40 @@ export function ExitCheckoutModal({
     const amount = Number(payment.amount);
     return sum + (Number.isFinite(amount) ? amount : 0);
   }, 0);
-  const paymentDifference = totalValue - paidTotal;
+  const paymentDifference = netTotal - paidTotal;
+
+  function handleDiscountChange(rawVal: string) {
+    const digits = rawVal.replace(/[^\d]/g, "");
+    const val = digits ? Math.min(Number(digits), subtotal) : 0;
+    setDiscountAmount(val);
+    const newNet = Math.max(0, subtotal - val);
+    if (payments.length === 1 && exitKind === "sale") {
+      setPayments([{ ...payments[0], amount: String(newNet) }]);
+    }
+    setError(null);
+  }
+
+  function handleSetFullGift() {
+    setDiscountAmount(subtotal);
+    if (!discountReason) {
+      setDiscountReason("Obsequio 100%");
+    }
+    if (payments.length === 1 && exitKind === "sale") {
+      setPayments([{ ...payments[0], amount: "0" }]);
+    }
+    setError(null);
+  }
+
+  function handleClearDiscount() {
+    setDiscountAmount(0);
+    if (discountReason === "Obsequio 100%") {
+      setDiscountReason("");
+    }
+    if (payments.length === 1 && exitKind === "sale") {
+      setPayments([{ ...payments[0], amount: String(subtotal) }]);
+    }
+    setError(null);
+  }
 
   function handleClose() {
     if (confirming || uploadingReceipt) return;
@@ -533,7 +591,17 @@ export function ExitCheckoutModal({
             </>
           ) : (
             <>
-              {totalUnits} unidades · <strong>{formatMoney(totalValue)}</strong>
+              {totalUnits} unidades ·{" "}
+              {discountAmount > 0 ? (
+                <>
+                  <span style={{ textDecoration: "line-through", color: "var(--inv-text-muted, #94a3b8)", marginRight: "6px" }}>
+                    {formatMoney(subtotal)}
+                  </span>
+                  <strong style={{ color: "#16a34a" }}>{formatMoney(netTotal)}</strong>
+                </>
+              ) : (
+                <strong>{formatMoney(totalValue)}</strong>
+              )}
             </>
           )}
         </p>
@@ -837,6 +905,120 @@ export function ExitCheckoutModal({
           </label>
         )}
 
+        {/* Descuento comercial o por obsequio a la Factura (Venta / Crédito) */}
+        {(exitKind === "sale" || exitKind === "credit") && (
+          <section
+            style={{
+              padding: "1rem",
+              borderRadius: "10px",
+              border: "1px solid var(--inv-border, #e2e8f0)",
+              background: discountAmount > 0 ? "rgba(16, 185, 129, 0.04)" : "var(--inv-card-bg, #f8fafc)",
+              marginBottom: "1.25rem",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap", gap: "0.5rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <span style={{ fontSize: "1.1rem" }}>🏷️</span>
+                <strong style={{ fontSize: "0.95rem", color: "var(--inv-text-main, #1e293b)" }}>
+                  Descuento a la Factura
+                </strong>
+                {discountAmount > 0 && (
+                  <span
+                    style={{
+                      fontSize: "0.75rem",
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      background: "#dcfce7",
+                      color: "#166534",
+                      border: "1px solid #bbf7d0",
+                    }}
+                  >
+                    -{formatMoney(discountAmount)} aplicado
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: "0.4rem" }}>
+                {discountAmount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={handleClearDiscount}
+                    className="inv-btn inv-btn--ghost"
+                    style={{ fontSize: "0.75rem", padding: "3px 8px", height: "auto" }}
+                  >
+                    Quitar descuento
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleSetFullGift}
+                    className="inv-btn inv-btn--ghost"
+                    style={{ fontSize: "0.75rem", padding: "3px 8px", height: "auto", color: "#16a34a" }}
+                    title="Aplica 100% de descuento para obsequio total"
+                  >
+                    🎁 Obsequio total (100%)
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "0.75rem" }}>
+              <label className="field" style={{ margin: 0 }}>
+                <span style={{ fontSize: "0.8rem", fontWeight: 600 }}>Valor a descontar ($ en plata)</span>
+                <div style={{ position: "relative" }}>
+                  <span style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8", fontWeight: 600 }}>
+                    $
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={discountAmount > 0 ? discountAmount.toLocaleString("es-CO") : ""}
+                    onChange={(e) => handleDiscountChange(e.target.value)}
+                    style={{ paddingLeft: "26px", fontWeight: 600 }}
+                  />
+                </div>
+              </label>
+
+              <label className="field" style={{ margin: 0 }}>
+                <span style={{ fontSize: "0.8rem", fontWeight: 600 }}>Motivo del descuento u obsequio</span>
+                <input
+                  type="text"
+                  placeholder="Ej: Promoción, Obsequio de producto, Fidelización..."
+                  value={discountReason}
+                  onChange={(e) => setDiscountReason(e.target.value)}
+                />
+              </label>
+            </div>
+
+            {/* Resumen numérico claro */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginTop: "0.75rem",
+                paddingTop: "0.75rem",
+                borderTop: "1px dashed var(--inv-border, #cbd5e1)",
+                fontSize: "0.85rem",
+                color: "var(--inv-text-muted, #64748b)",
+                flexWrap: "wrap",
+                gap: "0.5rem",
+              }}
+            >
+              <span>Subtotal: <strong>{formatMoney(subtotal)}</strong></span>
+              {discountAmount > 0 && (
+                <span style={{ color: "#dc2626" }}>
+                  Descuento: <strong>- {formatMoney(discountAmount)}</strong>
+                </span>
+              )}
+              <span style={{ fontSize: "0.95rem", color: "var(--inv-text-main, #0f172a)" }}>
+                Total neto a pagar: <strong style={{ color: "#16a34a", fontSize: "1.05rem" }}>{formatMoney(netTotal)}</strong>
+              </span>
+            </div>
+          </section>
+        )}
+
         {/* Métodos de Pago o Abono Inicial */}
         {(exitKind === "sale" || exitKind === "credit") && (
           <section className="inv-checkout-payments" aria-labelledby="payment-methods-title">
@@ -848,68 +1030,94 @@ export function ExitCheckoutModal({
                 <p>
                   {exitKind === "credit"
                     ? "Si el cliente abona una parte hoy, regístralo aquí. El saldo restante generará la Cuenta por Cobrar."
+                    : netTotal === 0
+                    ? "Factura totalmente bonificada/obsequio. No requiere registro de pago."
                     : "Divide el total entre uno o varios medios."}
                 </p>
               </div>
-              <button
-                type="button"
-                className="inv-btn inv-btn--ghost"
-                onClick={addPayment}
-                disabled={payments.length >= PAYMENT_METHODS.length}
-              >
-                + Agregar método
-              </button>
+              {netTotal > 0 && (
+                <button
+                  type="button"
+                  className="inv-btn inv-btn--ghost"
+                  onClick={addPayment}
+                  disabled={payments.length >= PAYMENT_METHODS.length}
+                >
+                  + Agregar método
+                </button>
+              )}
             </div>
 
-            <div className="inv-checkout-payments__rows">
-              {payments.map((payment, index) => (
-                <div className="inv-checkout-payment-row" key={payment.id}>
-                  <label className="field">
-                    <span>Medio {index + 1}</span>
-                    <select
-                      value={payment.method}
-                      onChange={(e) => updatePayment(payment.id, { method: e.target.value })}
-                    >
-                      {PAYMENT_METHODS.map((option) => (
-                        <option
-                          key={option.value}
-                          value={option.value}
-                          disabled={payments.some(
-                            (other) =>
-                              other.id !== payment.id && other.method === option.value
-                          )}
-                        >
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>Valor</span>
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      inputMode="numeric"
-                      value={payment.amount}
-                      onChange={(e) => updatePayment(payment.id, { amount: e.target.value })}
-                      placeholder="0"
-                    />
-                  </label>
-                  {payments.length > 1 ? (
-                    <button
-                      type="button"
-                      className="inv-checkout-payment-row__remove"
-                      onClick={() => removePayment(payment.id)}
-                      aria-label={`Quitar pago con ${payment.method}`}
-                      title="Quitar método"
-                    >
-                      ×
-                    </button>
-                  ) : null}
-                </div>
-              ))}
-            </div>
+            {netTotal === 0 ? (
+              <div
+                style={{
+                  padding: "0.85rem 1rem",
+                  borderRadius: "8px",
+                  background: "#f0fdf4",
+                  border: "1px solid #bbf7d0",
+                  color: "#166534",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  marginTop: "0.5rem",
+                  marginBottom: "0.5rem",
+                }}
+              >
+                <span>🎁</span>
+                <span>
+                  <strong>Factura con 100% de descuento (Obsequio / Cortesía).</strong> Total a cobrar: $0.
+                </span>
+              </div>
+            ) : (
+              <div className="inv-checkout-payments__rows">
+                {payments.map((payment, index) => (
+                  <div className="inv-checkout-payment-row" key={payment.id}>
+                    <label className="field">
+                      <span>Medio {index + 1}</span>
+                      <select
+                        value={payment.method}
+                        onChange={(e) => updatePayment(payment.id, { method: e.target.value })}
+                      >
+                        {PAYMENT_METHODS.map((option) => (
+                          <option
+                            key={option.value}
+                            value={option.value}
+                            disabled={payments.some(
+                              (other) =>
+                                other.id !== payment.id && other.method === option.value
+                            )}
+                          >
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Valor</span>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        inputMode="numeric"
+                        value={payment.amount}
+                        onChange={(e) => updatePayment(payment.id, { amount: e.target.value })}
+                        placeholder="0"
+                      />
+                    </label>
+                    {payments.length > 1 ? (
+                      <button
+                        type="button"
+                        className="inv-checkout-payment-row__remove"
+                        onClick={() => removePayment(payment.id)}
+                        aria-label={`Quitar pago con ${payment.method}`}
+                        title="Quitar método"
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {exitKind === "credit" ? (
               <div
@@ -923,11 +1131,11 @@ export function ExitCheckoutModal({
                 <span>
                   Saldo a crédito (Por cobrar):{" "}
                   <strong style={{ color: "#ef4444" }}>
-                    {formatMoney(Math.max(0, totalValue - paidTotal))}
+                    {formatMoney(Math.max(0, netTotal - paidTotal))}
                   </strong>
                 </span>
               </div>
-            ) : (
+            ) : netTotal > 0 ? (
               <div
                 className={`inv-checkout-payments__balance${
                   Math.abs(paymentDifference) < 0.01 ? " is-complete" : " is-pending"
@@ -941,8 +1149,30 @@ export function ExitCheckoutModal({
                       ? `Excede: ${formatMoney(Math.abs(paymentDifference))}`
                       : "Pago completo"}
                 </span>
+                {payments.length > 1 && Math.abs(paymentDifference) >= 0.01 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const last = payments[payments.length - 1];
+                      const currentVal = Number(last.amount) || 0;
+                      updatePayment(last.id, { amount: String(Math.max(0, currentVal + paymentDifference)) });
+                    }}
+                    style={{
+                      marginLeft: "auto",
+                      background: "transparent",
+                      border: "none",
+                      textDecoration: "underline",
+                      cursor: "pointer",
+                      fontSize: "0.8rem",
+                      fontWeight: 600,
+                      color: "inherit",
+                    }}
+                  >
+                    Ajustar diferencia
+                  </button>
+                )}
               </div>
-            )}
+            ) : null}
 
             {payments.some(
               (p) => Number(p.amount) > 0 && p.method !== "efectivo" && p.method !== "saldo_a_favor"

@@ -281,6 +281,8 @@ export type ConfirmExitPayload = {
   receiptUrl?: string | null;
   receiptUrls?: string[] | null;
   receiptFilename?: string | null;
+  discountAmount?: number;
+  discountReason?: string | null;
 };
 
 export async function confirmMovement(

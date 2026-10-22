@@ -85,17 +85,22 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
     doc.metadata?.isCredit === true ||
     kind === "Crédito" ||
     Boolean(doc.receivable);
+  const isPurchase = Boolean(
+    doc.purchaseOrderCode || doc.entryType === "purchase" || doc.metadata?.entryType === "purchase"
+  );
   const title = isAdjustment
     ? "Comprobante de ajuste de inventario"
-    : isEntry
-      ? "Comprobante de entrada"
-      : isCredit
-        ? "Comprobante de salida · Venta a crédito"
-        : "Comprobante de salida";
+    : isPurchase
+      ? "Comprobante de entrada · Compra"
+      : isEntry
+        ? "Comprobante de entrada"
+        : isCredit
+          ? "Comprobante de salida · Venta a crédito"
+          : "Comprobante de salida";
   const isOp = Boolean(
     doc.productionOrderCode || doc.entryType === "production_order" || doc.metadata?.entryType === "production_order"
   );
-  const accent = isOp ? "op" : isEntry || isAdjustment ? "entry" : "exit";
+  const accent = isOp || isPurchase ? "op" : isEntry || isAdjustment ? "entry" : "exit";
   // Movimientos internos entre almacenes o ajustes de conteo: no se muestran valores de venta
   const internalExit =
     doc.exitKind === "distribution" || doc.exitKind === "transfer" || doc.exitKind === "return_to_factory";
@@ -116,6 +121,10 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
     (sum, p) => sum + (Number(p.amount) || 0),
     0
   );
+
+  const discountAmount = Number(doc.discountAmount ?? doc.metadata?.discountAmount ?? 0);
+  const discountReason = doc.discountReason || doc.metadata?.discountReason || null;
+  const subtotalAmount = doc.subtotalAmount ?? (doc.totalAmount != null ? doc.totalAmount + discountAmount : 0);
 
   const totalSaleAmount = doc.totalAmount ?? 0;
   const initialPaymentTotal =
@@ -197,6 +206,12 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
                 <div className="inv-invoice__meta-item">
                   <span>Orden Prod.</span>
                   <strong>{doc.productionOrderCode}</strong>
+                </div>
+              ) : null}
+              {doc.purchaseOrderCode && doc.purchaseOrderCode !== doc.invoiceNumber ? (
+                <div className="inv-invoice__meta-item">
+                  <span>Orden Compra</span>
+                  <strong>{doc.purchaseOrderCode}</strong>
                 </div>
               ) : null}
             </div>
@@ -341,8 +356,33 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
                   </tr>
                 ) : isCredit ? (
                   <>
+                    {discountAmount > 0 && (
+                      <>
+                        <tr className="inv-invoice__row-credit-subtotal">
+                          <td colSpan={4}>Subtotal ({doc.totalQuantity} uds)</td>
+                          <td>
+                            <strong>{formatMoney(subtotalAmount)}</strong>
+                          </td>
+                        </tr>
+                        <tr className="inv-invoice__row-credit-paid">
+                          <td colSpan={4}>
+                            (-) Descuento comercial
+                            {discountReason ? (
+                              <span style={{ fontSize: "11px", fontWeight: "normal", marginLeft: "6px", color: "#64748b" }}>
+                                ({discountReason})
+                              </span>
+                            ) : null}
+                          </td>
+                          <td>
+                            <strong style={{ color: "#dc2626" }}>
+                              - {formatMoney(discountAmount)}
+                            </strong>
+                          </td>
+                        </tr>
+                      </>
+                    )}
                     <tr className="inv-invoice__row-credit-subtotal">
-                      <td colSpan={4}>Total venta ({doc.totalQuantity} uds)</td>
+                      <td colSpan={4}>Total venta neto ({doc.totalQuantity} uds)</td>
                       <td>
                         <strong>{formatMoney(totalSaleAmount)}</strong>
                       </td>
@@ -382,12 +422,39 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
                     </tr>
                   </>
                 ) : (
-                  <tr>
-                    <td colSpan={4}>Total ({doc.totalQuantity} uds)</td>
-                    <td>
-                      <strong>{formatMoney(doc.totalAmount ?? 0)}</strong>
-                    </td>
-                  </tr>
+                  <>
+                    {discountAmount > 0 && (
+                      <>
+                        <tr>
+                          <td colSpan={4}>Subtotal ({doc.totalQuantity} uds)</td>
+                          <td>
+                            <strong>{formatMoney(subtotalAmount)}</strong>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td colSpan={4}>
+                            (-) Descuento comercial
+                            {discountReason ? (
+                              <span style={{ fontSize: "11px", fontWeight: "normal", marginLeft: "6px", color: "#64748b" }}>
+                                ({discountReason})
+                              </span>
+                            ) : null}
+                          </td>
+                          <td>
+                            <strong style={{ color: "#dc2626" }}>
+                              - {formatMoney(discountAmount)}
+                            </strong>
+                          </td>
+                        </tr>
+                      </>
+                    )}
+                    <tr>
+                      <td colSpan={4}>Total {discountAmount > 0 ? "neto " : ""}({doc.totalQuantity} uds)</td>
+                      <td>
+                        <strong>{formatMoney(doc.totalAmount ?? 0)}</strong>
+                      </td>
+                    </tr>
+                  </>
                 )}
               </tfoot>
             </table>

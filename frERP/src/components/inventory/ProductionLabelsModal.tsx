@@ -95,7 +95,15 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
     };
   }, []);
 
-  const orderCode = doc.productionOrderCode || doc.invoiceNumber || "—";
+  const isPurchase = Boolean(
+    doc.entryType === "purchase" ||
+    doc.metadata?.entryType === "purchase" ||
+    doc.purchaseOrderCode ||
+    (doc.invoiceNumber && doc.invoiceNumber.startsWith("COM-"))
+  );
+  const orderCode = doc.purchaseOrderCode || doc.productionOrderCode || doc.invoiceNumber || "—";
+  const docTypeShort = isPurchase ? "COMPRA" : "OP";
+  const modalTitle = isPurchase ? "Etiquetas de Compra" : "Etiquetas de OP";
   const dateLabel = doc.completedAt
     ? doc.completedAt.slice(0, 10)
     : formatBogotaDate(new Date().toISOString());
@@ -146,7 +154,11 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
         onPrinted(item);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Error";
-        setError(msg === "not_a_production_order" ? "Este documento no es una orden de producción." : msg);
+        setError(
+          msg === "not_a_production_order"
+            ? "Este documento no admite impresión de etiquetas."
+            : msg
+        );
       } finally {
         setPrinting(false);
       }
@@ -242,7 +254,7 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
               }}
             >
               <span>REF: <strong style={{ color: "#0f172a", fontSize: "13px" }}>{sheet.referenceCode || "—"}</strong></span>
-              <span>OP: <strong style={{ color: "#0f172a", fontSize: "13px" }}>{orderCode}</strong></span>
+              <span>{docTypeShort}: <strong style={{ color: "#0f172a", fontSize: "13px" }}>{orderCode}</strong></span>
             </div>
           </div>
           <div
@@ -288,7 +300,7 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
           <div>
             <h2 id="op-labels-title" style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
               <Tag size={20} strokeWidth={2} aria-hidden />
-              Etiquetas de OP
+              {modalTitle}
             </h2>
             <p style={{ margin: "6px 0 0", color: "var(--muted)", fontSize: 13 }}>
               {orderCode} · {totalLabels} etiqueta{totalLabels === 1 ? "" : "s"}
@@ -396,7 +408,7 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
                 </strong>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#475569", marginTop: 4 }}>
                   <span>REF: <b style={{ color: "#0f172a" }}>{firstPreviewItem.referenceCode || "—"}</b></span>
-                  <span>OP: <b style={{ color: "#0f172a" }}>{orderCode}</b></span>
+                  <span>{docTypeShort}: <b style={{ color: "#0f172a" }}>{orderCode}</b></span>
                 </div>
               </div>
               <div style={{ textAlign: "center", marginTop: "auto" }}>
@@ -440,7 +452,9 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
 
         {labelItems.length === 0 ? (
           <p style={{ marginTop: 14, color: "var(--muted)", fontSize: 13 }}>
-            Esta orden no tiene productos con código de barras. No hay etiquetas para imprimir.
+            {isPurchase
+              ? "Esta compra no tiene productos con código de barras. No hay etiquetas para imprimir."
+              : "Esta orden no tiene productos con código de barras. No hay etiquetas para imprimir."}
           </p>
         ) : (
           <ul style={{ margin: "14px 0 0", padding: 0, listStyle: "none", display: "grid", gap: 8 }}>

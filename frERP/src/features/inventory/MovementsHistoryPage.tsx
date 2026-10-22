@@ -320,11 +320,13 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
   }
 
   function isProductionOrderDoc(doc: InventoryDocumentSummary | InventoryDocumentDetail): boolean {
+    const et = doc.entryType ?? doc.metadata?.entryType;
     return (
       doc.docType === "entry" &&
-      (doc.entryType === "production_order" ||
+      (et === "production_order" ||
+        et === "purchase" ||
         Boolean(doc.productionOrderCode) ||
-        doc.metadata?.entryType === "production_order")
+        Boolean(doc.purchaseOrderCode))
     );
   }
 
@@ -850,7 +852,7 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
             const showEditActions =
               canManageEditing && docIsToday(doc) && !cancelled && !isAdjustment;
             const unlocked = doc.editingUnlocked === true;
-            const docCode = doc.invoiceNumber || doc.productionOrderCode;
+            const docCode = doc.invoiceNumber || doc.productionOrderCode || doc.purchaseOrderCode;
             const countSubLabel =
               isAdjustment && doc.metadata?.countKind === "initial"
                 ? "Inventario inicial"

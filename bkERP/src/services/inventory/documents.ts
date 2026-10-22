@@ -28,6 +28,8 @@ export type ConfirmExitInput = {
   receiptUrl?: string | null;
   receiptUrls?: string[] | null;
   receiptFilename?: string | null;
+  discountAmount?: number;
+  discountReason?: string | null;
 };
 
 export type ConfirmLineInput = {
@@ -71,12 +73,16 @@ export type InventoryDocumentSummary = {
   relatedInvoiceNumber?: string | null;
   warehouseName?: string | null;
   warehouseCode?: string | null;
+  subtotalAmount?: number;
+  discountAmount?: number;
+  discountReason?: string | null;
   totalAmount?: number;
   lastEditObservation?: string | null;
   lastUnlockObservation?: string | null;
   editCount?: number;
   editingUnlocked?: boolean;
   productionOrderCode?: string | null;
+  purchaseOrderCode?: string | null;
   entryType?: string | null;
   labelsPrintedAt?: string | null;
   customerTaxId?: string | null;
@@ -289,6 +295,29 @@ async function nextProductionOrderCode(
   return `OP-${prefix}-${ymd}-${String(num).padStart(4, "0")}`;
 }
 
+async function nextPurchaseOrderCode(
+  client: pg.PoolClient,
+  warehouseId: string
+): Promise<string> {
+  const { rows: wh } = await client.query<{ code: string }>(
+    `SELECT code FROM warehouses WHERE id = $1::uuid`,
+    [warehouseId]
+  );
+  const prefix = (wh[0]?.code ?? "S").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6) || "S";
+  const { rows: seq } = await client.query<{ n: string }>(
+    `
+    SELECT COUNT(*)::text AS n
+    FROM inventory_documents
+    WHERE warehouse_id = $1::uuid
+      AND (metadata->>'entryType' = 'purchase' OR invoice_number LIKE 'COM-%')
+    `,
+    [warehouseId]
+  );
+  const num = Number(seq[0]?.n ?? 0) + 1;
+  const ymd = getTodayBogotaYmd().replace(/-/g, "");
+  return `COM-${prefix}-${ymd}-${String(num).padStart(4, "0")}`;
+}
+
 async function resolveCustomerId(
   client: pg.PoolClient,
   name: string | null | undefined
@@ -433,6 +462,7 @@ export async function confirmDocument(
   }
 
   const isProductionOrder = docType === "entry" && entryType === "production_order";
+  const isPurchase = docType === "entry" && entryType === "purchase";
 
   let originLink: OriginExitLookup | null = null;
   if (docType === "entry" && isLinkedEntryType(entryType)) {
@@ -512,6 +542,7 @@ export async function confirmDocument(
 
     let productionOrderId: string | null = null;
     let productionOrderCode: string | null = null;
+    let purchaseOrderCode: string | null = null;
     let invoiceNumber: string | null = null;
 
     if (isProductionOrder) {
@@ -524,6 +555,9 @@ export async function confirmDocument(
         [productionOrderCode, warehouseId, notes?.trim() || null, auth.userId]
       );
       productionOrderId = poRows[0]!.id;
+    } else if (isPurchase) {
+      purchaseOrderCode = await nextPurchaseOrderCode(client, warehouseId);
+      invoiceNumber = purchaseOrderCode;
     }
 
     const metadata = {
@@ -536,13 +570,16 @@ export async function confirmDocument(
       originDocumentId: originLink?.documentId ?? null,
       productionOrderCode,
       productionOrderId,
+      purchaseOrderCode,
     };
 
     const reason = isProductionOrder
       ? `Orden de producción ${productionOrderCode}`
-      : docType === "entry"
-        ? "Ingreso de mercancía"
-        : "Egreso de mercancía";
+      : isPurchase
+        ? `Entrada por compra ${purchaseOrderCode}`
+        : docType === "entry"
+          ? "Ingreso de mercancía"
+          : "Egreso de mercancía";
 
     const { rows: docRows } = await client.query<{ id: string }>(
       `
@@ -573,9 +610,11 @@ export async function confirmDocument(
         documentId,
         isProductionOrder
           ? `Orden de producción confirmada · ${productionOrderCode}`
-          : docType === "entry"
-            ? "Recepción confirmada"
-            : "Salida confirmada",
+          : isPurchase
+            ? `Entrada por compra confirmada · ${purchaseOrderCode}`
+            : docType === "entry"
+              ? "Recepción confirmada"
+              : "Salida confirmada",
         auth.userId,
       ]
     );
@@ -824,14 +863,44 @@ export async function confirmExitDocument(
       destinationWarehouseCode = destWh[0].code;
     }
 
-    const saleTotalForMeta = cleaned.reduce(
+    const subtotal = cleaned.reduce(
       (sum, line) => sum + line.quantity * (Number(line.unitSalePrice) || 0),
       0
     );
+    const discountAmount = Math.max(0, Math.round(Number(input.discountAmount) || 0));
+    if (discountAmount > subtotal) {
+      throw Object.assign(new Error("discount_exceeds_subtotal"), {
+        code: "discount_exceeds_subtotal",
+        subtotal,
+        requested: discountAmount,
+      });
+    }
+    const discountReason = input.discountReason?.trim() || null;
+    const finalNetSaleTotal = Math.max(0, subtotal - discountAmount);
+
     const initialPaidTotalForMeta = (exitKind === "credit" || exitKind === "sale") && input.paymentBreakdown
       ? input.paymentBreakdown.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
       : 0;
-    const creditBalanceForMeta = Math.max(0, Math.round((saleTotalForMeta - initialPaidTotalForMeta) * 100) / 100);
+
+    if (exitKind === "sale") {
+      if (finalNetSaleTotal > 0 && Math.abs(initialPaidTotalForMeta - finalNetSaleTotal) >= 0.01) {
+        throw Object.assign(new Error("payment_total_mismatch"), {
+          code: "payment_total_mismatch",
+          expected: finalNetSaleTotal,
+          received: initialPaidTotalForMeta,
+        });
+      }
+    }
+
+    if (exitKind === "credit" && initialPaidTotalForMeta > finalNetSaleTotal + 0.01) {
+      throw Object.assign(new Error("initial_payment_exceeds_total"), {
+        code: "initial_payment_exceeds_total",
+        total: finalNetSaleTotal,
+        initial: initialPaidTotalForMeta,
+      });
+    }
+
+    const creditBalanceForMeta = Math.max(0, Math.round((finalNetSaleTotal - initialPaidTotalForMeta) * 100) / 100);
 
     const metadata = {
       exitKind,
@@ -844,7 +913,11 @@ export async function confirmExitDocument(
       paymentBreakdown:
         exitKind === "sale" || exitKind === "credit" ? input.paymentBreakdown || null : null,
       isCredit: exitKind === "credit",
-      creditTotal: exitKind === "credit" ? saleTotalForMeta : null,
+      subtotalAmount: subtotal,
+      discountAmount,
+      discountReason,
+      totalAmount: finalNetSaleTotal,
+      creditTotal: exitKind === "credit" ? finalNetSaleTotal : null,
       creditInitialPayment: exitKind === "credit" ? initialPaidTotalForMeta : null,
       creditBalance: exitKind === "credit" ? creditBalanceForMeta : null,
       destinationWarehouseId: input.destinationWarehouseId || null,
@@ -870,9 +943,10 @@ export async function confirmExitDocument(
       `
       INSERT INTO inventory_documents (
         warehouse_id, doc_type, status, notes, metadata, created_by, completed_at,
-        invoice_number, exit_kind, customer_id, reason, receipt_url, receipt_filename, receipt_urls
+        invoice_number, exit_kind, customer_id, reason, receipt_url, receipt_filename, receipt_urls,
+        discount_amount, discount_reason
       )
-      VALUES ($1::uuid, $2, 'completed', $3, $4::jsonb, $5::uuid, now(), $6, $7, $8::uuid, $9, $10, $11, $12::jsonb)
+      VALUES ($1::uuid, $2, 'completed', $3, $4::jsonb, $5::uuid, now(), $6, $7, $8::uuid, $9, $10, $11, $12::jsonb, $13, $14)
       RETURNING id::text
       `,
       [
@@ -888,6 +962,8 @@ export async function confirmExitDocument(
         primaryReceiptUrl,
         input.receiptFilename?.trim() || null,
         jsonReceiptUrls,
+        discountAmount,
+        discountReason,
       ]
     );
     const documentId = docRows[0]!.id;
@@ -992,16 +1068,12 @@ export async function confirmExitDocument(
     }
 
     if (exitKind === "credit") {
-      const saleTotal = cleaned.reduce(
-        (sum, line) => sum + line.quantity * (Number(line.unitSalePrice) || 0),
-        0
-      );
       await recordCreditFromExitDocument(client, {
         documentId,
         invoiceNumber,
         warehouseId,
         customerId: customerId!,
-        totalAmount: saleTotal,
+        totalAmount: finalNetSaleTotal,
         initialPayments: input.paymentBreakdown || null,
         notes: notes?.trim() || null,
         userId: auth.userId,
@@ -1030,14 +1102,10 @@ export async function confirmExitDocument(
     }
 
     if (input.layawayId && customerId) {
-      const saleTotal = cleaned.reduce(
-        (sum, line) => sum + line.quantity * (Number(line.unitSalePrice) || 0),
-        0
-      );
       await redeemLayawayInSale(client, {
         layawayId: input.layawayId,
         documentId,
-        saleTotal,
+        saleTotal: finalNetSaleTotal,
         customerId,
       });
     }
@@ -1112,6 +1180,9 @@ export async function listDocuments(
     metadata: any;
     line_count: string;
     total_qty: string;
+    subtotal_amount: string;
+    discount_amount: string;
+    discount_reason: string | null;
     total_amount: string;
     created_at: string;
     completed_at: string | null;
@@ -1120,6 +1191,7 @@ export async function listDocuments(
     exit_kind: ExitKind | null;
     customer_name: string | null;
     production_order_code: string | null;
+    purchase_order_code: string | null;
     entry_type: string | null;
     labels_printed_at: string | null;
     edit_count: string;
@@ -1140,7 +1212,10 @@ export async function listDocuments(
       d.metadata,
       COUNT(l.id)::text AS line_count,
       COALESCE(SUM(l.quantity), 0)::text AS total_qty,
-      COALESCE(SUM(l.quantity * COALESCE(l.unit_sale_price, 0)), 0)::text AS total_amount,
+      COALESCE(SUM(l.quantity * COALESCE(l.unit_sale_price, 0)), 0)::text AS subtotal_amount,
+      COALESCE(d.discount_amount, 0)::text AS discount_amount,
+      d.discount_reason,
+      GREATEST(0, COALESCE(SUM(l.quantity * COALESCE(l.unit_sale_price, 0)), 0) - COALESCE(d.discount_amount, 0))::text AS total_amount,
       d.created_at::text,
       d.completed_at::text,
       u.full_name AS created_by_name,
@@ -1148,6 +1223,7 @@ export async function listDocuments(
       d.exit_kind,
       COALESCE(c.display_name, d.metadata->>'customerName') AS customer_name,
       d.metadata->>'productionOrderCode' AS production_order_code,
+      d.metadata->>'purchaseOrderCode' AS purchase_order_code,
       d.metadata->>'entryType' AS entry_type,
       d.metadata->>'labelsPrintedAt' AS labels_printed_at,
       (
@@ -1176,7 +1252,7 @@ export async function listDocuments(
     LEFT JOIN users u ON u.id = d.created_by
     LEFT JOIN customers c ON c.id = d.customer_id
     WHERE d.status IN ('completed', 'cancelled') AND (${whFilter}) ${typeFilter}${dateFilter}
-    GROUP BY d.id, d.warehouse_id, w.name, w.code, u.full_name, d.invoice_number, d.exit_kind, c.display_name, d.metadata, d.reason
+    GROUP BY d.id, d.warehouse_id, w.name, w.code, u.full_name, d.invoice_number, d.exit_kind, c.display_name, d.metadata, d.reason, d.discount_amount, d.discount_reason
     ORDER BY d.completed_at DESC NULLS LAST, d.created_at DESC
     LIMIT $${limitIdx} OFFSET $${offsetIdx}
     `,
@@ -1203,8 +1279,12 @@ export async function listDocuments(
       exitKind: r.exit_kind,
       customerName: r.customer_name,
       productionOrderCode: r.production_order_code,
+      purchaseOrderCode: r.purchase_order_code,
       entryType: r.entry_type,
       labelsPrintedAt: r.labels_printed_at,
+      subtotalAmount: Number(r.subtotal_amount),
+      discountAmount: Number(r.discount_amount),
+      discountReason: r.discount_reason,
       totalAmount: Number(r.total_amount),
       editCount: Number(r.edit_count),
       lastEditObservation: r.last_edit_observation,
@@ -1568,6 +1648,9 @@ export async function getDocument(
     reason: string | null;
     line_count: string;
     total_qty: string;
+    subtotal_amount: string;
+    discount_amount: string;
+    discount_reason: string | null;
     total_amount: string;
     created_at: string;
     completed_at: string | null;
@@ -1596,7 +1679,10 @@ export async function getDocument(
       d.reason,
       COUNT(l.id)::text AS line_count,
       COALESCE(SUM(l.quantity), 0)::text AS total_qty,
-      COALESCE(SUM(l.quantity * COALESCE(l.unit_sale_price, 0)), 0)::text AS total_amount,
+      COALESCE(SUM(l.quantity * COALESCE(l.unit_sale_price, 0)), 0)::text AS subtotal_amount,
+      COALESCE(d.discount_amount, 0)::text AS discount_amount,
+      d.discount_reason,
+      GREATEST(0, COALESCE(SUM(l.quantity * COALESCE(l.unit_sale_price, 0)), 0) - COALESCE(d.discount_amount, 0))::text AS total_amount,
       d.created_at::text,
       d.completed_at::text,
       u.full_name AS created_by_name,
@@ -1635,7 +1721,7 @@ export async function getDocument(
     LEFT JOIN users u ON u.id = d.created_by
     LEFT JOIN customers c ON c.id = d.customer_id
     WHERE d.id = $1::uuid AND (${whFilter})
-    GROUP BY d.id, d.warehouse_id, u.full_name, w.name, w.code, c.display_name, c.tax_id, c.phone, c.address, d.metadata, d.reason
+    GROUP BY d.id, d.warehouse_id, u.full_name, w.name, w.code, c.display_name, c.tax_id, c.phone, c.address, d.metadata, d.reason, d.discount_amount, d.discount_reason
     `,
     params
   );
@@ -1705,10 +1791,14 @@ export async function getDocument(
     customerAddress: head.customer_address ?? null,
     relatedInvoiceNumber: meta.relatedInvoiceNumber ?? null,
     productionOrderCode: meta.productionOrderCode ?? null,
+    purchaseOrderCode: meta.purchaseOrderCode ?? null,
     entryType: meta.entryType ?? null,
     labelsPrintedAt: meta.labelsPrintedAt ?? null,
     warehouseName: head.warehouse_name,
     warehouseCode: head.warehouse_code,
+    subtotalAmount: Number(head.subtotal_amount),
+    discountAmount: Number(head.discount_amount),
+    discountReason: head.discount_reason,
     totalAmount: Number(head.total_amount),
     editCount: Number(head.edit_count),
     lastEditObservation: head.last_edit_observation,
@@ -1849,10 +1939,13 @@ export async function markLabelsPrinted(
       throw Object.assign(new Error("document_not_found"), { code: "document_not_found" });
     }
     const meta = doc.metadata ?? {};
-    const isProductionOrder =
+    const isLabelEligible =
       doc.doc_type === "entry" &&
-      (meta.entryType === "production_order" || Boolean(meta.productionOrderCode));
-    if (!isProductionOrder) {
+      (meta.entryType === "production_order" ||
+        meta.entryType === "purchase" ||
+        Boolean(meta.productionOrderCode) ||
+        Boolean(meta.purchaseOrderCode));
+    if (!isLabelEligible) {
       throw Object.assign(new Error("not_a_production_order"), { code: "not_a_production_order" });
     }
     if (doc.status === "cancelled") {

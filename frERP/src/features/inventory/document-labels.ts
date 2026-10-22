@@ -5,6 +5,7 @@ export function documentTypeLabel(doc: {
   docType: string;
   exitKind?: ExitKind | null;
   productionOrderCode?: string | null;
+  purchaseOrderCode?: string | null;
   entryType?: string | null;
   reason?: string | null;
   metadata?: { entryType?: string | null; countKind?: string | null } | null;
@@ -16,6 +17,9 @@ export function documentTypeLabel(doc: {
     const et = doc.entryType ?? doc.metadata?.entryType;
     if (doc.productionOrderCode || et === "production_order") {
       return "Orden de producción";
+    }
+    if ((doc as any).purchaseOrderCode || et === "purchase") {
+      return "Entrada · Compra";
     }
     if (et === "transfer") return "Entrada · Traslado";
     if (et === "distribution") return "Entrada";

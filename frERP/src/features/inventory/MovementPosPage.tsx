@@ -125,7 +125,7 @@ export function MovementPosPage({ mode }: Props) {
   const draftHydratedRef = useRef<string | null>(null);
 
   const [entryType, setEntryType] = useState<
-    "transfer" | "distribution" | "return_to_factory" | "production_order"
+    "transfer" | "distribution" | "return_to_factory" | "production_order" | "purchase"
   >("distribution");
   const [exitKind, setExitKind] = useState<ExitKind>("sale");
   const [originInvoiceNumber, setOriginInvoiceNumber] = useState("");
@@ -136,6 +136,7 @@ export function MovementPosPage({ mode }: Props) {
   const [verifyFlash, setVerifyFlash] = useState<string | null>(null);
 
   const isProductionOrder = isEntry && entryType === "production_order";
+  const isPurchase = isEntry && entryType === "purchase";
   const isInvoiceLinkedEntry =
     isEntry &&
     (entryType === "transfer" ||
@@ -144,7 +145,7 @@ export function MovementPosPage({ mode }: Props) {
   const hideCatalogPicker = isInvoiceLinkedEntry;
   // En entradas ligadas la pistola sirve para VERIFICAR lo recibido (no agrega al carrito)
   const verifyMode = isInvoiceLinkedEntry;
-  const hidePistol = isProductionOrder || (verifyMode && cart.length === 0);
+  const hidePistol = isProductionOrder || isPurchase || (verifyMode && cart.length === 0);
 
   const getLocalScanItems = useCallback((): ScanMatchable[] => {
     if (verifyMode && cart.length > 0) {
@@ -320,7 +321,7 @@ export function MovementPosPage({ mode }: Props) {
     try {
       const data = await fetchCatalog(token, warehouseId, {
         q: catalogSearch || undefined,
-        limit: isEntry && entryType === "production_order" ? 100 : 40,
+        limit: isEntry && (entryType === "production_order" || entryType === "purchase") ? 100 : 40,
         withoutBarcode: isEntry ? undefined : true,
         withBarcode: undefined,
       });
@@ -861,6 +862,15 @@ export function MovementPosPage({ mode }: Props) {
         });
         return;
       }
+      if (entryType === "purchase") {
+        navigate("/app/inventario/entradas/historial", {
+          replace: true,
+          state: {
+            flash: `Entrada por compra ${item.purchaseOrderCode ?? item.invoiceNumber ?? ""} registrada. Imprime las etiquetas desde la card.`,
+          },
+        });
+        return;
+      }
       setSuccess("Entrada registrada correctamente.");
       window.setTimeout(() => setSuccess(null), 4000);
     } catch (err) {
@@ -925,6 +935,8 @@ export function MovementPosPage({ mode }: Props) {
         receiptUrl: data.receiptUrl || null,
         receiptUrls: data.receiptUrls || null,
         receiptFilename: data.receiptFilename || null,
+        discountAmount: data.discountAmount || 0,
+        discountReason: data.discountReason || null,
       });
       setCart([]);
       setNotes("");
@@ -1003,9 +1015,11 @@ export function MovementPosPage({ mode }: Props) {
           isEntry
             ? isProductionOrder
               ? `Agrega productos al listado · ${sessionLabel}`
-              : isInvoiceLinkedEntry
-                ? `Código corto + verificación con pistola · ${sessionLabel}`
-                : `Elige el tipo de ingreso · ${sessionLabel}`
+              : isPurchase
+                ? `Ingreso de compra a proveedores (etiquetas) · ${sessionLabel}`
+                : isInvoiceLinkedEntry
+                  ? `Código corto + verificación con pistola · ${sessionLabel}`
+                  : `Elige el tipo de ingreso · ${sessionLabel}`
             : "Punto de venta · pistolea o toca productos"
         }
         actions={
@@ -1034,9 +1048,10 @@ export function MovementPosPage({ mode }: Props) {
                   setPistolCode("");
                 }}
               >
-                <option value="distribution">Entrada</option>
+                <option value="distribution">Entrada (distribución)</option>
                 <option value="transfer">Traslado desde otra sede</option>
                 <option value="return_to_factory">Devolución a Fábrica (recepción)</option>
+                <option value="purchase">Entrada por compra (etiquetas)</option>
                 {isFactory ? (
                   <option value="production_order">Orden de producción (etiquetas)</option>
                 ) : null}
@@ -1084,6 +1099,12 @@ export function MovementPosPage({ mode }: Props) {
           {entryType === "production_order" ? (
             <p className="inv-pos-config__hint">
               Puedes agregar cualquier producto. Al confirmar la OP, las etiquetas/QR se generan solo para los que tienen código de barras configurado.
+            </p>
+          ) : null}
+
+          {entryType === "purchase" ? (
+            <p className="inv-pos-config__hint">
+              Entrada directa por compra (bodega y todas las sedes). No necesitas pistolear: toca o busca los productos en el catálogo y define las cantidades. Al confirmar, podrás imprimir las etiquetas adhesivas para pegárselas a los productos.
             </p>
           ) : null}
 
@@ -1413,7 +1434,9 @@ export function MovementPosPage({ mode }: Props) {
                 isEntry
                   ? entryType === "production_order"
                     ? "Buscar productos para la orden…"
-                    : "Filtrar productos por nombre o referencia…"
+                    : entryType === "purchase"
+                      ? "Buscar productos de la compra…"
+                      : "Filtrar productos por nombre o referencia…"
                   : "Buscar productos sin código de barras…"
               }
               aria-label="Filtrar listado de productos"
