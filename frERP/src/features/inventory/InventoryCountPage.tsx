@@ -95,6 +95,56 @@ type InventoryCountPageProps = {
   mode?: CountKind;
 };
 
+type LineQtyInputProps = {
+  value: number;
+  disabled?: boolean;
+  onChange: (qty: number) => void;
+  productName: string;
+};
+
+function LineQtyInput({ value, disabled, onChange, productName }: LineQtyInputProps) {
+  const [localVal, setLocalVal] = useState(String(value));
+  const committedRef = useRef(value);
+
+  useEffect(() => {
+    setLocalVal(String(value));
+    committedRef.current = value;
+  }, [value]);
+
+  const commit = useCallback(
+    (rawVal: string) => {
+      const num = Math.max(0, Math.round(Number(rawVal) || 0));
+      if (num !== committedRef.current) {
+        committedRef.current = num;
+        onChange(num);
+      }
+      setLocalVal(String(num));
+    },
+    [onChange]
+  );
+
+  return (
+    <input
+      type="number"
+      inputMode="numeric"
+      min={0}
+      value={localVal}
+      disabled={disabled}
+      onChange={(e) => setLocalVal(e.target.value)}
+      onBlur={(e) => commit(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit(e.currentTarget.value);
+          e.currentTarget.blur();
+        }
+      }}
+      aria-label={`Cantidad contada de ${productName}`}
+      className="inv-count-line__qty-input"
+    />
+  );
+}
+
 export function InventoryCountPage({ mode }: InventoryCountPageProps) {
   const { token, user } = useAuth();
   const { warehouseId, setWarehouseId, isAllWarehouses, canViewAllWarehouses, warehouses } =
@@ -107,6 +157,7 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
   const [targetWarehouseId, setTargetWarehouseId] = useState<string | null>(null);
 
   const [count, setCount] = useState<InventoryCountDetail | null>(null);
+  const isInitial = isInitialMode || count?.countKind === "initial";
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -343,7 +394,7 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
       applyServerCount(item);
       setSuccess(
         count.countKind === "initial"
-          ? "Inventario inicial reiniciado. Puedes volver a pistolear."
+          ? "Inventario inicial reiniciado. Puedes ingresar cantidades manualmente o con pistola."
           : "Cierre reiniciado. Puedes volver a pistolear."
       );
     } catch (err) {
@@ -643,7 +694,7 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
                 value={pistolCode}
                 onChange={(e) => onPistolChange(e.target.value)}
                 onKeyDown={onPistolKeyDown}
-                placeholder="Pistola / código…"
+                placeholder={isInitial ? "Pistola / código (opcional)…" : "Pistola / código…"}
                 aria-label="Escanear con pistola"
               />
             </label>
@@ -697,7 +748,7 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
               const pct = progressPct(line.countedQuantity, line.expectedQuantity);
               const img = resolveLightMediaUrl(line.imageUrl, "xs");
               const flash = flashProductId === line.productId;
-              const pistolOnly = Boolean(line.barcode);
+              const pistolOnly = !isInitial && Boolean(line.barcode);
               return (
                 <li
                   key={line.productId}
@@ -725,6 +776,10 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
                     {pistolOnly ? (
                       <span className="inv-count-line__manual inv-count-line__manual--pistol">
                         Solo pistola
+                      </span>
+                    ) : isInitial ? (
+                      <span className="inv-count-line__manual inv-count-line__manual--pistol">
+                        {line.barcode ? "Manual o pistola" : "Sin código · ingreso manual"}
                       </span>
                     ) : (
                       <span className="inv-count-line__manual">Sin código · ingreso manual</span>
@@ -779,14 +834,11 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
                       >
                         <Minus size={16} strokeWidth={2.5} aria-hidden />
                       </button>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
+                      <LineQtyInput
                         value={line.countedQuantity}
-                        onChange={(e) => void setLineQty(line.productId, Number(e.target.value))}
-                        aria-label={`Cantidad contada de ${line.productName}`}
-                        className="inv-count-line__qty-input"
+                        disabled={saving}
+                        onChange={(qty) => void setLineQty(line.productId, qty)}
+                        productName={line.productName}
                       />
                       <button
                         type="button"
