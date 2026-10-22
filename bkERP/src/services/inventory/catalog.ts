@@ -112,12 +112,14 @@ export async function listCatalog(
   let filterIdx = 1;
 
   if (query.q?.trim()) {
-    const term = query.q.trim();
-    conditions.push(
-      `((p.barcode IS NOT NULL AND p.barcode <> '' AND (p.barcode = $${filterIdx} OR p.reference_code = $${filterIdx} OR COALESCE(p.sku, '') = $${filterIdx} OR COALESCE(p.internal_code, '') = $${filterIdx})) OR (COALESCE(p.barcode, '') = '' AND (p.name ILIKE $${filterIdx + 1} OR p.reference_code ILIKE $${filterIdx + 1} OR COALESCE(p.sku, '') ILIKE $${filterIdx + 1} OR COALESCE(p.internal_code, '') ILIKE $${filterIdx + 1})))`
-    );
-    filterParams.push(term, `%${term}%`);
-    filterIdx += 2;
+    const tokens = query.q.trim().split(/\s+/).filter(Boolean);
+    for (const token of tokens) {
+      conditions.push(
+        `(p.name ILIKE $${filterIdx} OR p.reference_code ILIKE $${filterIdx} OR COALESCE(p.barcode, '') ILIKE $${filterIdx} OR COALESCE(p.sku, '') ILIKE $${filterIdx} OR COALESCE(p.internal_code, '') ILIKE $${filterIdx})`
+      );
+      filterParams.push(`%${token}%`);
+      filterIdx++;
+    }
   }
   if (query.categoryId && /^[0-9a-f-]{36}$/i.test(query.categoryId)) {
     conditions.push(`p.category_id = $${filterIdx}::uuid`);
@@ -214,12 +216,14 @@ export async function listProductCatalog(
   let idx = 1;
 
   if (query.q?.trim()) {
-    const term = query.q.trim();
-    conditions.push(
-      `((p.barcode IS NOT NULL AND p.barcode <> '' AND (p.barcode = $${idx} OR p.reference_code = $${idx} OR COALESCE(p.sku, '') = $${idx} OR COALESCE(p.internal_code, '') = $${idx})) OR (COALESCE(p.barcode, '') = '' AND (p.name ILIKE $${idx + 1} OR p.reference_code ILIKE $${idx + 1} OR COALESCE(p.sku, '') ILIKE $${idx + 1} OR COALESCE(p.internal_code, '') ILIKE $${idx + 1})))`
-    );
-    params.push(term, `%${term}%`);
-    idx += 2;
+    const tokens = query.q.trim().split(/\s+/).filter(Boolean);
+    for (const token of tokens) {
+      conditions.push(
+        `(p.name ILIKE $${idx} OR p.reference_code ILIKE $${idx} OR COALESCE(p.barcode, '') ILIKE $${idx} OR COALESCE(p.sku, '') ILIKE $${idx} OR COALESCE(p.internal_code, '') ILIKE $${idx})`
+      );
+      params.push(`%${token}%`);
+      idx++;
+    }
   }
   if (query.categoryId && /^[0-9a-f-]{36}$/i.test(query.categoryId)) {
     conditions.push(`p.category_id = $${idx}::uuid`);
