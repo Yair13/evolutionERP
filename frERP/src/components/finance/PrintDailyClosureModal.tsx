@@ -274,6 +274,15 @@ export function PrintDailyClosureModal({ closure, onClose }: Props) {
                   <td style={{ padding: "8px 10px", textAlign: "right", color: "#94a3b8" }}>—</td>
                 </tr>
               )}
+              {(closure.cashOtherIncomes ?? 0) > 0 && (
+                <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
+                  <td style={{ padding: "8px 10px" }}>Otros Ingresos / Recibos de Caja (Efectivo)</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#16a34a", fontWeight: 600 }}>
+                    + {formatMoney(closure.cashOtherIncomes ?? 0)}
+                  </td>
+                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#94a3b8" }}>—</td>
+                </tr>
+              )}
               {closure.cashOutflows > 0 && (
                 <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
                   <td style={{ padding: "8px 10px" }}>Comprobantes de Egreso (Caja Menor) en Efectivo</td>

@@ -237,35 +237,6 @@ export function PrintEgressVoucherModal({ open, outflow, onClose }: Props) {
           </div>
         </div>
       </div>
-
-      {/* Recuadro de Huella (Compacto) */}
-      <div
-        style={{
-          marginTop: "5px",
-          display: "flex",
-          justifyContent: "flex-end",
-        }}
-      >
-        <div
-          style={{
-            width: "20mm",
-            height: "22mm",
-            border: "1.5px solid #000000",
-            borderRadius: "3px",
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "center",
-            paddingBottom: "2px",
-            fontSize: "7.5px",
-            fontWeight: 700,
-            color: "#000000",
-            background: "#ffffff",
-            boxSizing: "border-box",
-          }}
-        >
-          Huella
-        </div>
-      </div>
     </div>
   );
 

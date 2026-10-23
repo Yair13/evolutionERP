@@ -27,6 +27,7 @@ import { PaymentsCashPage } from "./features/finance/PaymentsCashPage.js";
 import { LayawaysPage } from "./features/finance/LayawaysPage.js";
 import { PayablesPage } from "./features/finance/PayablesPage.js";
 import { CashOutflowsPage } from "./features/finance/CashOutflowsPage.js";
+import { CashIncomesPage } from "./features/finance/CashIncomesPage.js";
 import { PayrollPage } from "./features/finance/PayrollPage.js";
 import { DailyClosurePage } from "./features/finance/DailyClosurePage.js";
 
@@ -73,6 +74,7 @@ export default function App() {
             <Route path="finanzas/cartera" element={<ReceivablesPage />} />
             <Route path="finanzas/caja" element={<PaymentsCashPage />} />
             <Route path="finanzas/apartados" element={<LayawaysPage />} />
+            <Route path="finanzas/ingresos" element={<CashIncomesPage />} />
             <Route path="finanzas/egresos" element={<CashOutflowsPage />} />
             <Route path="finanzas/nomina" element={<PayrollPage />} />
             <Route path="finanzas/cierre-diario" element={<DailyClosurePage />} />

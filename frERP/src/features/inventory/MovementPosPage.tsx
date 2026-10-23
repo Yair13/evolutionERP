@@ -41,6 +41,7 @@ const BarcodeScannerModal = lazy(() =>
   }))
 );
 import { DocumentInvoicePrint } from "../../components/inventory/DocumentInvoicePrint.js";
+import { PrintChoiceModal } from "../../components/inventory/PrintChoiceModal.js";
 import {
   ExitCheckoutModal,
   type ExitCheckoutData,
@@ -107,7 +108,9 @@ export function MovementPosPage({ mode }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showExitCheckout, setShowExitCheckout] = useState(false);
+  const [pendingChoiceDoc, setPendingChoiceDoc] = useState<InventoryDocumentDetail | null>(null);
   const [invoiceDoc, setInvoiceDoc] = useState<InventoryDocumentDetail | null>(null);
+  const [printFormat, setPrintFormat] = useState<"half_letter" | "voucher">("half_letter");
   const [lastAdded, setLastAdded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -942,7 +945,7 @@ export function MovementPosPage({ mode }: Props) {
       setNotes("");
       setShowExitCheckout(false);
       setCartOpen(false);
-      setInvoiceDoc(item);
+      setPendingChoiceDoc(item);
       clearPosDraft(mode, warehouseId);
       clearCheckoutDraft(warehouseId);
       clearScanCache(warehouseId);
@@ -1693,8 +1696,31 @@ export function MovementPosPage({ mode }: Props) {
         </Suspense>
       ) : null}
 
+      {pendingChoiceDoc ? (
+        <PrintChoiceModal
+          document={pendingChoiceDoc}
+          onSelectFormat={(chosenFormat) => {
+            const doc = pendingChoiceDoc;
+            setPendingChoiceDoc(null);
+            setPrintFormat(chosenFormat);
+            setInvoiceDoc(doc);
+          }}
+          onClose={() => {
+            const num = pendingChoiceDoc.invoiceNumber;
+            setPendingChoiceDoc(null);
+            if (num) {
+              setSuccess(`Venta registrada exitosamente con comprobante: ${num}`);
+            }
+          }}
+        />
+      ) : null}
+
       {invoiceDoc ? (
-        <DocumentInvoicePrint document={invoiceDoc} onClose={() => setInvoiceDoc(null)} />
+        <DocumentInvoicePrint
+          document={invoiceDoc}
+          initialFormat={printFormat}
+          onClose={() => setInvoiceDoc(null)}
+        />
       ) : null}
     </div>
   );

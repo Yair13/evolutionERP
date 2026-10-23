@@ -1106,6 +1106,19 @@ export async function getPaymentsCashSummary(
     GROUP BY LOWER(TRIM(lp.payment_method))
   `;
 
+  // 2b. Desglose desde otros ingresos / recibos de caja (cash_incomes)
+  const incomesQuery = `
+    SELECT
+      LOWER(TRIM(ci.payment_method)) AS method,
+      COALESCE(SUM(ci.amount), 0)::text AS amount,
+      COUNT(*)::int AS count
+    FROM cash_incomes ci
+    WHERE 1=1
+      ${whRpFilter.replace(/rp\./g, "ci.")}
+      ${dateRpFilter.replace(/rp\./g, "ci.")}
+    GROUP BY LOWER(TRIM(ci.payment_method))
+  `;
+
   // 3. Deducciones de efectivo: Nómina en efectivo y Egresos de caja
   const payrollParams: unknown[] = [];
   const whPayrollFilter = opts.warehouseId
@@ -1156,12 +1169,14 @@ export async function getPaymentsCashSummary(
     { rows: salesRows },
     { rows: payRows },
     { rows: layRows },
+    { rows: incomeRows },
     { rows: payrollRows },
     { rows: outflowRows },
   ] = await Promise.all([
     pool.query<{ method: string; amount: string; count: number }>(salesQuery, params),
     pool.query<{ method: string; amount: string; count: number }>(paymentsQuery, params),
     pool.query<{ method: string; amount: string; count: number }>(layawaysQuery, params),
+    pool.query<{ method: string; amount: string; count: number }>(incomesQuery, params),
     pool.query<{ amount: string; count: number }>(payrollQuery, payrollParams),
     pool.query<{ amount: string; count: number }>(outflowQuery, outflowParams),
   ]);
@@ -1204,6 +1219,14 @@ export async function getPaymentsCashSummary(
   }
 
   for (const r of layRows) {
+    const m = r.method || "otro";
+    const cur = map.get(m) ?? { salesAmount: 0, creditsAmount: 0, count: 0 };
+    cur.creditsAmount += Number(r.amount);
+    cur.count += r.count;
+    map.set(m, cur);
+  }
+
+  for (const r of incomeRows) {
     const m = r.method || "otro";
     const cur = map.get(m) ?? { salesAmount: 0, creditsAmount: 0, count: 0 };
     cur.creditsAmount += Number(r.amount);

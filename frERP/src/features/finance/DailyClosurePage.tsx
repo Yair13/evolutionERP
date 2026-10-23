@@ -430,7 +430,8 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
     ? worksheet.cashSales +
       worksheet.cashCreditPayments +
       worksheet.cashLayawayPayments +
-      worksheet.cashTransfersReceived
+      worksheet.cashTransfersReceived +
+      (worksheet.cashOtherIncomes ?? 0)
     : 0;
 
   const totalCashOut = worksheet
@@ -890,6 +891,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                             cashCreditPayments: worksheet.cashCreditPayments,
                             cashLayawayPayments: worksheet.cashLayawayPayments,
                             cashTransfersReceived: worksheet.cashTransfersReceived,
+                            cashOtherIncomes: worksheet.cashOtherIncomes ?? 0,
                             cashTransfersSent: worksheet.cashTransfersSent,
                             cashOutflows: worksheet.cashOutflows,
                             cashPayroll: worksheet.cashPayroll,
@@ -1048,6 +1050,11 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                     {worksheet.cashTransfersReceived > 0 && (
                       <div style={{ display: "flex", justifyContent: "space-between", color: "#0284c7" }}>
                         <span>Remesas recibidas:</span> <strong>+ {formatMoney(worksheet.cashTransfersReceived)}</strong>
+                      </div>
+                    )}
+                    {(worksheet.cashOtherIncomes ?? 0) > 0 && (
+                      <div style={{ display: "flex", justifyContent: "space-between", color: "#059669" }}>
+                        <span>Otros ingresos / caja:</span> <strong>+ {formatMoney(worksheet.cashOtherIncomes ?? 0)}</strong>
                       </div>
                     )}
                   </div>
@@ -1665,6 +1672,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                             cashCreditPayments: worksheet.cashCreditPayments,
                             cashLayawayPayments: worksheet.cashLayawayPayments,
                             cashTransfersReceived: worksheet.cashTransfersReceived,
+                            cashOtherIncomes: worksheet.cashOtherIncomes ?? 0,
                             cashTransfersSent: worksheet.cashTransfersSent,
                             cashOutflows: worksheet.cashOutflows,
                             cashPayroll: worksheet.cashPayroll,

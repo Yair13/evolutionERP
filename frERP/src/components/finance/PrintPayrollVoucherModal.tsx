@@ -429,37 +429,15 @@ export function PrintPayrollVoucherModal({ payment, onClose }: Props) {
               </div>
             </div>
 
-            {/* Firma Colaborador + Huella */}
-            <div style={{ display: "flex", gap: "1rem", alignItems: "flex-end" }}>
-              <div style={{ flex: 1, textAlign: "center" }}>
-                <div style={{ borderBottom: "1px solid #0f172a", height: 50, marginBottom: 8 }} />
-                <div style={{ fontWeight: 700 }}>RECIBÍ A CONFORMIDAD</div>
-                <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                  {payment.employeeName}
-                </div>
-                <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                  {payment.employeeDocType ?? "CC"}: {payment.employeeDocNumber}
-                </div>
+            {/* Firma Colaborador */}
+            <div style={{ textAlign: "center" }}>
+              <div style={{ borderBottom: "1px solid #0f172a", height: 50, marginBottom: 8 }} />
+              <div style={{ fontWeight: 700 }}>RECIBÍ A CONFORMIDAD</div>
+              <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                {payment.employeeName}
               </div>
-
-              {/* Recuadro para huella dactilar */}
-              <div
-                style={{
-                  width: 65,
-                  height: 80,
-                  border: "1px dashed #64748b",
-                  borderRadius: 4,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "flex-end",
-                  padding: 4,
-                  fontSize: "0.65rem",
-                  color: "#94a3b8",
-                  textAlign: "center",
-                }}
-              >
-                HUELLA
+              <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                {payment.employeeDocType ?? "CC"}: {payment.employeeDocNumber}
               </div>
             </div>
           </div>

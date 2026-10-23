@@ -26,6 +26,10 @@ export interface GeneralClosureWorksheet {
   totalCreditPayments: number;
   totalLayawayPayments: number;
 
+  // Otros Ingresos
+  totalOtherIncomes: number;
+  totalCashOtherIncomes: number;
+
   // Salidas y Nómina
   totalOutflows: number;
   totalPayroll: number;
@@ -81,6 +85,8 @@ export interface GeneralClosureRecord {
   totalBankSales: number;
   totalCreditPayments: number;
   totalLayawayPayments: number;
+  totalOtherIncomes?: number;
+  totalCashOtherIncomes?: number;
   totalOutflows: number;
   totalPayroll: number;
   openingCash: number;
@@ -225,6 +231,10 @@ export async function getGeneralClosureData(
     ? `AND co.created_at > '${new Date(fromTime).toISOString()}'::timestamptz AND (co.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`
     : `AND (co.created_at AT TIME ZONE 'America/Bogota')::date >= $1::date AND (co.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`;
 
+  const timeFilterCi = fromTime
+    ? `AND ci.created_at > '${new Date(fromTime).toISOString()}'::timestamptz AND (ci.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`
+    : `AND (ci.created_at AT TIME ZONE 'America/Bogota')::date >= $1::date AND (ci.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`;
+
   const timeFilterPp = fromTime
     ? `AND pp.created_at > '${new Date(fromTime).toISOString()}'::timestamptz AND (pp.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`
     : `AND pp.payment_date >= $1::date AND pp.payment_date <= $2::date`;
@@ -273,6 +283,7 @@ export async function getGeneralClosureData(
   const whFilterRp = opts.warehouseId ? `AND rp.warehouse_id = '${opts.warehouseId}'::uuid` : "";
   const whFilterLp = opts.warehouseId ? `AND lp.warehouse_id = '${opts.warehouseId}'::uuid` : "";
   const whFilterCo = opts.warehouseId ? `AND co.warehouse_id = '${opts.warehouseId}'::uuid` : "";
+  const whFilterCi = opts.warehouseId ? `AND ci.warehouse_id = '${opts.warehouseId}'::uuid` : "";
   const whFilterPp = opts.warehouseId ? `AND pp.warehouse_id = '${opts.warehouseId}'::uuid` : "";
   const whFilterDestCt = opts.warehouseId ? `AND ct.destination_warehouse_id = '${opts.warehouseId}'::uuid` : "";
   const whFilterOrigCt = opts.warehouseId ? `AND ct.origin_warehouse_id = '${opts.warehouseId}'::uuid` : "";
@@ -332,6 +343,26 @@ export async function getGeneralClosureData(
     `,
     [opts.dateFrom, opts.dateTo]
   );
+
+  // 3b. Otros ingresos (devolución conductores, venta de rezagos/cuero, etc.)
+  const { rows: incomeRows } = await pool.query<{ method: string; amount: string; count: number }>(
+    `
+    SELECT
+      LOWER(TRIM(ci.payment_method)) AS method,
+      COALESCE(SUM(ci.amount), 0)::text AS amount,
+      COUNT(*)::int AS count
+    FROM cash_incomes ci
+    WHERE 1=1
+      ${whFilterCi}
+      ${timeFilterCi}
+    GROUP BY LOWER(TRIM(ci.payment_method))
+    `,
+    [opts.dateFrom, opts.dateTo]
+  );
+
+  const totalOtherIncomes = incomeRows.reduce((s, r) => s + Number(r.amount), 0);
+  const cashIncomeItem = incomeRows.find((r) => r.method === "efectivo");
+  const totalCashOtherIncomes = cashIncomeItem ? Number(cashIncomeItem.amount) : 0;
 
   // 4. Egresos
   const { rows: outflowRows } = await pool.query<{ total: string; cash_total: string }>(
@@ -423,6 +454,14 @@ export async function getGeneralClosureData(
     methodMap.set(m, cur);
   }
 
+  for (const r of incomeRows) {
+    const m = r.method || "otro";
+    const cur = methodMap.get(m) ?? { salesAmount: 0, creditsAmount: 0, count: 0 };
+    cur.creditsAmount += Number(r.amount);
+    cur.count += r.count;
+    methodMap.set(m, cur);
+  }
+
   const paymentBreakdown: MethodBreakdownItem[] = Array.from(methodMap.entries()).map(([m, d]) => ({
     method: m,
     label: METHOD_LABELS[m] || m.toUpperCase(),
@@ -445,7 +484,8 @@ export async function getGeneralClosureData(
   const totalNetCash =
     totalCashSales +
     totalCashCredits +
-    totalTransfersReceived -
+    totalTransfersReceived +
+    totalCashOtherIncomes -
     totalCashOutflows -
     totalCashPayroll -
     totalTransfersSent;
@@ -476,6 +516,8 @@ export async function getGeneralClosureData(
     totalBankSales,
     totalCreditPayments,
     totalLayawayPayments,
+    totalOtherIncomes,
+    totalCashOtherIncomes,
     totalOutflows,
     totalPayroll,
     totalCashPayroll,
@@ -571,7 +613,9 @@ export async function saveGeneralClosure(
         payment_breakdown = $12::jsonb,
         notes = $13,
         status = 'approved',
-        closed_at = now()
+        closed_at = now(),
+        total_other_incomes = $15,
+        total_cash_other_incomes = $16
       WHERE id = $14::uuid
       `,
       [
@@ -589,6 +633,8 @@ export async function saveGeneralClosure(
         JSON.stringify(ws.paymentBreakdown),
         data.notes?.trim() || null,
         closureId,
+        ws.totalOtherIncomes,
+        ws.totalCashOtherIncomes,
       ]
     );
   } else {
@@ -616,9 +662,11 @@ export async function saveGeneralClosure(
         payment_breakdown,
         notes,
         created_by,
-        status
+        status,
+        total_other_incomes,
+        total_cash_other_incomes
       ) VALUES (
-        $1, $2, $3::date, $4::date, $5::date, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, 'approved'
+        $1, $2, $3::date, $4::date, $5::date, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, 'approved', $22, $23
       )
       RETURNING id
       `,
@@ -644,6 +692,8 @@ export async function saveGeneralClosure(
         JSON.stringify(ws.paymentBreakdown),
         data.notes?.trim() || null,
         userId || null,
+        ws.totalOtherIncomes,
+        ws.totalCashOtherIncomes,
       ]
     );
     closureId = rows[0]!.id;
@@ -679,6 +729,8 @@ export async function getGeneralClosureDetail(
       gc.total_bank_sales::float AS "totalBankSales",
       gc.total_credit_payments::float AS "totalCreditPayments",
       gc.total_layaway_payments::float AS "totalLayawayPayments",
+      COALESCE(gc.total_other_incomes, 0)::float AS "totalOtherIncomes",
+      COALESCE(gc.total_cash_other_incomes, 0)::float AS "totalCashOtherIncomes",
       gc.total_outflows::float AS "totalOutflows",
       gc.total_payroll::float AS "totalPayroll",
       gc.total_net_cash::float AS "totalNetCash",
@@ -738,6 +790,8 @@ export async function listGeneralClosures(
       gc.total_bank_sales::float AS "totalBankSales",
       gc.total_credit_payments::float AS "totalCreditPayments",
       gc.total_layaway_payments::float AS "totalLayawayPayments",
+      COALESCE(gc.total_other_incomes, 0)::float AS "totalOtherIncomes",
+      COALESCE(gc.total_cash_other_incomes, 0)::float AS "totalCashOtherIncomes",
       gc.total_outflows::float AS "totalOutflows",
       gc.total_payroll::float AS "totalPayroll",
       gc.total_net_cash::float AS "totalNetCash",

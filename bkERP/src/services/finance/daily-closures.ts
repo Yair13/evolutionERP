@@ -2,7 +2,7 @@ import type pg from "pg";
 
 export interface ReceiptAuditItem {
   id: string;
-  type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "payable_payment" | "transfer_sent" | "transfer_received" | "payroll";
+  type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "payable_payment" | "transfer_sent" | "transfer_received" | "payroll" | "other_income" | "cash_income";
   typeLabel: string;
   reference: string;
   concept: string;
@@ -55,6 +55,7 @@ export interface DailyClosureWorksheet {
   cashCreditPayments: number;
   cashLayawayPayments: number;
   cashTransfersReceived: number;
+  cashOtherIncomes: number;
   totalCashIn: number;
 
   // Salidas de Efectivo
@@ -105,6 +106,7 @@ export interface DailyClosureRecord {
   cashCreditPayments: number;
   cashLayawayPayments: number;
   cashTransfersReceived: number;
+  cashOtherIncomes: number;
   cashTransfersSent: number;
   cashOutflows: number;
   cashPayroll: number;
@@ -477,6 +479,46 @@ async function getReceiptAuditItemsBetween(
     });
   }
 
+  // 9. Otros Ingresos por banco
+  const { rows: otherIncomeDocs } = await pool.query<any>(
+    `
+    SELECT
+      ci.id,
+      ci.voucher_number AS "voucherNumber",
+      ci.amount::float AS "amount",
+      ci.payment_method AS "paymentMethod",
+      ci.receipt_url AS "receiptUrl",
+      ci.receipt_filename AS "receiptFilename",
+      COALESCE(ci.receipt_urls, '[]'::jsonb) AS "receiptUrls",
+      ci.created_at AS "createdAt",
+      ci.concept,
+      ci.payer_name AS "payerName"
+    FROM cash_incomes ci
+    WHERE ci.warehouse_id = $1::uuid
+      ${fromTime ? `AND ci.created_at > '${fromTime}'::timestamptz` : ""}
+      AND ci.created_at <= '${toTime}'::timestamptz
+      AND LOWER(TRIM(ci.payment_method)) NOT IN ('efectivo', 'saldo_a_favor')
+    `,
+    [warehouseId]
+  );
+  for (const ci of otherIncomeDocs) {
+    const urls = parseReceiptUrls(ci.receiptUrls, ci.receiptUrl || null);
+    auditList.push({
+      id: ci.id,
+      type: "other_income",
+      typeLabel: "Otro Ingreso por Banco",
+      reference: ci.voucherNumber,
+      concept: `${ci.payerName} - ${ci.concept}`,
+      amount: Number(ci.amount),
+      paymentMethod: ci.paymentMethod,
+      receiptUrl: urls[0] || ci.receiptUrl || null,
+      receiptUrls: urls,
+      receiptFilename: ci.receiptFilename || null,
+      isMissing: urls.length === 0,
+      createdAt: ci.createdAt,
+    });
+  }
+
   return auditList;
 }
 
@@ -493,6 +535,7 @@ async function calculateMovementsBetween(
   cashCreditPayments: number;
   cashLayawayPayments: number;
   cashTransfersReceived: number;
+  cashOtherIncomes: number;
   totalCashIn: number;
   cashOutflows: number;
   cashPayroll: number;
@@ -571,7 +614,21 @@ async function calculateMovementsBetween(
     [warehouseId]
   );
   const cashTransfersReceived = Number(transferInRows[0]?.amount || 0);
-  const totalCashIn = cashSales + cashCreditPayments + cashLayawayPayments + cashTransfersReceived;
+
+  // 4b. Otros ingresos en efectivo (devoluciones conductores, venta de rezagos/cuero, etc.)
+  const { rows: otherIncomesRows } = await pool.query<{ amount: string }>(
+    `
+    SELECT COALESCE(SUM(amount), 0)::text AS amount
+    FROM cash_incomes
+    WHERE warehouse_id = $1::uuid
+      ${fromTime ? `AND created_at > '${fromTime}'::timestamptz` : ""}
+      AND created_at <= '${toTime}'::timestamptz
+      AND LOWER(TRIM(payment_method)) = 'efectivo'
+    `,
+    [warehouseId]
+  );
+  const cashOtherIncomes = Number(otherIncomesRows[0]?.amount || 0);
+  const totalCashIn = cashSales + cashCreditPayments + cashLayawayPayments + cashTransfersReceived + cashOtherIncomes;
 
   // 5. Salidas de efectivo
   // 5a. Egresos
@@ -677,8 +734,24 @@ async function calculateMovementsBetween(
     [warehouseId]
   );
 
+  const { rows: bankOtherIncomeRows } = await pool.query<{ method: string; amount: string; count: number }>(
+    `
+    SELECT
+      LOWER(TRIM(payment_method)) AS method,
+      COALESCE(SUM(amount), 0)::text AS amount,
+      COUNT(*)::int AS count
+    FROM cash_incomes
+    WHERE warehouse_id = $1::uuid
+      ${fromTime ? `AND created_at > '${fromTime}'::timestamptz` : ""}
+      AND created_at <= '${toTime}'::timestamptz
+      AND LOWER(TRIM(payment_method)) NOT IN ('efectivo', 'saldo_a_favor')
+    GROUP BY LOWER(TRIM(payment_method))
+    `,
+    [warehouseId]
+  );
+
   const bankMap = new Map<string, { amount: number; count: number }>();
-  for (const r of [...bankSalesRows, ...bankCreditRows, ...bankLayRows]) {
+  for (const r of [...bankSalesRows, ...bankCreditRows, ...bankLayRows, ...bankOtherIncomeRows]) {
     const cur = bankMap.get(r.method) ?? { amount: 0, count: 0 };
     cur.amount += Number(r.amount);
     cur.count += r.count;
@@ -713,6 +786,7 @@ async function calculateMovementsBetween(
     cashCreditPayments,
     cashLayawayPayments,
     cashTransfersReceived,
+    cashOtherIncomes,
     totalCashIn,
     cashOutflows,
     cashPayroll,
@@ -838,7 +912,8 @@ export async function getDailyClosureData(
         cashCreditPayments: Number(existing.cash_credit_payments),
         cashLayawayPayments: Number(existing.cash_layaway_payments),
         cashTransfersReceived: Number(existing.cash_transfers_received),
-        totalCashIn: Number(existing.cash_sales) + Number(existing.cash_credit_payments) + Number(existing.cash_layaway_payments) + Number(existing.cash_transfers_received),
+        cashOtherIncomes: Number(existing.cash_other_incomes || 0),
+        totalCashIn: Number(existing.cash_sales) + Number(existing.cash_credit_payments) + Number(existing.cash_layaway_payments) + Number(existing.cash_transfers_received) + Number(existing.cash_other_incomes || 0),
 
         cashOutflows: Number(existing.cash_outflows),
         cashPayroll: Number(existing.cash_payroll),
@@ -968,6 +1043,7 @@ export async function getDailyClosureData(
     cashCreditPayments: mov.cashCreditPayments,
     cashLayawayPayments: mov.cashLayawayPayments,
     cashTransfersReceived: mov.cashTransfersReceived,
+    cashOtherIncomes: mov.cashOtherIncomes,
     totalCashIn: mov.totalCashIn,
 
     cashOutflows: mov.cashOutflows,
@@ -1053,6 +1129,7 @@ export async function saveDailyClosure(
       cash_credit_payments,
       cash_layaway_payments,
       cash_transfers_received,
+      cash_other_incomes,
       cash_transfers_sent,
       cash_outflows,
       cash_payroll,
@@ -1067,7 +1144,7 @@ export async function saveDailyClosure(
       submitted_at,
       created_at
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $7, $7
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $7, $7
     )
     RETURNING id
     `,
@@ -1084,6 +1161,7 @@ export async function saveDailyClosure(
       ws.cashCreditPayments,
       ws.cashLayawayPayments,
       ws.cashTransfersReceived,
+      ws.cashOtherIncomes,
       ws.cashTransfersSent,
       ws.cashOutflows,
       ws.cashPayroll,
@@ -1148,6 +1226,7 @@ export async function getDailyClosureDetail(
       dc.cash_credit_payments::float AS "cashCreditPayments",
       dc.cash_layaway_payments::float AS "cashLayawayPayments",
       dc.cash_transfers_received::float AS "cashTransfersReceived",
+      COALESCE(dc.cash_other_incomes, 0)::float AS "cashOtherIncomes",
       dc.cash_transfers_sent::float AS "cashTransfersSent",
       dc.cash_outflows::float AS "cashOutflows",
       dc.cash_payroll::float AS "cashPayroll",
@@ -1241,6 +1320,7 @@ export async function listDailyClosures(
       dc.cash_credit_payments::float AS "cashCreditPayments",
       dc.cash_layaway_payments::float AS "cashLayawayPayments",
       dc.cash_transfers_received::float AS "cashTransfersReceived",
+      COALESCE(dc.cash_other_incomes, 0)::float AS "cashOtherIncomes",
       dc.cash_transfers_sent::float AS "cashTransfersSent",
       dc.cash_outflows::float AS "cashOutflows",
       dc.cash_payroll::float AS "cashPayroll",
@@ -1272,7 +1352,7 @@ export async function listDailyClosures(
 export async function attachReceiptToOperation(
   pool: pg.Pool,
   data: {
-    type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "cash_outflow" | "payable_payment" | "transfer_sent" | "transfer_received" | "payroll" | "payroll_payment";
+    type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "cash_outflow" | "payable_payment" | "transfer_sent" | "transfer_received" | "payroll" | "payroll_payment" | "other_income" | "cash_income";
     id: string;
     receiptUrl: string;
     receiptUrls?: string[];
@@ -1333,6 +1413,13 @@ export async function attachReceiptToOperation(
     case "payroll_payment":
       await pool.query(
         `UPDATE payroll_payments SET transfer_receipt_url = $1, transfer_receipt_filename = $2, transfer_receipt_urls = $4::jsonb WHERE id = $3::uuid`,
+        [primaryUrl, data.receiptFilename, data.id, jsonUrls]
+      );
+      break;
+    case "other_income":
+    case "cash_income":
+      await pool.query(
+        `UPDATE cash_incomes SET receipt_url = $1, receipt_filename = $2, receipt_urls = $4::jsonb WHERE id = $3::uuid`,
         [primaryUrl, data.receiptFilename, data.id, jsonUrls]
       );
       break;

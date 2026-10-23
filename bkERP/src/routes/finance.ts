@@ -43,6 +43,11 @@ import {
   getCashTransferDetail,
 } from "../services/finance/transfers-egress.js";
 import {
+  createCashIncome,
+  listCashIncomes,
+  getCashIncomeDetail,
+} from "../services/finance/cash-incomes.js";
+import {
   listEmployees,
   getEmployeeById,
   createEmployee,
@@ -1325,6 +1330,158 @@ export function createFinanceRouter(): Router {
         res.status(err.statusCode || 400).json({ error: err.message });
         return;
       }
+      next(err);
+    }
+  });
+
+  // ─── Recibos de Caja / Otros Ingresos (Devoluciones conductores, venta rezagos/cuero, etc.) ──
+
+  /**
+   * Listar recibos de caja con filtros y totales.
+   */
+  r.get("/incomes", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const auth = req.auth!;
+    let targetWh: string | null = null;
+    const requestedWh = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+
+    if (requestedWh) {
+      if (!isUuid(requestedWh)) {
+        res.status(400).json({ error: "invalid_warehouse_id" });
+        return;
+      }
+      targetWh = requestedWh;
+    } else if (!auth.hasAdminAccess && auth.warehouseIds && auth.warehouseIds.length > 0) {
+      targetWh = auth.warehouseIds[0]!;
+    }
+
+    const paymentMethod = typeof req.query.paymentMethod === "string" ? req.query.paymentMethod : null;
+    const category = typeof req.query.category === "string" ? req.query.category : null;
+    const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom.trim() : null;
+    const dateTo = typeof req.query.dateTo === "string" ? req.query.dateTo.trim() : null;
+    const search = typeof req.query.q === "string" ? req.query.q.trim() : null;
+    const page = req.query.page ? Number(req.query.page) : 1;
+    const limit = req.query.limit ? Number(req.query.limit) : 25;
+
+    try {
+      const result = await listCashIncomes(pool, {
+        warehouseId: targetWh,
+        allowedWarehouseIds: auth.hasAdminAccess ? null : auth.warehouseIds,
+        paymentMethod,
+        category,
+        dateFrom,
+        dateTo,
+        search,
+        page,
+        limit,
+      });
+      res.json(result);
+    } catch (err: any) {
+      if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
+        res.status(err.statusCode || 400).json({ error: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  /**
+   * Crear recibo de caja / comprobante de ingreso.
+   */
+  r.post("/incomes", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const warehouseId =
+      typeof req.body?.warehouseId === "string" && isUuid(req.body.warehouseId)
+        ? req.body.warehouseId
+        : null;
+    if (!warehouseId) {
+      res.status(400).json({ error: "warehouse_id_required" });
+      return;
+    }
+
+    if (!req.auth!.hasAdminAccess && req.auth!.warehouseIds && req.auth!.warehouseIds.length > 0) {
+      if (!req.auth!.warehouseIds.includes(warehouseId)) {
+        res.status(403).json({ error: "warehouse_access_denied" });
+        return;
+      }
+    }
+
+    const category = typeof req.body?.category === "string" ? req.body.category : "other";
+    const concept = typeof req.body?.concept === "string" ? req.body.concept : "";
+    const payerName = typeof req.body?.payerName === "string" ? req.body.payerName : "";
+    const payerDoc = typeof req.body?.payerDoc === "string" ? req.body.payerDoc : null;
+    const payerPhone = typeof req.body?.payerPhone === "string" ? req.body.payerPhone : null;
+    const amount = Number(req.body?.amount);
+    const paymentMethod = typeof req.body?.paymentMethod === "string" ? req.body.paymentMethod : "efectivo";
+    const referenceCode = typeof req.body?.referenceCode === "string" ? req.body.referenceCode : null;
+    const notes = typeof req.body?.notes === "string" ? req.body.notes : null;
+    const receiptUrl = typeof req.body?.receiptUrl === "string" ? req.body.receiptUrl : null;
+    const receiptUrls = Array.isArray(req.body?.receiptUrls)
+      ? req.body.receiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
+      : null;
+    const receiptFilename = typeof req.body?.receiptFilename === "string" ? req.body.receiptFilename : null;
+
+    try {
+      const item = await createCashIncome(pool, {
+        warehouseId,
+        category,
+        concept,
+        payerName,
+        payerDoc,
+        payerPhone,
+        amount,
+        paymentMethod,
+        referenceCode,
+        notes,
+        userId: req.auth!.userId,
+        receiptUrl,
+        receiptUrls,
+        receiptFilename,
+      });
+      res.status(201).json({ item });
+    } catch (err: any) {
+      if (err.code === "concept_required" || err.code === "payer_required" || err.code === "invalid_amount" || err.code === "payment_method_required") {
+        res.status(400).json({ error: err.code });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  /**
+   * Detalle de un recibo de caja / comprobante de ingreso.
+   */
+  r.get("/incomes/:id", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const id = String(req.params.id);
+    if (!isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+
+    try {
+      const item = await getCashIncomeDetail(pool, id);
+      if (!item) {
+        res.status(404).json({ error: "income_not_found" });
+        return;
+      }
+      res.json({ item });
+    } catch (err: any) {
       next(err);
     }
   });

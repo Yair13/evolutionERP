@@ -740,6 +740,97 @@ export async function fetchCashOutflowDetail(token: string, id: string) {
   return apiGet<{ item: CashOutflowItem }>(`/finance/outflows/${id}`, token);
 }
 
+// ─── Recibos de Caja / Otros Ingresos ────────────────────────────────────────
+
+export type CashIncomeCategory =
+  | "driver_refund"
+  | "scrap_sale"
+  | "operational_refund"
+  | "other";
+
+export interface CashIncomeItem {
+  id: string;
+  voucherNumber: string;
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  category: CashIncomeCategory;
+  concept: string;
+  payerName: string;
+  payerDoc: string | null;
+  payerPhone: string | null;
+  amount: number;
+  paymentMethod: string;
+  referenceCode: string | null;
+  receiptUrl?: string | null;
+  receiptUrls?: string[];
+  receiptFilename?: string | null;
+  notes: string | null;
+  createdBy: string | null;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export async function fetchCashIncomes(
+  token: string,
+  params?: {
+    warehouseId?: string | null;
+    paymentMethod?: string | null;
+    category?: string | null;
+    dateFrom?: string | null;
+    dateTo?: string | null;
+    q?: string | null;
+    page?: number;
+    limit?: number;
+  }
+) {
+  const qry = new URLSearchParams();
+  if (params?.warehouseId) qry.set("warehouseId", params.warehouseId);
+  if (params?.paymentMethod) qry.set("paymentMethod", params.paymentMethod);
+  if (params?.category) qry.set("category", params.category);
+  if (params?.dateFrom) qry.set("dateFrom", params.dateFrom);
+  if (params?.dateTo) qry.set("dateTo", params.dateTo);
+  if (params?.q) qry.set("q", params.q);
+  if (params?.page) qry.set("page", String(params.page));
+  if (params?.limit) qry.set("limit", String(params.limit));
+
+  const qs = qry.toString();
+  return apiGet<{
+    items: CashIncomeItem[];
+    total: number;
+    page: number;
+    limit: number;
+    totalAmount: number;
+    cashAmount: number;
+    bankAmount: number;
+  }>(`/finance/incomes${qs ? `?${qs}` : ""}`, token);
+}
+
+export async function createCashIncome(
+  token: string,
+  data: {
+    warehouseId: string;
+    category?: CashIncomeCategory | string;
+    concept: string;
+    payerName: string;
+    payerDoc?: string | null;
+    payerPhone?: string | null;
+    amount: number;
+    paymentMethod: string;
+    referenceCode?: string | null;
+    notes?: string | null;
+    receiptUrl?: string | null;
+    receiptUrls?: string[] | null;
+    receiptFilename?: string | null;
+  }
+) {
+  return apiPost<{ item: CashIncomeItem }>("/finance/incomes", data, token);
+}
+
+export async function fetchCashIncomeDetail(token: string, id: string) {
+  return apiGet<{ item: CashIncomeItem }>(`/finance/incomes/${id}`, token);
+}
+
 // ─── Traslados de Dinero entre Sedes ─────────────────────────────────────────
 
 export async function fetchCashTransfers(
@@ -1082,7 +1173,7 @@ export async function fetchPayrollSummary(
 
 export interface ReceiptAuditItem {
   id: string;
-  type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "cash_outflow" | "payable_payment" | "transfer_sent" | "transfer_received" | "payroll" | "payroll_payment";
+  type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "cash_outflow" | "payable_payment" | "transfer_sent" | "transfer_received" | "payroll" | "payroll_payment" | "other_income" | "cash_income";
   typeLabel: string;
   reference: string;
   concept: string;
@@ -1130,6 +1221,7 @@ export interface DailyClosureWorksheet {
   cashCreditPayments: number;
   cashLayawayPayments: number;
   cashTransfersReceived: number;
+  cashOtherIncomes?: number;
   totalCashIn: number;
 
   // Salidas de Efectivo
@@ -1172,6 +1264,7 @@ export interface DailyClosureRecord {
   cashCreditPayments: number;
   cashLayawayPayments: number;
   cashTransfersReceived: number;
+  cashOtherIncomes?: number;
   cashTransfersSent: number;
   cashOutflows: number;
   cashPayroll: number;
@@ -1308,7 +1401,7 @@ export async function uploadClosureReceiptFiles(
 export async function attachReceiptToOperation(
   token: string,
   data: {
-    type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "cash_outflow" | "payable_payment" | "transfer_sent" | "transfer_received" | "payroll" | "payroll_payment";
+    type: "sale" | "credit_payment" | "layaway_payment" | "outflow" | "cash_outflow" | "payable_payment" | "transfer_sent" | "transfer_received" | "payroll" | "payroll_payment" | "other_income" | "cash_income";
     id: string;
     receiptUrl: string;
     receiptUrls?: string[];
@@ -1344,6 +1437,10 @@ export interface GeneralClosureWorksheet {
   // Cartera y Apartados
   totalCreditPayments: number;
   totalLayawayPayments: number;
+
+  // Otros Ingresos
+  totalOtherIncomes?: number;
+  totalCashOtherIncomes?: number;
 
   // Salidas y Nómina
   totalOutflows: number;
@@ -1400,6 +1497,8 @@ export interface GeneralClosureRecord {
   totalBankSales: number;
   totalCreditPayments: number;
   totalLayawayPayments: number;
+  totalOtherIncomes?: number;
+  totalCashOtherIncomes?: number;
   totalOutflows: number;
   totalPayroll: number;
   openingCash: number;

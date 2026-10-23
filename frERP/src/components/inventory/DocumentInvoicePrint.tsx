@@ -1,4 +1,4 @@
-import { Printer, X } from "lucide-react";
+import { FileText, Printer, Receipt, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { InventoryDocumentDetail } from "../../features/inventory/inventory.types.js";
@@ -41,11 +41,17 @@ function eventLabel(status: string): string {
 
 type Props = {
   document: InventoryDocumentDetail;
+  initialFormat?: "half_letter" | "voucher";
   onClose: () => void;
 };
 
-export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
+export function DocumentInvoicePrint({ document: doc, initialFormat = "half_letter", onClose }: Props) {
   const [portalReady, setPortalReady] = useState(false);
+  const [format, setFormat] = useState<"half_letter" | "voucher">(initialFormat);
+
+  useEffect(() => {
+    setFormat(initialFormat);
+  }, [initialFormat]);
 
   useEffect(() => {
     setPortalReady(true);
@@ -53,7 +59,7 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
 
   useEffect(() => {
     function clearPrintClass() {
-      document.body.classList.remove("inv-print-invoice");
+      document.body.classList.remove("inv-print-invoice", "inv-print-voucher");
       document.getElementById("inv-print-page-size")?.remove();
     }
     window.addEventListener("afterprint", clearPrintClass);
@@ -65,14 +71,23 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
 
   function print() {
     document.body.classList.remove("inv-print-barcode-label");
-    document.body.classList.add("inv-print-invoice");
     let pageStyle = document.getElementById("inv-print-page-size");
     if (!pageStyle) {
       pageStyle = document.createElement("style");
       pageStyle.id = "inv-print-page-size";
       document.head.appendChild(pageStyle);
     }
-    pageStyle.textContent = "@page { size: 8.5in 5.5in; margin: 0.2in; }";
+
+    if (format === "voucher") {
+      document.body.classList.remove("inv-print-invoice");
+      document.body.classList.add("inv-print-voucher");
+      pageStyle.textContent = "@page { size: auto; margin: 0mm; }";
+    } else {
+      document.body.classList.remove("inv-print-voucher");
+      document.body.classList.add("inv-print-invoice");
+      pageStyle.textContent = "@page { size: 8.5in 5.5in; margin: 0.2in; }";
+    }
+
     window.setTimeout(() => window.print(), 80);
   }
 
@@ -148,25 +163,306 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
 
   const isFullyPaid = isCredit && balancePending <= 0.01;
 
+  const renderVoucherContent = () => (
+    <div className="sale-voucher-body">
+      {/* Encabezado del Baucher */}
+      <div className="sale-voucher-header">
+        <div className="sale-voucher-logo-row">
+          <img src={LOGO_SRC} alt="Evolution" className="sale-voucher-logo" width={34} height={34} />
+          <div className="sale-voucher-company">
+            <strong>EVOLUTION</strong>
+            <span>COLCHONES S.A.S</span>
+          </div>
+        </div>
+        <div className="sale-voucher-brand-sub">Documento interno · {kind}</div>
+        <div className="sale-voucher-warehouse">
+          SEDE: {doc.warehouseName?.toUpperCase() ?? "PRINCIPAL"}
+          {doc.warehouseCode ? ` (${doc.warehouseCode})` : ""}
+        </div>
+        <div className="sale-voucher-doc-type">
+          {internalExit
+            ? "COMPROBANTE DE TRASLADO"
+            : isAdjustment
+              ? "COMPROBANTE DE AJUSTE"
+              : isCredit
+                ? "COMPROBANTE DE SALIDA · CRÉDITO"
+                : "COMPROBANTE DE SALIDA / VENTA"}
+        </div>
+        <div className="sale-voucher-number">
+          Nº {doc.invoiceNumber ?? "—"}
+        </div>
+        <div className="sale-voucher-date">
+          {formatDate(doc.completedAt ?? doc.createdAt)}
+        </div>
+      </div>
+
+      <div className="sale-voucher-divider" />
+
+      {/* Datos del Cliente y Vendedor */}
+      <div className="sale-voucher-section">
+        {doc.customerName && (
+          <div className="sale-voucher-row">
+            <span className="sale-voucher-label">Cliente:</span>
+            <span className="sale-voucher-val sale-voucher-val--bold">{doc.customerName}</span>
+          </div>
+        )}
+        {doc.customerTaxId && (
+          <div className="sale-voucher-row">
+            <span className="sale-voucher-label">C.C. / NIT:</span>
+            <span className="sale-voucher-val">{doc.customerTaxId}</span>
+          </div>
+        )}
+        {doc.customerPhone && (
+          <div className="sale-voucher-row">
+            <span className="sale-voucher-label">Teléfono:</span>
+            <span className="sale-voucher-val">{doc.customerPhone}</span>
+          </div>
+        )}
+        {doc.customerAddress && (
+          <div className="sale-voucher-row">
+            <span className="sale-voucher-label">Dirección:</span>
+            <span className="sale-voucher-val">{doc.customerAddress}</span>
+          </div>
+        )}
+        {doc.metadata?.destinationWarehouseName && (
+          <div className="sale-voucher-row">
+            <span className="sale-voucher-label">Destino:</span>
+            <span className="sale-voucher-val">
+              {doc.metadata.destinationWarehouseName} ({doc.metadata.destinationWarehouseCode})
+            </span>
+          </div>
+        )}
+        {doc.relatedInvoiceNumber && (
+          <div className="sale-voucher-row">
+            <span className="sale-voucher-label">Fac. Ref:</span>
+            <span className="sale-voucher-val">{doc.relatedInvoiceNumber}</span>
+          </div>
+        )}
+        {doc.createdByName && (
+          <div className="sale-voucher-row">
+            <span className="sale-voucher-label">Atendido por:</span>
+            <span className="sale-voucher-val">{doc.createdByName}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="sale-voucher-divider" />
+
+      {/* Lista de Artículos */}
+      <div className="sale-voucher-items">
+        <div className="sale-voucher-items-head">
+          <span>DESCRIPCIÓN / CANT</span>
+          {showValues && <span>TOTAL</span>}
+        </div>
+        {doc.lines.map((line) => {
+          const unit = line.unitSalePrice ?? 0;
+          const sub = unit * line.quantity;
+          return (
+            <div key={line.id} className="sale-voucher-item">
+              <div className="sale-voucher-item-main">
+                <span className="sale-voucher-item-qty">{line.quantity}x</span>
+                <span className="sale-voucher-item-name">{line.productName}</span>
+              </div>
+              <div className="sale-voucher-item-sub">
+                <span className="sale-voucher-item-ref">Ref: {line.referenceCode}</span>
+                {showValues && (
+                  <span className="sale-voucher-item-prices">
+                    {line.quantity > 1 ? `(${formatMoney(unit)}) ` : ""}
+                    <strong>{formatMoney(sub)}</strong>
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="sale-voucher-divider" />
+
+      {/* Totales y Liquidación */}
+      <div className="sale-voucher-totals">
+        <div className="sale-voucher-row">
+          <span>Total Artículos:</span>
+          <strong>{doc.totalQuantity} uds</strong>
+        </div>
+
+        {showValues && discountAmount > 0 && (
+          <>
+            <div className="sale-voucher-row">
+              <span>Subtotal:</span>
+              <span>{formatMoney(subtotalAmount)}</span>
+            </div>
+            <div className="sale-voucher-row sale-voucher-row--discount">
+              <span>(-) Descuento {discountReason ? `(${discountReason})` : ""}:</span>
+              <span>- {formatMoney(discountAmount)}</span>
+            </div>
+          </>
+        )}
+
+        {showValues && (
+          <div className="sale-voucher-total-box">
+            <span className="sale-voucher-total-label">TOTAL {discountAmount > 0 ? "NETO" : "VENTA"}:</span>
+            <span className="sale-voucher-total-amount">{formatMoney(totalSaleAmount)}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Pagos / Crédito */}
+      {showValues && (
+        <>
+          <div className="sale-voucher-divider" />
+          <div className="sale-voucher-payments">
+            {isCredit ? (
+              <div className="sale-voucher-credit-block">
+                <div className="sale-voucher-credit-badge">MODALIDAD CRÉDITO</div>
+                <div className="sale-voucher-row">
+                  <span>Abono inicial recibido:</span>
+                  <strong style={{ color: "#059669" }}>{formatMoney(initialPaymentTotal)}</strong>
+                </div>
+                {paymentBreakdown.length > 0 && (
+                  <div className="sale-voucher-payment-breakdown">
+                    {paymentBreakdown.map((p, i) => (
+                      <div key={i} className="sale-voucher-breakdown-row">
+                        <span>· {paymentMethodLabel(p.method)}:</span>
+                        <span>{formatMoney(Number(p.amount))}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {doc.receivable && doc.receivable.paidAmount > initialPaymentTotal && (
+                  <div className="sale-voucher-row">
+                    <span>Abonos acumulados a hoy:</span>
+                    <span>{formatMoney(totalPaidToDate)}</span>
+                  </div>
+                )}
+                <div className="sale-voucher-balance-box">
+                  <span>SALDO PENDIENTE:</span>
+                  <strong>{formatMoney(balancePending)}</strong>
+                </div>
+                {doc.receivable?.dueDate && (
+                  <div className="sale-voucher-row" style={{ marginTop: "3px" }}>
+                    <span>Fecha límite de pago:</span>
+                    <strong>{doc.receivable.dueDate}</strong>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="sale-voucher-payment-block">
+                <div className="sale-voucher-section-title">Medios de Pago:</div>
+                {paymentBreakdown.length > 0 ? (
+                  paymentBreakdown.map((p, i) => (
+                    <div key={i} className="sale-voucher-row">
+                      <span>{paymentMethodLabel(p.method)}:</span>
+                      <strong>{formatMoney(Number(p.amount))}</strong>
+                    </div>
+                  ))
+                ) : doc.metadata?.paymentMethod ? (
+                  <div className="sale-voucher-row">
+                    <span>{paymentMethodLabel(doc.metadata.paymentMethod)}:</span>
+                    <strong>{formatMoney(doc.totalAmount ?? 0)}</strong>
+                  </div>
+                ) : (
+                  <div className="sale-voucher-row">
+                    <span>Pago:</span>
+                    <strong>Contado</strong>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Observaciones */}
+      {doc.notes && (
+        <>
+          <div className="sale-voucher-divider" />
+          <div className="sale-voucher-notes">
+            <strong>Observaciones:</strong> {doc.notes}
+          </div>
+        </>
+      )}
+
+      {/* Firma si es a crédito */}
+      {isCredit && (
+        <div className="sale-voucher-signature">
+          <div className="sale-voucher-signature-line" />
+          <div className="sale-voucher-signature-name">FIRMA DEL CLIENTE / RECIBÍ CONFORME</div>
+          <div className="sale-voucher-signature-sub">
+            {doc.customerName || "Cliente"} {doc.customerTaxId ? `· C.C. ${doc.customerTaxId}` : ""}
+          </div>
+          <p className="sale-voucher-legal-text">
+            Acepto las condiciones comerciales y el saldo pendiente estipulado en este comprobante.
+          </p>
+        </div>
+      )}
+
+      <div className="sale-voucher-divider" />
+
+      {/* Pie del baucher */}
+      <div className="sale-voucher-footer">
+        <p className="sale-voucher-thanks">¡Gracias por su compra!</p>
+        <p className="sale-voucher-footer-sub">
+          Evolution Colchones S.A.S · Calidad y Confort
+        </p>
+        <p className="sale-voucher-footer-sub">
+          Conserve este comprobante para trámites de soporte o garantía.
+        </p>
+      </div>
+    </div>
+  );
+
   const modal = (
     <div className="inv-modal-backdrop inv-invoice-backdrop" role="presentation">
-      <div className="inv-modal inv-modal--invoice" role="dialog" aria-labelledby="invoice-title">
+      <div
+        className={`inv-modal inv-modal--invoice ${format === "voucher" ? "inv-modal--voucher" : ""}`}
+        role="dialog"
+        aria-labelledby="invoice-title"
+      >
         <div className="inv-invoice-actions no-print">
           <button type="button" className="inv-btn inv-btn--ghost" onClick={onClose}>
             <X size={18} strokeWidth={2} aria-hidden />
             Cerrar
           </button>
+
+          {/* Selector de formato: Media Carta vs Baucher */}
+          <div className="inv-print-format-toggle" role="group" aria-label="Formato de impresión">
+            <button
+              type="button"
+              className={`inv-format-btn ${format === "half_letter" ? "is-active" : ""}`}
+              onClick={() => setFormat("half_letter")}
+              title="Formato media carta horizontal"
+            >
+              <FileText size={16} />
+              <span>Media Carta</span>
+            </button>
+            <button
+              type="button"
+              className={`inv-format-btn ${format === "voucher" ? "is-active" : ""}`}
+              onClick={() => setFormat("voucher")}
+              title="Formato tirilla térmica de 80 mm"
+            >
+              <Receipt size={16} />
+              <span>Baucher (80 mm)</span>
+            </button>
+          </div>
+
           <button type="button" className="inv-btn inv-btn--primary" onClick={print}>
             <Printer size={18} strokeWidth={2} aria-hidden />
-            Imprimir
+            {format === "voucher" ? "Imprimir Baucher" : "Imprimir Media Carta"}
           </button>
         </div>
 
-        <article
-          className={`inv-invoice inv-invoice--${accent} inv-invoice--density-${density}`}
-          id="inv-invoice-print"
-          data-lines={lineCount}
-        >
+        {format === "voucher" ? (
+          <div className="inv-voucher-preview-container">
+            {renderVoucherContent()}
+          </div>
+        ) : (
+          <article
+            className={`inv-invoice inv-invoice--${accent} inv-invoice--density-${density}`}
+            id="inv-invoice-print"
+            data-lines={lineCount}
+          >
           {doc.status === "cancelled" ? (
             <div className="inv-invoice__cancelled">COMPROBANTE ANULADO / INACTIVO</div>
           ) : null}
@@ -530,9 +826,20 @@ export function DocumentInvoicePrint({ document: doc, onClose }: Props) {
             <p>Evolution ERP · Documento interno · Media hoja carta</p>
           </footer>
         </article>
+        )}
       </div>
     </div>
   );
 
-  return portalReady ? createPortal(modal, document.body) : null;
+  return portalReady ? (
+    <>
+      {createPortal(modal, document.body)}
+      {createPortal(
+        <div id="inv-sale-voucher-print" aria-hidden="true">
+          {renderVoucherContent()}
+        </div>,
+        document.body
+      )}
+    </>
+  ) : null;
 }

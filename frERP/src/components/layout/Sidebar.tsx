@@ -24,6 +24,7 @@ import {
   ArrowLeftRight,
   ShieldCheck,
   FileSpreadsheet,
+  FileCheck2,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -387,6 +388,13 @@ export function Sidebar({ open, pinned = false, onTogglePin, onNavigate }: Sideb
               label: "Proveedores y Pagos",
               hint: "Cuentas por pagar a proveedores y saldos a favor",
             }] : []),
+            {
+              to: "/app/finanzas/ingresos",
+              end: true,
+              icon: FileCheck2,
+              label: "Otros Ingresos / Caja",
+              hint: "Devoluciones, venta de rezagos/cuero y recibos de caja",
+            },
             {
               to: "/app/finanzas/egresos",
               end: true,
