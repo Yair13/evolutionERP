@@ -174,7 +174,7 @@ export function ProductBulkUploadPage() {
   const loadExistingCodes = useCallback(async () => {
     if (!token) return;
     try {
-      const data = await fetchProductCatalog(token, { limit: 1000 });
+      const data = await fetchProductCatalog(token, { limit: 5000, includeInactive: true });
       const codes = new Set<string>();
       for (const item of data.items) {
         if (item.referenceCode) codes.add(item.referenceCode.trim().toUpperCase());

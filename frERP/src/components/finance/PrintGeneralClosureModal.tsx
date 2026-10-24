@@ -204,6 +204,26 @@ export function PrintGeneralClosureModal({ closure, onClose }: Props) {
               </div>
             </div>
 
+            {(closure.totalOtherIncomes ?? 0) > 0 && (
+              <div
+                style={{
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 8,
+                  padding: "0.75rem",
+                  background: "#f8fafc",
+                }}
+              >
+                <div style={{ fontSize: "0.75rem", color: "#64748b" }}>Otros Ingresos (Caja / Bancos)</div>
+                <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "#059669", marginTop: 2 }}>
+                  + {formatMoney(closure.totalOtherIncomes ?? 0)}
+                </div>
+                <div style={{ fontSize: "0.75rem", color: "#475569", marginTop: 4 }}>
+                  Efectivo: <strong>{formatMoney(closure.totalCashOtherIncomes ?? 0)}</strong><br />
+                  Digital: <strong>{formatMoney((closure.totalOtherIncomes ?? 0) - (closure.totalCashOtherIncomes ?? 0))}</strong>
+                </div>
+              </div>
+            )}
+
             <div
               style={{
                 border: "1px solid #e2e8f0",

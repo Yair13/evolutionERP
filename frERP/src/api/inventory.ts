@@ -47,13 +47,14 @@ async function inventoryFetch<T>(
 
 export async function fetchProductCatalog(
   token: string,
-  params?: { q?: string; categoryId?: string; offset?: number; limit?: number }
+  params?: { q?: string; categoryId?: string; offset?: number; limit?: number; includeInactive?: boolean }
 ) {
   const q = new URLSearchParams();
   if (params?.q) q.set("q", params.q);
   if (params?.categoryId) q.set("categoryId", params.categoryId);
   if (params?.offset != null) q.set("offset", String(params.offset));
   if (params?.limit != null) q.set("limit", String(params.limit));
+  if (params?.includeInactive) q.set("includeInactive", "true");
   const qs = q.toString();
   return apiGet<{ items: CatalogItem[]; total: number }>(
     `/inventory/product-catalog${qs ? `?${qs}` : ""}`,

@@ -2153,6 +2153,24 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                   </div>
                 </div>
 
+                {/* Otros Ingresos (Caja y Bancos) */}
+                {(generalWorksheet.totalOtherIncomes ?? 0) > 0 && (
+                  <div className="fin-kpi-card fin-kpi-card--emerald">
+                    <div className="fin-kpi-top">
+                      <span className="fin-kpi-label">Otros Ingresos (Caja)</span>
+                      <div className="fin-kpi-icon fin-kpi-icon--emerald">
+                        <DollarSign size={18} />
+                      </div>
+                    </div>
+                    <div className="fin-kpi-val fin-kpi-val--emerald">
+                      + {formatMoney(generalWorksheet.totalOtherIncomes ?? 0)}
+                    </div>
+                    <div className="fin-kpi-sub">
+                      Efectivo: {formatMoney(generalWorksheet.totalCashOtherIncomes ?? 0)} | Digital: {formatMoney((generalWorksheet.totalOtherIncomes ?? 0) - (generalWorksheet.totalCashOtherIncomes ?? 0))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Salidas y Nómina */}
                 <div className="fin-kpi-card fin-kpi-card--rose">
                   <div className="fin-kpi-top">
@@ -2306,7 +2324,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                             {formatMoney(generalWorksheet.totalNetCash)}
                           </div>
                           <div className="fin-kpi-sub">
-                            (Ventas + Abonos − Egresos − Nómina)
+                            (Ventas + Abonos + Otros Ingresos − Egresos − Nómina)
                           </div>
                         </div>
 

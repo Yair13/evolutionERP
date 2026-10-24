@@ -179,6 +179,7 @@ export function createInventoryRouter(): Router {
     const status = typeof req.query.status === "string" ? req.query.status : undefined;
     const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
     const offset = req.query.offset != null ? Number(req.query.offset) : undefined;
+    const includeInactive = req.query.includeInactive === "true";
 
     try {
       const result = await listProductCatalog(pool, req.auth!, {
@@ -187,6 +188,7 @@ export function createInventoryRouter(): Router {
         status,
         limit,
         offset,
+        includeInactive,
       });
       res.json(result);
     } catch (err) {
@@ -1098,6 +1100,8 @@ export function createInventoryRouter(): Router {
                      margin_percent = $5,
                      category_id = COALESCE($6::uuid, category_id),
                      barcode = $7,
+                     is_active = true,
+                     status = 'active',
                      updated_at = now()
                  WHERE id = $8::uuid`,
                 [

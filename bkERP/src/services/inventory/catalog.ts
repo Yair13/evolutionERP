@@ -96,6 +96,7 @@ export type ProductCatalogQuery = {
   status?: string;
   limit?: number;
   offset?: number;
+  includeInactive?: boolean;
 };
 
 export async function listCatalog(
@@ -208,10 +209,10 @@ export async function listProductCatalog(
   query: ProductCatalogQuery
 ): Promise<{ items: CatalogItem[]; total: number }> {
   const includeCost = canSeeProductionCost(auth);
-  const limit = Math.min(Math.max(query.limit ?? 48, 1), 100);
+  const limit = Math.min(Math.max(query.limit ?? 48, 1), 5000);
   const offset = Math.max(query.offset ?? 0, 0);
 
-  const conditions: string[] = ["p.is_active = true"];
+  const conditions: string[] = query.includeInactive ? [] : ["p.is_active = true"];
   const params: unknown[] = [];
   let idx = 1;
 

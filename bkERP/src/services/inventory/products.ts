@@ -261,32 +261,63 @@ export async function createProduct(
   try {
     await client.query("BEGIN");
 
-    const { rows } = await client.query<{ id: string }>(
-      `
-      INSERT INTO products (
-        reference_code, sku, internal_code, name, description, category_id,
-        brand, unit, status, base_sale_price, production_cost, margin_percent, barcode
-      )
-      VALUES ($1, $2, $3, $4, $5, $6::uuid, $7, $8, $9, $10, $11, $12, $13)
-      RETURNING id::text
-      `,
-      [
-        cleanRef,
-        input.sku?.trim() || null,
-        input.internalCode?.trim().toUpperCase() || cleanRef,
-        input.name.trim(),
-        input.description?.trim() || null,
-        input.categoryId || null,
-        input.brand?.trim() || null,
-        input.unit?.trim() || "und",
-        input.status ?? "active",
-        sale,
-        cost,
-        margin,
-        barcode,
-      ]
+    const { rows: inactive } = await client.query<{ id: string }>(
+      `SELECT id::text FROM products WHERE (upper(reference_code) = $1 OR upper(internal_code) = $1) AND is_active = false LIMIT 1`,
+      [cleanRef]
     );
-    const productId = rows[0]!.id;
+    let productId: string;
+    if (inactive[0]) {
+      productId = inactive[0].id;
+      await client.query(
+        `UPDATE products
+         SET reference_code = $1, sku = $2, internal_code = $3, name = $4,
+             description = $5, category_id = $6::uuid, brand = $7, unit = $8,
+             status = $9, base_sale_price = $10, production_cost = $11,
+             margin_percent = $12, barcode = $13, is_active = true, updated_at = now()
+         WHERE id = $14::uuid`,
+        [
+          cleanRef,
+          input.sku?.trim() || null,
+          input.internalCode?.trim().toUpperCase() || cleanRef,
+          input.name.trim(),
+          input.description?.trim() || null,
+          input.categoryId || null,
+          input.brand?.trim() || null,
+          input.unit?.trim() || "und",
+          input.status ?? "active",
+          sale,
+          cost,
+          margin,
+          barcode,
+          productId,
+        ]
+      );
+    } else {
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO products (
+          reference_code, sku, internal_code, name, description, category_id,
+          brand, unit, status, base_sale_price, production_cost, margin_percent, barcode, is_active
+        )
+        VALUES ($1, $2, $3, $4, $5, $6::uuid, $7, $8, $9, $10, $11, $12, $13, true)
+        RETURNING id::text`,
+        [
+          cleanRef,
+          input.sku?.trim() || null,
+          input.internalCode?.trim().toUpperCase() || cleanRef,
+          input.name.trim(),
+          input.description?.trim() || null,
+          input.categoryId || null,
+          input.brand?.trim() || null,
+          input.unit?.trim() || "und",
+          input.status ?? "active",
+          sale,
+          cost,
+          margin,
+          barcode,
+        ]
+      );
+      productId = rows[0]!.id;
+    }
 
     if (warehouseId) {
       const minStock = Number(input.minStockLevel ?? 0);
