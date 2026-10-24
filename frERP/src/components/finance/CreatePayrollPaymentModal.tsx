@@ -373,7 +373,7 @@ export function CreatePayrollPaymentModal({
                 <input
                   type="number"
                   min="0"
-                  step="1000"
+                  step="any"
                   required
                   value={baseSalary}
                   onChange={(e) => setBaseSalary(e.target.value)}
@@ -384,7 +384,7 @@ export function CreatePayrollPaymentModal({
                 <input
                   type="number"
                   min="0"
-                  step="1000"
+                  step="any"
                   value={bonuses}
                   onChange={(e) => setBonuses(e.target.value)}
                   placeholder="0"
@@ -395,7 +395,7 @@ export function CreatePayrollPaymentModal({
                 <input
                   type="number"
                   min="0"
-                  step="1000"
+                  step="any"
                   value={deductions}
                   onChange={(e) => setDeductions(e.target.value)}
                   placeholder="0"

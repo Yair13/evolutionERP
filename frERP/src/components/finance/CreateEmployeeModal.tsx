@@ -230,7 +230,7 @@ export function CreateEmployeeModal({
               <input
                 type="number"
                 min="0"
-                step="1000"
+                step="any"
                 value={baseSalary}
                 onChange={(e) => setBaseSalary(e.target.value)}
                 placeholder="Ej. 1300000"
