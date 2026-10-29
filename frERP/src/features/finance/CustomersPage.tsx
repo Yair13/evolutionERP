@@ -269,7 +269,7 @@ export function CustomersPage() {
     setOpenEditCustomer(true);
   }
 
-  // Filtrado interno de facturas y abonos por sede seleccionada en la vista de detalle
+  // Filtrado interno de facturas, abonos y movimientos por sede seleccionada en la vista de detalle
   const filteredInvoices = customerProfile?.invoices?.filter((inv) => {
     if (!detailSedeFilter) return true;
     return inv.warehouseId === detailSedeFilter;
@@ -279,6 +279,31 @@ export function CustomersPage() {
     if (!detailSedeFilter) return true;
     return p.warehouseId === detailSedeFilter;
   }) ?? [];
+
+  const filteredMovements = customerProfile?.creditBalanceMovements?.filter((m) => {
+    if (!detailSedeFilter) return true;
+    return m.warehouseId === detailSedeFilter;
+  }) ?? [];
+
+  const activeSedeBreakdown = customerProfile?.warehouseBreakdown?.find(
+    (w) => w.warehouseId === detailSedeFilter
+  ) || null;
+
+  const currentDisplayCreditBalance = activeSedeBreakdown
+    ? activeSedeBreakdown.creditBalance
+    : customerProfile?.customer.creditBalance ?? 0;
+
+  const currentDisplayDebt = activeSedeBreakdown
+    ? activeSedeBreakdown.currentDebt
+    : customerProfile?.stats.totalCurrentDebt ?? 0;
+
+  const currentDisplayBilled = activeSedeBreakdown
+    ? activeSedeBreakdown.totalBilled
+    : customerProfile?.stats.totalBilledAmount ?? 0;
+
+  const currentDisplayAbonos = activeSedeBreakdown
+    ? activeSedeBreakdown.totalAbonos
+    : customerProfile?.stats.totalAbonosAmount ?? 0;
 
   return (
     <div className="fin-page">
@@ -746,7 +771,7 @@ export function CustomersPage() {
                     <h2 style={{ margin: 0, fontSize: "1.4rem", color: "#0f172a" }}>
                       {customerProfile.customer.displayName}
                     </h2>
-                    {customerProfile.customer.creditBalance > 0 && (
+                    {currentDisplayCreditBalance > 0 && (
                       <span
                         style={{
                           fontSize: "0.85rem",
@@ -758,10 +783,10 @@ export function CustomersPage() {
                           border: "1px solid #bbf7d0",
                         }}
                       >
-                        💰 Saldo a Favor: {formatMoney(customerProfile.customer.creditBalance)}
+                        💰 Saldo a Favor: {formatMoney(currentDisplayCreditBalance)}
                       </span>
                     )}
-                    {customerProfile.stats.totalCurrentDebt > 0 && (
+                    {currentDisplayDebt > 0 && (
                       <span
                         style={{
                           fontSize: "0.85rem",
@@ -773,7 +798,7 @@ export function CustomersPage() {
                           border: "1px solid #fecaca",
                         }}
                       >
-                        ⚠️ Deuda Actual: {formatMoney(customerProfile.stats.totalCurrentDebt)}
+                        ⚠️ Deuda: {formatMoney(currentDisplayDebt)}
                       </span>
                     )}
                   </div>
@@ -797,6 +822,59 @@ export function CustomersPage() {
                 </div>
               </div>
 
+              {/* Banner de Sede Activa */}
+              {detailSedeFilter ? (
+                <div
+                  style={{
+                    padding: "10px 16px",
+                    borderRadius: 10,
+                    background: "rgba(99, 102, 241, 0.08)",
+                    border: "1px solid rgba(99, 102, 241, 0.2)",
+                    marginBottom: "1rem",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    fontSize: "0.88rem",
+                    color: "#3730a3",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <Building2 size={16} />
+                    <span>
+                      Mostrando datos y saldos exclusivos de:{" "}
+                      <strong>{warehouses.find((w) => w.id === detailSedeFilter)?.name ?? "Sede seleccionada"}</strong>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="fin-btn fin-btn--ghost fin-btn--sm"
+                    onClick={() => setDetailSedeFilter("")}
+                  >
+                    Ver consolidado de todas las sedes
+                  </button>
+                </div>
+              ) : !isAllWarehouses ? (
+                <div
+                  style={{
+                    padding: "10px 16px",
+                    borderRadius: 10,
+                    background: "#f0fdf4",
+                    border: "1px solid #bbf7d0",
+                    marginBottom: "1rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "0.88rem",
+                    color: "#166534",
+                  }}
+                >
+                  <Building2 size={16} />
+                  <span>
+                    Sede actual: <strong>{warehouses.find((w) => w.id === warehouseId)?.name ?? "Esta sede"}</strong>. Los saldos, facturas y abonos corresponden únicamente a esta sede.
+                  </span>
+                </div>
+              ) : null}
+
               {/* Tarjetas KPI del Cliente */}
               <div className="fin-kpi-grid fin-kpi-grid--4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))" }}>
                 <div
@@ -804,16 +882,18 @@ export function CustomersPage() {
                   style={{ background: "linear-gradient(145deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.02))" }}
                 >
                   <div className="fin-kpi-top">
-                    <span className="fin-kpi-label" style={{ color: "#059669" }}>Saldo a Favor Disponible</span>
+                    <span className="fin-kpi-label" style={{ color: "#059669" }}>
+                      {detailSedeFilter || !isAllWarehouses ? "Saldo a Favor (Esta Sede)" : "Saldo a Favor Global"}
+                    </span>
                     <div className="fin-kpi-icon fin-kpi-icon--emerald">
                       <Wallet size={18} />
                     </div>
                   </div>
                   <div className="fin-kpi-val fin-kpi-val--emerald">
-                    {formatMoney(customerProfile.customer.creditBalance)}
+                    {formatMoney(currentDisplayCreditBalance)}
                   </div>
                   <div className="fin-kpi-sub">
-                    Se aplica en POS al emitir una nueva factura
+                    Disponible para aplicar en esta sede
                   </div>
                 </div>
 
@@ -822,46 +902,52 @@ export function CustomersPage() {
                   style={{ background: "linear-gradient(145deg, rgba(225, 29, 72, 0.1), rgba(225, 29, 72, 0.02))" }}
                 >
                   <div className="fin-kpi-top">
-                    <span className="fin-kpi-label" style={{ color: "#e11d48" }}>Deuda Pendiente de Pago</span>
+                    <span className="fin-kpi-label" style={{ color: "#e11d48" }}>
+                      {detailSedeFilter || !isAllWarehouses ? "Deuda (Esta Sede)" : "Deuda Total"}
+                    </span>
                     <div className="fin-kpi-icon fin-kpi-icon--rose">
                       <Clock size={18} />
                     </div>
                   </div>
                   <div className="fin-kpi-val fin-kpi-val--rose">
-                    {formatMoney(customerProfile.stats.totalCurrentDebt)}
+                    {formatMoney(currentDisplayDebt)}
                   </div>
                   <div className="fin-kpi-sub">
-                    {customerProfile.stats.activeCreditsCount} crédito(s) activo(s) con saldo
+                    Saldo pendiente en facturas a crédito
                   </div>
                 </div>
 
                 <div className="fin-kpi-card fin-kpi-card--indigo">
                   <div className="fin-kpi-top">
-                    <span className="fin-kpi-label">Total Facturado</span>
+                    <span className="fin-kpi-label">
+                      {detailSedeFilter || !isAllWarehouses ? "Facturado (Esta Sede)" : "Total Facturado"}
+                    </span>
                     <div className="fin-kpi-icon fin-kpi-icon--indigo">
                       <Receipt size={18} />
                     </div>
                   </div>
                   <div className="fin-kpi-val fin-kpi-val--indigo">
-                    {formatMoney(customerProfile.stats.totalBilledAmount ?? 0)}
+                    {formatMoney(currentDisplayBilled)}
                   </div>
                   <div className="fin-kpi-sub">
-                    {customerProfile.stats.totalInvoicesCount ?? customerProfile.invoices?.length ?? 0} facturas generadas
+                    {filteredInvoices.length} facturas generadas
                   </div>
                 </div>
 
                 <div className="fin-kpi-card fin-kpi-card--teal">
                   <div className="fin-kpi-top">
-                    <span className="fin-kpi-label">Total Recaudado</span>
+                    <span className="fin-kpi-label">
+                      {detailSedeFilter || !isAllWarehouses ? "Abonos (Esta Sede)" : "Total Recaudado"}
+                    </span>
                     <div className="fin-kpi-icon fin-kpi-icon--teal">
                       <ArrowDownLeft size={18} />
                     </div>
                   </div>
                   <div className="fin-kpi-val fin-kpi-val--teal">
-                    {formatMoney(customerProfile.stats.totalAbonosAmount ?? 0)}
+                    {formatMoney(currentDisplayAbonos)}
                   </div>
                   <div className="fin-kpi-sub">
-                    {customerProfile.stats.totalAbonosCount ?? customerProfile.recentPayments.length} abonos recibidos
+                    {filteredPayments.length} abonos registrados
                   </div>
                 </div>
               </div>
@@ -901,8 +987,8 @@ export function CustomersPage() {
                           <th style={{ textAlign: "center" }}>Créditos Activos</th>
                           <th style={{ textAlign: "right" }}>Deuda en Sede</th>
                           <th style={{ textAlign: "right" }}>Abonos en Sede</th>
-                          <th style={{ textAlign: "right" }}>Excedentes Generados</th>
-                          <th style={{ textAlign: "center" }}>Filtro</th>
+                          <th style={{ textAlign: "right" }}>Saldo a Favor Sede</th>
+                          <th style={{ textAlign: "center" }}>Acción</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -936,12 +1022,12 @@ export function CustomersPage() {
                               {formatMoney(w.totalAbonos)} ({w.paymentsCount} abonos)
                             </td>
                             <td className="fin-table-num">
-                              {w.excessGenerated > 0 ? (
+                              {w.creditBalance > 0 ? (
                                 <strong style={{ color: "#059669" }}>
-                                  +{formatMoney(w.excessGenerated)}
+                                  💰 {formatMoney(w.creditBalance)}
                                 </strong>
                               ) : (
-                                <span style={{ color: "#94a3b8" }}>—</span>
+                                <span style={{ color: "#94a3b8" }}>$ 0</span>
                               )}
                             </td>
                             <td style={{ textAlign: "center" }}>
@@ -991,7 +1077,7 @@ export function CustomersPage() {
                   onClick={() => setDetailTab("favour_movements")}
                 >
                   <Wallet size={16} />
-                  <span>Movimientos de Saldo a Favor ({customerProfile.creditBalanceMovements?.length ?? 0})</span>
+                  <span>Movimientos de Saldo a Favor ({filteredMovements.length})</span>
                 </button>
               </div>
 
@@ -1348,7 +1434,7 @@ export function CustomersPage() {
                     </div>
                   </div>
 
-                  {!customerProfile.creditBalanceMovements || customerProfile.creditBalanceMovements.length === 0 ? (
+                  {filteredMovements.length === 0 ? (
                     <div className="fin-empty" style={{ padding: "2.5rem" }}>
                       <p className="fin-empty__desc">No hay movimientos de saldo a favor registrados para este cliente.</p>
                     </div>
@@ -1366,7 +1452,7 @@ export function CustomersPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {customerProfile.creditBalanceMovements.map((m) => (
+                          {filteredMovements.map((m) => (
                             <tr key={m.id}>
                               <td style={{ color: "#64748b" }}>
                                 {formatDateTime(m.createdAt)}

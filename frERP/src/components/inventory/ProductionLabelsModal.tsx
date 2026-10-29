@@ -2,7 +2,7 @@ import JsBarcode from "jsbarcode";
 import { Compass, Printer, Tag, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { markLabelsPrinted } from "../../api/inventory.js";
+import { markBackupLabelsPrinted, markLabelsPrinted } from "../../api/inventory.js";
 import type { InventoryDocumentDetail } from "../../features/inventory/inventory.types.js";
 import { formatBogotaDate } from "../../lib/dateUtils.js";
 
@@ -21,6 +21,7 @@ type Props = {
   warehouseId?: string | null;
   onClose: () => void;
   onPrinted: (updated: InventoryDocumentDetail) => void;
+  mode?: "standard" | "backup";
 };
 
 function BarcodeSvg({
@@ -81,7 +82,14 @@ function BarcodeSvg({
   );
 }
 
-export function ProductionLabelsModal({ document: doc, token, warehouseId, onClose, onPrinted }: Props) {
+export function ProductionLabelsModal({
+  document: doc,
+  token,
+  warehouseId,
+  onClose,
+  onPrinted,
+  mode = "standard",
+}: Props) {
   const [portalReady, setPortalReady] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +103,7 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
     };
   }, []);
 
+  const isBackup = mode === "backup";
   const isPurchase = Boolean(
     doc.entryType === "purchase" ||
     doc.metadata?.entryType === "purchase" ||
@@ -102,27 +111,42 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
     (doc.invoiceNumber && doc.invoiceNumber.startsWith("COM-"))
   );
   const orderCode = doc.purchaseOrderCode || doc.productionOrderCode || doc.invoiceNumber || "—";
-  const docTypeShort = isPurchase ? "COMPRA" : "OP";
-  const modalTitle = isPurchase ? "Etiquetas de Compra" : "Etiquetas de OP";
+  const docTypeShort = isBackup ? "RESPALDO OP" : isPurchase ? "COMPRA" : "OP";
+  const modalTitle = isBackup
+    ? "Etiquetas de Respaldo"
+    : isPurchase
+    ? "Etiquetas de Compra"
+    : "Etiquetas de OP";
   const dateLabel = doc.completedAt
     ? doc.completedAt.slice(0, 10)
     : formatBogotaDate(new Date().toISOString());
 
-  const labelItems = useMemo<LabelItem[]>(
-    () =>
-      doc.lines
+  const labelItems = useMemo<LabelItem[]>(() => {
+    if (isBackup) {
+      const backupItems = doc.backupLabels?.items ?? [];
+      return backupItems
         .filter((l) => Boolean(l.barcode))
         .map((l) => ({
           barcode: l.barcode!,
           name: l.productName,
           referenceCode: l.referenceCode,
           quantity: Math.max(1, Math.floor(Math.abs(l.quantity))),
-        })),
-    [doc.lines]
-  );
+        }));
+    }
+    return doc.lines
+      .filter((l) => Boolean(l.barcode))
+      .map((l) => ({
+        barcode: l.barcode!,
+        name: l.productName,
+        referenceCode: l.referenceCode,
+        quantity: Math.max(1, Math.floor(Math.abs(l.quantity))),
+      }));
+  }, [doc.lines, doc.backupLabels, isBackup]);
 
   const totalLabels = labelItems.reduce((s, i) => s + i.quantity, 0);
-  const withoutBarcode = doc.lines.filter((l) => !l.barcode).length;
+  const withoutBarcode = isBackup
+    ? (doc.backupLabels?.items ?? []).filter((l) => !l.barcode).length
+    : doc.lines.filter((l) => !l.barcode).length;
 
   async function handlePrint() {
     if (printing || labelItems.length === 0) return;
@@ -150,13 +174,19 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
     const finish = async () => {
       clear();
       try {
-        const { item } = await markLabelsPrinted(token, doc.id, warehouseId);
+        const { item } = isBackup
+          ? await markBackupLabelsPrinted(token, doc.id, warehouseId)
+          : await markLabelsPrinted(token, doc.id, warehouseId);
         onPrinted(item);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Error";
         setError(
           msg === "not_a_production_order"
             ? "Este documento no admite impresión de etiquetas."
+            : msg === "backup_labels_already_printed"
+            ? "Las etiquetas de respaldo ya fueron marcadas como impresas."
+            : msg === "no_pending_backup_labels"
+            ? "No hay etiquetas de respaldo pendientes para esta orden."
             : msg
         );
       } finally {
@@ -302,7 +332,12 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
               <Tag size={20} strokeWidth={2} aria-hidden />
               {modalTitle}
             </h2>
-            <p style={{ margin: "6px 0 0", color: "var(--muted)", fontSize: 13 }}>
+            {isBackup ? (
+              <p style={{ margin: "4px 0 0", color: "#0d9488", fontSize: 13, fontWeight: 600 }}>
+                Etiquetas de respaldo autorizadas por administración
+              </p>
+            ) : null}
+            <p style={{ margin: "4px 0 0", color: "var(--muted)", fontSize: 13 }}>
               {orderCode} · {totalLabels} etiqueta{totalLabels === 1 ? "" : "s"}
             </p>
           </div>
@@ -501,7 +536,7 @@ export function ProductionLabelsModal({ document: doc, token, warehouseId, onClo
             onClick={() => void handlePrint()}
           >
             <Printer size={16} strokeWidth={2} aria-hidden />
-            {printing ? "Imprimiendo…" : `Imprimir ${totalLabels}`}
+            {printing ? "Imprimiendo…" : isBackup ? `Imprimir ${totalLabels} de respaldo` : `Imprimir ${totalLabels}`}
           </button>
         </div>
       </div>

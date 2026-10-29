@@ -382,13 +382,13 @@ export function Sidebar({ open, pinned = false, onTogglePin, onNavigate }: Sideb
               label: "Clientes y Saldos",
               hint: "Ficha comercial, facturación y saldo a favor de clientes",
             },
-            {
+            ...(isAllWarehouses ? [{
               to: "/app/finanzas/proveedores",
               end: true,
               icon: Truck,
               label: "Proveedores y Deudas",
-              hint: "Directorio de proveedores, cuentas por pagar y saldos a favor",
-            },
+              hint: "Directorio de proveedores, cuentas por pagar y saldos a favor (Sede Administrativa)",
+            }] : []),
             {
               to: "/app/finanzas/cartera",
               end: true,

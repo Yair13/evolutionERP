@@ -5,12 +5,15 @@ import {
   ArrowUpFromLine,
   Building2,
   Calendar,
+  CheckCircle2,
+  CopyPlus,
   Factory,
   FileText,
   History,
   Layers,
   Package,
   Pencil,
+  Printer,
   RotateCcw,
   Search,
   SlidersHorizontal,
@@ -32,6 +35,7 @@ import { DocumentEditModal } from "../../components/inventory/DocumentEditModal.
 import { DocumentUnlockModal } from "../../components/inventory/DocumentUnlockModal.js";
 import { DocumentInvoicePrint } from "../../components/inventory/DocumentInvoicePrint.js";
 import { ProductionLabelsModal } from "../../components/inventory/ProductionLabelsModal.js";
+import { BackupLabelsModal } from "../../components/inventory/BackupLabelsModal.js";
 import { InventoryPageHeader } from "../../components/inventory/InventoryPageHeader.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useInventoryScope } from "../../hooks/useInventoryScope.js";
@@ -97,6 +101,8 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
     useInventoryScope();
   const canManageEditing =
     user?.roles.includes("super_admin") || user?.roles.includes("secretaria") || false;
+  const isAdminSede =
+    canManageEditing || canViewAllWarehouses || user?.roles.includes("admin_local") || false;
 
   const [filterType, setFilterType] = useState<FilterDocType>(fixedType ?? "");
   const effectiveType: FilterDocType = fixedType ?? filterType;
@@ -118,6 +124,10 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [labelsDoc, setLabelsDoc] = useState<InventoryDocumentDetail | null>(null);
   const [labelsLoadingId, setLabelsLoadingId] = useState<string | null>(null);
+  const [backupModalDoc, setBackupModalDoc] = useState<InventoryDocumentDetail | null>(null);
+  const [backupModalLoadingId, setBackupModalLoadingId] = useState<string | null>(null);
+  const [backupPrintDoc, setBackupPrintDoc] = useState<InventoryDocumentDetail | null>(null);
+  const [backupPrintLoadingId, setBackupPrintLoadingId] = useState<string | null>(null);
 
   const showAdminSedeFilter = canViewAllWarehouses && isAllWarehouses;
 
@@ -359,6 +369,69 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
           : row
       )
     );
+  }
+
+  async function openBackupModal(doc: InventoryDocumentSummary) {
+    if (!token) return;
+    setBackupModalLoadingId(doc.id);
+    setError(null);
+    try {
+      const wh = doc.warehouseId ?? effectiveWh ?? undefined;
+      const { item } = await fetchDocument(token, doc.id, wh);
+      setBackupModalDoc(item);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cargar la orden para respaldo");
+    } finally {
+      setBackupModalLoadingId(null);
+    }
+  }
+
+  async function openBackupPrint(doc: InventoryDocumentSummary) {
+    if (!token) return;
+    setBackupPrintLoadingId(doc.id);
+    setError(null);
+    try {
+      const wh = doc.warehouseId ?? effectiveWh ?? undefined;
+      const { item } = await fetchDocument(token, doc.id, wh);
+      setBackupPrintDoc(item);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cargar la orden para imprimir respaldo");
+    } finally {
+      setBackupPrintLoadingId(null);
+    }
+  }
+
+  function onBackupCreated(updated: InventoryDocumentDetail) {
+    setItems((prev) =>
+      prev.map((row) =>
+        row.id === updated.id
+          ? {
+              ...row,
+              backupLabels: updated.backupLabels ?? null,
+              metadata: updated.metadata ?? row.metadata,
+            }
+          : row
+      )
+    );
+    setFlash(`Respaldo de ${updated.backupLabels?.totalQuantity ?? 0} etiquetas generado para la sede.`);
+    window.setTimeout(() => setFlash(null), 6000);
+  }
+
+  function onBackupPrinted(updated: InventoryDocumentDetail) {
+    setBackupPrintDoc(null);
+    setItems((prev) =>
+      prev.map((row) =>
+        row.id === updated.id
+          ? {
+              ...row,
+              backupLabels: updated.backupLabels ?? null,
+              metadata: updated.metadata ?? row.metadata,
+            }
+          : row
+      )
+    );
+    setFlash(`Etiquetas de respaldo (${updated.backupLabels?.totalQuantity ?? 0} uds) impresas correctamente.`);
+    window.setTimeout(() => setFlash(null), 6000);
   }
 
   async function confirmUnlock(observation: string) {
@@ -839,6 +912,9 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
             const isEntry = doc.docType === "entry";
             const isOp = isProductionOrderDoc(doc);
             const labelsPrinted = Boolean(doc.labelsPrintedAt);
+            const backup = doc.backupLabels || doc.metadata?.backupLabels;
+            const hasPendingBackup = backup?.status === "pending" && (backup.totalQuantity ?? 0) > 0;
+            const hasPrintedBackup = backup?.status === "printed" && (backup.totalQuantity ?? 0) > 0;
             const variant = isAdjustment ? "adjustment" : isEntry ? "entry" : "exit";
             const Icon = isAdjustment
               ? SlidersHorizontal
@@ -897,6 +973,22 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
                           {edited ? <span className="inv-history-card__edited">Editado</span> : null}
                           {isOp && labelsPrinted ? (
                             <span className="inv-history-card__edited">Etiquetas impresas</span>
+                          ) : null}
+                          {isOp && hasPendingBackup ? (
+                            <span
+                              className="inv-history-card__backup-badge inv-history-card__backup-badge--pending"
+                              title={`Respaldo solicitado por ${backup?.requestedByName ?? "administración"}`}
+                            >
+                              Respaldo pendiente ({backup?.totalQuantity} uds)
+                            </span>
+                          ) : null}
+                          {isOp && hasPrintedBackup ? (
+                            <span
+                              className="inv-history-card__backup-badge inv-history-card__backup-badge--printed"
+                              title={`Respaldo impreso el ${formatDate(backup?.printedAt!)}${backup?.printedByName ? ` por ${backup.printedByName}` : ""}`}
+                            >
+                              Respaldo generado ({backup?.totalQuantity} uds)
+                            </span>
                           ) : null}
                         </div>
                         {showAmount ? (
@@ -970,6 +1062,41 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
                         {labelsLoadingId === doc.id ? "Cargando…" : "Imprimir etiquetas"}
                       </button>
                     ) : null}
+                    {isOp && !cancelled && isAdminSede ? (
+                      <button
+                        type="button"
+                        className="inv-history-card__action"
+                        disabled={backupModalLoadingId === doc.id}
+                        title="Generar o ajustar etiquetas de respaldo para esta orden de producción"
+                        onClick={() => void openBackupModal(doc)}
+                      >
+                        <CopyPlus size={15} strokeWidth={2} aria-hidden />
+                        {backupModalLoadingId === doc.id ? "Cargando…" : "Etiquetas de respaldo"}
+                      </button>
+                    ) : null}
+                    {isOp && !cancelled && hasPendingBackup ? (
+                      <button
+                        type="button"
+                        className="inv-history-card__action inv-history-card__action--backup-print"
+                        disabled={backupPrintLoadingId === doc.id}
+                        title={`Imprimir ${backup?.totalQuantity} etiquetas de respaldo autorizadas`}
+                        onClick={() => void openBackupPrint(doc)}
+                      >
+                        <Printer size={15} strokeWidth={2} aria-hidden />
+                        {backupPrintLoadingId === doc.id
+                          ? "Cargando…"
+                          : `Imprimir respaldo (${backup?.totalQuantity})`}
+                      </button>
+                    ) : null}
+                    {isOp && !cancelled && hasPrintedBackup ? (
+                      <span
+                        className="inv-history-card__action inv-history-card__action--backup-completed"
+                        title={`Respaldo impreso el ${formatDate(backup?.printedAt!)}${backup?.printedByName ? ` por ${backup.printedByName}` : ""}`}
+                      >
+                        <CheckCircle2 size={15} strokeWidth={2} aria-hidden />
+                        Respaldo generado ({backup?.totalQuantity})
+                      </span>
+                    ) : null}
                     {!cancelled && canManageEditing && !isAdjustment ? (
                       <button
                         type="button"
@@ -1025,6 +1152,27 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
           warehouseId={labelsDoc.warehouseId ?? effectiveWh}
           onClose={() => setLabelsDoc(null)}
           onPrinted={onLabelsPrinted}
+        />
+      ) : null}
+
+      {backupModalDoc && token ? (
+        <BackupLabelsModal
+          document={backupModalDoc}
+          token={token}
+          warehouseId={backupModalDoc.warehouseId ?? effectiveWh}
+          onClose={() => setBackupModalDoc(null)}
+          onSuccess={onBackupCreated}
+        />
+      ) : null}
+
+      {backupPrintDoc && token ? (
+        <ProductionLabelsModal
+          document={backupPrintDoc}
+          token={token}
+          warehouseId={backupPrintDoc.warehouseId ?? effectiveWh}
+          mode="backup"
+          onClose={() => setBackupPrintDoc(null)}
+          onPrinted={onBackupPrinted}
         />
       ) : null}
 

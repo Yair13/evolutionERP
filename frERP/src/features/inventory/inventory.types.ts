@@ -171,6 +171,7 @@ export type InventoryDocumentDetail = {
   purchaseOrderCode?: string | null;
   entryType?: string | null;
   labelsPrintedAt?: string | null;
+  backupLabels?: BackupLabelsData | null;
   warehouseName?: string | null;
   warehouseCode?: string | null;
   subtotalAmount?: number;
@@ -238,4 +239,24 @@ export type InventoryCountSummary = {
 
 export type InventoryCountDetail = InventoryCountSummary & {
   lines: InventoryCountLine[];
+};
+
+export type BackupLabelItem = {
+  productId: string;
+  productName: string;
+  referenceCode: string;
+  barcode: string | null;
+  quantity: number;
+};
+
+export type BackupLabelsData = {
+  status: "pending" | "printed";
+  totalQuantity: number;
+  items: BackupLabelItem[];
+  requestedAt: string;
+  requestedBy: string;
+  requestedByName?: string | null;
+  printedAt?: string | null;
+  printedBy?: string | null;
+  printedByName?: string | null;
 };

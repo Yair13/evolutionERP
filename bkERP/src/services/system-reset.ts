@@ -300,6 +300,7 @@ export async function cleanOperationalTestData(pool: Pool): Promise<CleanTestDat
     // 2. Reiniciar saldos a favor de clientes y proveedores a 0
     await client.query(`UPDATE customers SET credit_balance = 0`);
     await client.query(`UPDATE suppliers SET credit_balance = 0`);
+    await client.query(`DELETE FROM customer_warehouse_credit_balances`);
 
     // 3. Reiniciar configuración de desbloqueo de edición de movimientos
     await client.query(`

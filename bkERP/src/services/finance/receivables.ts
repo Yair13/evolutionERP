@@ -110,6 +110,7 @@ export interface CustomerWarehouseSummary {
   paymentsCount: number;
   totalAbonos: number;
   excessGenerated: number;
+  creditBalance: number;
 }
 
 export interface CustomerCreditBalanceMovement {
@@ -174,6 +175,7 @@ export interface CustomerDirectoryItem {
     totalBilled: number;
     totalDebt: number;
     totalAbonos: number;
+    creditBalance?: number;
   }[];
 }
 
@@ -209,6 +211,125 @@ export async function nextReceiptNumber(
 /**
  * Registra el crédito y los abonos iniciales durante la confirmación de una salida tipo 'credit'.
  */
+/**
+ * Obtiene el saldo a favor de un cliente para una sede específica (o total global si no se especifica warehouseId).
+ */
+export async function getCustomerWarehouseCreditBalance(
+  client: pg.PoolClient | pg.Pool,
+  customerId: string,
+  warehouseId?: string | null
+): Promise<number> {
+  if (warehouseId) {
+    const { rows } = await client.query<{ credit_balance: string }>(
+      `SELECT credit_balance::text FROM customer_warehouse_credit_balances WHERE customer_id = $1::uuid AND warehouse_id = $2::uuid`,
+      [customerId, warehouseId]
+    );
+    return Number(rows[0]?.credit_balance ?? 0);
+  }
+  const { rows } = await client.query<{ total: string }>(
+    `SELECT COALESCE(SUM(credit_balance), 0)::text AS total FROM customer_warehouse_credit_balances WHERE customer_id = $1::uuid`,
+    [customerId]
+  );
+  return Number(rows[0]?.total ?? 0);
+}
+
+/**
+ * Agrega saldo a favor a un cliente en una sede específica y sincroniza customers.credit_balance.
+ */
+export async function creditCustomerWarehouseBalance(
+  client: pg.PoolClient,
+  customerId: string,
+  warehouseId: string,
+  amount: number
+): Promise<number> {
+  const rounded = Math.round(Number(amount) * 100) / 100;
+  if (rounded <= 0) return getCustomerWarehouseCreditBalance(client, customerId, warehouseId);
+
+  const { rows } = await client.query<{ credit_balance: string }>(
+    `
+    INSERT INTO customer_warehouse_credit_balances (customer_id, warehouse_id, credit_balance, updated_at)
+    VALUES ($1::uuid, $2::uuid, $3, now())
+    ON CONFLICT (customer_id, warehouse_id)
+    DO UPDATE SET credit_balance = ROUND((customer_warehouse_credit_balances.credit_balance + $3)::numeric, 2), updated_at = now()
+    RETURNING credit_balance::text
+    `,
+    [customerId, warehouseId, rounded]
+  );
+
+  await client.query(
+    `
+    UPDATE customers
+    SET credit_balance = (
+      SELECT COALESCE(SUM(credit_balance), 0)
+      FROM customer_warehouse_credit_balances
+      WHERE customer_id = $1::uuid
+    )
+    WHERE id = $1::uuid
+    `,
+    [customerId]
+  );
+
+  return Number(rows[0]?.credit_balance ?? 0);
+}
+
+/**
+ * Descuenta saldo a favor de un cliente en una sede específica y sincroniza customers.credit_balance.
+ */
+export async function debitCustomerWarehouseBalance(
+  client: pg.PoolClient,
+  customerId: string,
+  warehouseId: string,
+  amount: number
+): Promise<number> {
+  const rounded = Math.round(Number(amount) * 100) / 100;
+  if (rounded <= 0) return getCustomerWarehouseCreditBalance(client, customerId, warehouseId);
+
+  const { rows } = await client.query<{ credit_balance: string }>(
+    `
+    SELECT credit_balance::text
+    FROM customer_warehouse_credit_balances
+    WHERE customer_id = $1::uuid AND warehouse_id = $2::uuid
+    FOR UPDATE
+    `,
+    [customerId, warehouseId]
+  );
+
+  const available = Number(rows[0]?.credit_balance ?? 0);
+  if (available + 0.001 < rounded) {
+    throw Object.assign(new Error("insufficient_credit_balance"), {
+      code: "insufficient_credit_balance",
+      available,
+      requested: rounded,
+      warehouseId,
+    });
+  }
+
+  const { rows: updatedRows } = await client.query<{ credit_balance: string }>(
+    `
+    UPDATE customer_warehouse_credit_balances
+    SET credit_balance = GREATEST(0, ROUND((credit_balance - $3)::numeric, 2)), updated_at = now()
+    WHERE customer_id = $1::uuid AND warehouse_id = $2::uuid
+    RETURNING credit_balance::text
+    `,
+    [customerId, warehouseId, rounded]
+  );
+
+  await client.query(
+    `
+    UPDATE customers
+    SET credit_balance = (
+      SELECT COALESCE(SUM(credit_balance), 0)
+      FROM customer_warehouse_credit_balances
+      WHERE customer_id = $1::uuid
+    )
+    WHERE id = $1::uuid
+    `,
+    [customerId]
+  );
+
+  return Number(updatedRows[0]?.credit_balance ?? 0);
+}
+
 export async function recordCreditFromExitDocument(
   client: pg.PoolClient,
   params: {
@@ -238,23 +359,7 @@ export async function recordCreditFromExitDocument(
     for (const p of initialPayments) {
       const pAmount = Math.round((Number(p.amount) || 0) * 100) / 100;
       if (p.method === "saldo_a_favor") {
-        // Descontar del saldo a favor del cliente
-        const { rows: custRows } = await client.query<{ credit_balance: string }>(
-          `SELECT credit_balance::text FROM customers WHERE id = $1::uuid FOR UPDATE`,
-          [customerId]
-        );
-        const currentBalance = Number(custRows[0]?.credit_balance ?? 0);
-        if (currentBalance + 0.001 < pAmount) {
-          throw Object.assign(new Error("insufficient_credit_balance"), {
-            code: "insufficient_credit_balance",
-            available: currentBalance,
-            requested: pAmount,
-          });
-        }
-        await client.query(
-          `UPDATE customers SET credit_balance = GREATEST(0, ROUND((credit_balance - $1)::numeric, 2)) WHERE id = $2::uuid`,
-          [pAmount, customerId]
-        );
+        await debitCustomerWarehouseBalance(client, customerId, warehouseId, pAmount);
       }
       initialPaidTotal = Math.round((initialPaidTotal + pAmount) * 100) / 100;
     }
@@ -268,10 +373,7 @@ export async function recordCreditFromExitDocument(
   const paidAt = balanceAmount === 0 ? new Date() : null;
 
   if (excessTotal > 0) {
-    await client.query(
-      `UPDATE customers SET credit_balance = ROUND((credit_balance + $1)::numeric, 2) WHERE id = $2::uuid`,
-      [excessTotal, customerId]
-    );
+    await creditCustomerWarehouseBalance(client, customerId, warehouseId, excessTotal);
   }
 
   const { rows: arRows } = await client.query<{ id: string }>(
@@ -913,22 +1015,7 @@ export async function addReceivablePayment(
 
     // Si paga con saldo a favor
     if (cleanMethod === "saldo_a_favor") {
-      const { rows: cRows } = await client.query<{ credit_balance: string }>(
-        `SELECT credit_balance::text FROM customers WHERE id = $1::uuid FOR UPDATE`,
-        [customerId]
-      );
-      const custBalance = Number(cRows[0]?.credit_balance ?? 0);
-      if (custBalance + 0.001 < cleanAmount) {
-        throw Object.assign(new Error("insufficient_credit_balance"), {
-          code: "insufficient_credit_balance",
-          available: custBalance,
-          requested: cleanAmount,
-        });
-      }
-      await client.query(
-        `UPDATE customers SET credit_balance = GREATEST(0, ROUND((credit_balance - $1)::numeric, 2)) WHERE id = $2::uuid`,
-        [cleanAmount, customerId]
-      );
+      await debitCustomerWarehouseBalance(client, customerId, warehouseId, cleanAmount);
     }
 
     // Amortización vs Excedente
@@ -953,12 +1040,9 @@ export async function addReceivablePayment(
       [newBalance, newPaidAmount, newStatus, paidAt, receivableId]
     );
 
-    // Si hubo excedente, sumarlo al saldo a favor del cliente
+    // Si hubo excedente, sumarlo al saldo a favor del cliente en esta sede
     if (excessToFavour > 0 && cleanMethod !== "saldo_a_favor") {
-      await client.query(
-        `UPDATE customers SET credit_balance = ROUND((credit_balance + $1)::numeric, 2) WHERE id = $2::uuid`,
-        [excessToFavour, customerId]
-      );
+      await creditCustomerWarehouseBalance(client, customerId, warehouseId, excessToFavour);
     }
 
     // Generar recibo de caja
@@ -1011,12 +1095,8 @@ export async function addReceivablePayment(
       ]
     );
 
-    // Obtener nuevo saldo a favor del cliente
-    const { rows: finalCust } = await client.query<{ credit_balance: string }>(
-      `SELECT credit_balance::text FROM customers WHERE id = $1::uuid`,
-      [customerId]
-    );
-    const finalCreditBalance = Number(finalCust[0]?.credit_balance ?? 0);
+    // Obtener nuevo saldo a favor del cliente en esta sede
+    const finalCreditBalance = await getCustomerWarehouseCreditBalance(client, customerId, warehouseId);
 
     await client.query("COMMIT");
 
@@ -1067,6 +1147,21 @@ export async function getCustomerCreditProfile(
 
   if (custRows.length === 0) return null;
   const c = custRows[0]!;
+
+  // Consultar saldos a favor por cada sede para este cliente
+  const { rows: cwRows } = await pool.query<{ warehouse_id: string; credit_balance: string }>(
+    `SELECT warehouse_id::text, credit_balance::text FROM customer_warehouse_credit_balances WHERE customer_id = $1::uuid`,
+    [customerId]
+  );
+  const cwMap = new Map<string, number>();
+  for (const r of cwRows) cwMap.set(r.warehouse_id, Number(r.credit_balance));
+
+  let effectiveCreditBalance = 0;
+  if (opts?.warehouseId) {
+    effectiveCreditBalance = cwMap.get(opts.warehouseId) ?? 0;
+  } else {
+    effectiveCreditBalance = Array.from(cwMap.values()).reduce((sum, v) => sum + v, 0);
+  }
 
   const recParams: unknown[] = [customerId, c.display_name, c.tax_id, c.phone];
   let whRecFilter = "";
@@ -1387,7 +1482,11 @@ export async function getCustomerCreditProfile(
     }
   }
 
-  creditBalanceMovements.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  let filteredMovements = creditBalanceMovements;
+  if (opts?.warehouseId) {
+    filteredMovements = filteredMovements.filter((m) => m.warehouseId === opts.warehouseId);
+  }
+  filteredMovements.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   // Resumen por cada sede
   const whMap = new Map<string, CustomerWarehouseSummary>();
@@ -1406,6 +1505,7 @@ export async function getCustomerCreditProfile(
         paymentsCount: 0,
         totalAbonos: 0,
         excessGenerated: 0,
+        creditBalance: 0,
       };
       whMap.set(id, entry);
     }
@@ -1436,6 +1536,24 @@ export async function getCustomerCreditProfile(
     w.excessGenerated = Math.round((w.excessGenerated + p.excessToFavour) * 100) / 100;
   }
 
+  // Asegurar que sedes con saldo a favor aparezcan en el desglose
+  for (const [whId, cBal] of cwMap.entries()) {
+    if (cBal > 0 && !whMap.has(whId)) {
+      const { rows: whInfo } = await pool.query<{ code: string; name: string }>(
+        `SELECT code, name FROM warehouses WHERE id = $1::uuid`,
+        [whId]
+      );
+      if (whInfo[0]) {
+        const w = ensureWh(whId, whInfo[0].code, whInfo[0].name);
+        w.creditBalance = cBal;
+      }
+    }
+  }
+
+  for (const w of whMap.values()) {
+    w.creditBalance = cwMap.get(w.warehouseId) ?? 0;
+  }
+
   const warehouseBreakdown = Array.from(whMap.values()).sort((a, b) =>
     a.warehouseName.localeCompare(b.warehouseName)
   );
@@ -1464,7 +1582,7 @@ export async function getCustomerCreditProfile(
       taxId: c.tax_id,
       phone: c.phone,
       address: c.address,
-      creditBalance: Number(c.credit_balance),
+      creditBalance: effectiveCreditBalance,
     },
     stats: {
       totalInvoicesCount,
@@ -1481,7 +1599,7 @@ export async function getCustomerCreditProfile(
     invoices,
     receivables: recRows,
     recentPayments: payRows,
-    creditBalanceMovements,
+    creditBalanceMovements: filteredMovements,
   };
 }
 
@@ -1547,12 +1665,16 @@ export async function listCustomersWithSummary(
   }
 
   let filterCond = "";
+  const creditBalanceExpr = opts.warehouseId
+    ? `COALESCE((SELECT cw.credit_balance FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = c.id AND cw.warehouse_id = $1::uuid), 0)`
+    : `COALESCE(c.credit_balance, 0)`;
+
   if (opts.filter === "with_debt") {
     filterCond = `AND COALESCE(ar_agg.total_debt, 0) > 0`;
   } else if (opts.filter === "with_favour") {
-    filterCond = `AND COALESCE(c.credit_balance, 0) > 0`;
+    filterCond = `AND ${creditBalanceExpr} > 0`;
   } else if (opts.filter === "with_activity") {
-    filterCond = `AND (COALESCE(doc_agg.invoices_count, 0) > 0 OR COALESCE(ar_agg.credits_count, 0) > 0 OR COALESCE(pay_agg.payments_count, 0) > 0 OR COALESCE(c.credit_balance, 0) > 0)`;
+    filterCond = `AND (COALESCE(doc_agg.invoices_count, 0) > 0 OR COALESCE(ar_agg.credits_count, 0) > 0 OR COALESCE(pay_agg.payments_count, 0) > 0 OR ${creditBalanceExpr} > 0)`;
   }
 
   const baseCte = `
@@ -1648,7 +1770,8 @@ export async function listCustomersWithSummary(
             'invoicesCount', invoices_count,
             'totalBilled', total_billed,
             'totalDebt', total_debt,
-            'totalAbonos', total_abonos
+            'totalAbonos', total_abonos,
+            'creditBalance', COALESCE((SELECT cw.credit_balance FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = sub.customer_id AND cw.warehouse_id = sub.warehouse_id), 0)::float
           ) ORDER BY warehouse_name
         ) AS warehouses
       FROM wh_breakdown
@@ -1661,7 +1784,11 @@ export async function listCustomersWithSummary(
         c.tax_id AS "taxId",
         c.phone,
         c.address,
-        COALESCE(c.credit_balance, 0)::float AS "creditBalance",
+        ${
+          opts.warehouseId
+            ? `COALESCE((SELECT cw.credit_balance FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = c.id AND cw.warehouse_id = $1::uuid), 0)::float`
+            : `COALESCE(c.credit_balance, 0)::float`
+        } AS "creditBalance",
         (COALESCE(doc_agg.invoices_count, 0) + COALESCE(ar_agg.manual_count, 0))::int AS "invoicesCount",
         (COALESCE(doc_agg.total_billed, 0) + COALESCE(ar_agg.manual_billed, 0))::float AS "totalBilled",
         COALESCE(ar_agg.active_credits_count, 0)::int AS "activeCreditsCount",
@@ -1677,7 +1804,7 @@ export async function listCustomersWithSummary(
       LEFT JOIN wh_json ON wh_json.customer_id = c.id
       WHERE 1=1
         ${ (opts.warehouseId || (opts.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0))
-          ? `AND (doc_agg.customer_id IS NOT NULL OR ar_agg.customer_id IS NOT NULL OR pay_agg.customer_id IS NOT NULL OR COALESCE(c.credit_balance, 0) > 0 ${searchCond ? "OR TRUE" : ""})`
+          ? `AND (doc_agg.customer_id IS NOT NULL OR ar_agg.customer_id IS NOT NULL OR pay_agg.customer_id IS NOT NULL OR ${creditBalanceExpr} > 0 ${searchCond ? "OR TRUE" : ""})`
           : ""
         }
         ${searchCond}

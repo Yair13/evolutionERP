@@ -97,6 +97,7 @@ export interface CustomerWarehouseSummary {
   paymentsCount: number;
   totalAbonos: number;
   excessGenerated: number;
+  creditBalance: number;
 }
 
 export interface CustomerCreditBalanceMovement {
@@ -161,6 +162,7 @@ export interface CustomerDirectoryItem {
     totalBilled: number;
     totalDebt: number;
     totalAbonos: number;
+    creditBalance?: number;
   }[];
 }
 

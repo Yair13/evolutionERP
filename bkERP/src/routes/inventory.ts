@@ -24,6 +24,8 @@ import {
   type DocType,
   cancelDocument,
   markLabelsPrinted,
+  createBackupLabels,
+  markBackupLabelsPrinted,
   lookupOriginExitForEntry,
   type LinkedEntryType,
 } from "../services/inventory/documents.js";
@@ -542,6 +544,109 @@ export function createInventoryRouter(): Router {
         e?.code === "not_a_production_order" ||
         e?.code === "document_already_cancelled" ||
         e?.code === "labels_already_printed"
+      ) {
+        res.status(403).json({ error: e.code });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  /** Genera/autoriza etiquetas de respaldo para una OP. */
+  r.post("/documents/:id/backup-labels", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+    const auth = req.auth!;
+    if (!canManageInventory(auth)) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    const id = firstPathParam(req.params.id);
+    if (!id || !isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+    let warehouseId: string | null = null;
+    const qWh = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+    if (qWh) {
+      if (!isUuid(qWh)) {
+        res.status(400).json({ error: "invalid_warehouse_id" });
+        return;
+      }
+      if (auth.warehouseIds !== null && !auth.warehouseIds.includes(qWh)) {
+        res.status(403).json({ error: "warehouse_forbidden" });
+        return;
+      }
+      warehouseId = qWh;
+    }
+    try {
+      const item = await createBackupLabels(pool, auth, id, req.body, warehouseId);
+      res.json({ item });
+    } catch (err) {
+      const e = err as { code?: string };
+      if (e?.code === "document_not_found") {
+        res.status(404).json({ error: e.code });
+        return;
+      }
+      if (
+        e?.code === "not_a_production_order" ||
+        e?.code === "document_already_cancelled" ||
+        e?.code === "invalid_backup_items" ||
+        e?.code === "empty_backup_quantities"
+      ) {
+        res.status(400).json({ error: e.code });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  /** Marca etiquetas de respaldo como impresas (solo una vez). */
+  r.post("/documents/:id/mark-backup-labels-printed", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+    const auth = req.auth!;
+    if (!canManageInventory(auth)) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    const id = firstPathParam(req.params.id);
+    if (!id || !isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+    let warehouseId: string | null = null;
+    const qWh = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+    if (qWh) {
+      if (!isUuid(qWh)) {
+        res.status(400).json({ error: "invalid_warehouse_id" });
+        return;
+      }
+      if (auth.warehouseIds !== null && !auth.warehouseIds.includes(qWh)) {
+        res.status(403).json({ error: "warehouse_forbidden" });
+        return;
+      }
+      warehouseId = qWh;
+    }
+    try {
+      const item = await markBackupLabelsPrinted(pool, auth, id, warehouseId);
+      res.json({ item });
+    } catch (err) {
+      const e = err as { code?: string };
+      if (e?.code === "document_not_found") {
+        res.status(404).json({ error: e.code });
+        return;
+      }
+      if (
+        e?.code === "no_pending_backup_labels" ||
+        e?.code === "backup_labels_already_printed" ||
+        e?.code === "document_already_cancelled"
       ) {
         res.status(403).json({ error: e.code });
         return;
@@ -1241,7 +1346,41 @@ export function createInventoryRouter(): Router {
       return;
     }
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const auth = req.auth!;
+
+    // Identificar sede activa: query parameter, header x-warehouse-id o sede del usuario
+    const isSessionAdmin = req.headers["x-session-scope"] === "admin";
+    let targetWh: string | null = null;
+    if (typeof req.query.warehouseId === "string" && isUuid(req.query.warehouseId)) {
+      targetWh = req.query.warehouseId;
+    } else if (typeof req.headers["x-warehouse-id"] === "string" && isUuid(req.headers["x-warehouse-id"])) {
+      targetWh = req.headers["x-warehouse-id"];
+    } else if (!isSessionAdmin && auth.warehouseIds && auth.warehouseIds.length > 0) {
+      targetWh = auth.warehouseIds[0]!;
+    }
+
     try {
+      const params: any[] = [];
+      let whParamIdx: number | null = null;
+      if (targetWh) {
+        params.push(targetWh);
+        whParamIdx = params.length;
+      }
+
+      let qParamIdx: number | null = null;
+      if (q) {
+        params.push(`%${q}%`);
+        qParamIdx = params.length;
+      }
+
+      const creditBalanceExpr = whParamIdx
+        ? `COALESCE((SELECT cw.credit_balance FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = c.id AND cw.warehouse_id = $${whParamIdx}::uuid), 0)::float`
+        : `COALESCE(c.credit_balance, 0)::float`;
+
+      const totalDebtExpr = whParamIdx
+        ? `COALESCE((SELECT SUM(ar.balance_amount) FROM accounts_receivable ar WHERE ar.customer_id = c.id AND ar.warehouse_id = $${whParamIdx}::uuid AND ar.status IN ('open', 'partial')), 0)::float`
+        : `COALESCE((SELECT SUM(ar.balance_amount) FROM accounts_receivable ar WHERE ar.customer_id = c.id AND ar.status IN ('open', 'partial')), 0)::float`;
+
       let queryStr = `
         SELECT
           c.id::text,
@@ -1249,20 +1388,16 @@ export function createInventoryRouter(): Router {
           c.tax_id AS "taxId",
           c.phone,
           c.address,
-          COALESCE(c.credit_balance, 0)::float AS "creditBalance",
-          COALESCE((
-            SELECT SUM(ar.balance_amount)
-            FROM accounts_receivable ar
-            WHERE ar.customer_id = c.id AND ar.status IN ('open', 'partial')
-          ), 0)::float AS "totalDebt"
+          ${creditBalanceExpr} AS "creditBalance",
+          ${totalDebtExpr} AS "totalDebt"
         FROM customers c
       `;
-      const params: any[] = [];
-      if (q) {
-        queryStr += ` WHERE c.display_name ILIKE $1 OR c.tax_id ILIKE $1 OR c.phone ILIKE $1`;
-        params.push(`%${q}%`);
+
+      if (qParamIdx) {
+        queryStr += ` WHERE c.display_name ILIKE $${qParamIdx} OR c.tax_id ILIKE $${qParamIdx} OR c.phone ILIKE $${qParamIdx}`;
       }
-      queryStr += ` ORDER BY (COALESCE(c.credit_balance, 0) > 0) DESC, c.display_name LIMIT 60`;
+
+      queryStr += ` ORDER BY (${creditBalanceExpr} > 0) DESC, c.display_name LIMIT 60`;
       const { rows } = await pool.query(queryStr, params);
       res.json({ items: rows });
     } catch (err) {

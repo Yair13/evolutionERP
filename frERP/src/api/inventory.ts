@@ -471,6 +471,42 @@ export async function markLabelsPrinted(
   );
 }
 
+/** Genera/autoriza etiquetas de respaldo para una OP (cantidades específicas por producto). */
+export async function createBackupLabels(
+  token: string,
+  documentId: string,
+  payload: { items: Array<{ productId: string; quantity: number }> },
+  warehouseId?: string | null
+) {
+  const q = warehouseId ? `?warehouseId=${warehouseId}` : "";
+  return inventoryFetch<{ item: import("../features/inventory/inventory.types.js").InventoryDocumentDetail }>(
+    `/inventory/documents/${documentId}/backup-labels${q}`,
+    token,
+    warehouseId ?? null,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+/** Marca las etiquetas de respaldo de una OP como impresas por la sede (una sola vez). */
+export async function markBackupLabelsPrinted(
+  token: string,
+  documentId: string,
+  warehouseId?: string | null
+) {
+  const q = warehouseId ? `?warehouseId=${warehouseId}` : "";
+  return inventoryFetch<{ item: import("../features/inventory/inventory.types.js").InventoryDocumentDetail }>(
+    `/inventory/documents/${documentId}/mark-backup-labels-printed${q}`,
+    token,
+    warehouseId ?? null,
+    {
+      method: "POST",
+    }
+  );
+}
+
 export type BulkImportProductItem = {
   name: string;
   referenceCode: string;
@@ -563,9 +599,12 @@ export async function fetchDocumentByInvoice(
   );
 }
 
-export async function fetchCustomers(token: string, q?: string) {
-  const query = q ? `?q=${encodeURIComponent(q)}` : "";
-  return apiGet<{ items: Customer[] }>(`/inventory/customers${query}`, token);
+export async function fetchCustomers(token: string, q?: string, warehouseId?: string | null) {
+  const params = new URLSearchParams();
+  if (q?.trim()) params.set("q", q.trim());
+  if (warehouseId) params.set("warehouseId", warehouseId);
+  const qs = params.toString();
+  return apiGet<{ items: Customer[] }>(`/inventory/customers${qs ? `?${qs}` : ""}`, token);
 }
 
 export async function createCustomer(

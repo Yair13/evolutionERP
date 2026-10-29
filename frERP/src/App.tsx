@@ -87,6 +87,7 @@ export default function App() {
             <Route path="finanzas/cierre-general" element={<DailyClosurePage defaultTab="general" />} />
 
             <Route element={<RequireAdminHeadquarters />}>
+              <Route path="proveedores" element={<PayablesPage />} />
               <Route path="finanzas/proveedores" element={<PayablesPage />} />
               <Route path="productos" element={<ProductsCatalogPage />} />
               <Route path="productos/nuevo" element={<ProductNewPage />} />

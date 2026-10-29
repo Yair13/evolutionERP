@@ -316,7 +316,7 @@ export function ExitCheckoutModal({
     const t = window.setTimeout(async () => {
       setSearching(true);
       try {
-        const data = await fetchCustomers(token, searchQuery.trim());
+        const data = await fetchCustomers(token, searchQuery.trim(), currentWarehouseId);
         setCustomerList(data.items || []);
       } catch (err) {
         console.error(err);
@@ -325,7 +325,7 @@ export function ExitCheckoutModal({
       }
     }, 280);
     return () => window.clearTimeout(t);
-  }, [searchQuery, token, open]);
+  }, [searchQuery, token, open, currentWarehouseId]);
 
   if (!open) return null;
 

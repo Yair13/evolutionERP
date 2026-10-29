@@ -6,7 +6,7 @@ import {
   canManageMovementEditing,
   MOVEMENT_EDIT_TZ,
 } from "./movement-edit-settings.js";
-import { recordCreditFromExitDocument } from "../finance/receivables.js";
+import { recordCreditFromExitDocument, debitCustomerWarehouseBalance, creditCustomerWarehouseBalance } from "../finance/receivables.js";
 import { getTodayBogotaYmd } from "../../lib/date-utils.js";
 import { redeemLayawayInSale } from "../finance/layaways.js";
 
@@ -85,10 +85,38 @@ export type InventoryDocumentSummary = {
   purchaseOrderCode?: string | null;
   entryType?: string | null;
   labelsPrintedAt?: string | null;
+  backupLabels?: BackupLabelsData | null;
   customerTaxId?: string | null;
   customerPhone?: string | null;
   customerAddress?: string | null;
   metadata?: any;
+};
+
+export type BackupLabelItem = {
+  productId: string;
+  productName: string;
+  referenceCode: string;
+  barcode: string | null;
+  quantity: number;
+};
+
+export type BackupLabelsData = {
+  status: "pending" | "printed";
+  totalQuantity: number;
+  items: BackupLabelItem[];
+  requestedAt: string;
+  requestedBy: string;
+  requestedByName?: string | null;
+  printedAt?: string | null;
+  printedBy?: string | null;
+  printedByName?: string | null;
+};
+
+export type CreateBackupLabelsInput = {
+  items: Array<{
+    productId: string;
+    quantity: number;
+  }>;
 };
 
 export type DocumentLineView = {
@@ -1055,29 +1083,11 @@ export async function confirmExitDocument(
       for (const p of input.paymentBreakdown) {
         const pAmount = Math.round((Number(p.amount) || 0) * 100) / 100;
         if (p.method === "saldo_a_favor" && customerId) {
-          const { rows: custRows } = await client.query<{ credit_balance: string }>(
-            `SELECT credit_balance::text FROM customers WHERE id = $1::uuid FOR UPDATE`,
-            [customerId]
-          );
-          const currentBalance = Number(custRows[0]?.credit_balance ?? 0);
-          if (currentBalance + 0.001 < pAmount) {
-            throw Object.assign(new Error("insufficient_credit_balance"), {
-              code: "insufficient_credit_balance",
-              available: currentBalance,
-              requested: pAmount,
-            });
-          }
-          await client.query(
-            `UPDATE customers SET credit_balance = GREATEST(0, ROUND((credit_balance - $1)::numeric, 2)) WHERE id = $2::uuid`,
-            [pAmount, customerId]
-          );
+          await debitCustomerWarehouseBalance(client, customerId, warehouseId, pAmount);
         }
       }
       if (excessToFavourForMeta > 0 && customerId) {
-        await client.query(
-          `UPDATE customers SET credit_balance = ROUND((credit_balance + $1)::numeric, 2) WHERE id = $2::uuid`,
-          [excessToFavourForMeta, customerId]
-        );
+        await creditCustomerWarehouseBalance(client, customerId, warehouseId, excessToFavourForMeta);
       }
     }
 
@@ -1263,6 +1273,7 @@ export async function listDocuments(
       purchaseOrderCode: r.purchase_order_code,
       entryType: r.entry_type,
       labelsPrintedAt: r.labels_printed_at,
+      backupLabels: r.metadata?.backupLabels ?? null,
       subtotalAmount: Number(r.subtotal_amount),
       discountAmount: Number(r.discount_amount),
       discountReason: r.discount_reason,
@@ -1679,7 +1690,11 @@ export async function getDocument(
       c.tax_id AS customer_tax_id,
       c.phone AS customer_phone,
       c.address AS customer_address,
-      COALESCE(c.credit_balance, 0)::text AS customer_credit_balance,
+      COALESCE((
+        SELECT cw.credit_balance
+        FROM customer_warehouse_credit_balances cw
+        WHERE cw.customer_id = d.customer_id AND cw.warehouse_id = d.warehouse_id
+      ), 0)::text AS customer_credit_balance,
       (d.editing_unlocked_at IS NOT NULL) AS editing_unlocked,
       (
         SELECT COUNT(*)::text
@@ -1781,6 +1796,7 @@ export async function getDocument(
     purchaseOrderCode: meta.purchaseOrderCode ?? null,
     entryType: meta.entryType ?? null,
     labelsPrintedAt: meta.labelsPrintedAt ?? null,
+    backupLabels: meta.backupLabels ?? null,
     warehouseName: head.warehouse_name,
     warehouseCode: head.warehouse_code,
     subtotalAmount: Number(head.subtotal_amount),
@@ -1962,6 +1978,242 @@ export async function markLabelsPrinted(
 
     const detail = await getDocument(pool, auth, documentId, doc.warehouse_id);
     if (!detail) throw new Error("labels_print_failed");
+    return detail;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Permite al administrador generar / autorizar un conjunto de etiquetas de respaldo
+ * para una Orden de Producción (especificando productos y cantidades a reimprimir).
+ */
+export async function createBackupLabels(
+  pool: pg.Pool,
+  auth: AuthContext,
+  documentId: string,
+  input: CreateBackupLabelsInput,
+  _warehouseId?: string | null
+): Promise<InventoryDocumentDetail> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: docRows } = await client.query<{
+      warehouse_id: string;
+      status: string;
+      doc_type: string;
+      metadata: any;
+    }>(
+      `SELECT warehouse_id::text, status, doc_type, metadata
+       FROM inventory_documents
+       WHERE id = $1::uuid
+       FOR UPDATE`,
+      [documentId]
+    );
+
+    const doc = docRows[0];
+    if (!doc) {
+      throw Object.assign(new Error("document_not_found"), { code: "document_not_found" });
+    }
+    if (doc.status === "cancelled") {
+      throw Object.assign(new Error("document_already_cancelled"), { code: "document_already_cancelled" });
+    }
+
+    const meta = doc.metadata ?? {};
+    const isLabelEligible =
+      doc.doc_type === "entry" &&
+      (meta.entryType === "production_order" ||
+        meta.entryType === "purchase" ||
+        Boolean(meta.productionOrderCode) ||
+        Boolean(meta.purchaseOrderCode));
+    if (!isLabelEligible) {
+      throw Object.assign(new Error("not_a_production_order"), { code: "not_a_production_order" });
+    }
+
+    if (!input || !Array.isArray(input.items) || input.items.length === 0) {
+      throw Object.assign(new Error("invalid_backup_items"), { code: "invalid_backup_items" });
+    }
+
+    const { rows: lineRows } = await client.query<{
+      product_id: string;
+      name: string;
+      reference_code: string;
+      barcode: string | null;
+      quantity: string;
+    }>(
+      `SELECT l.product_id::text, p.name, p.reference_code, p.barcode, l.quantity::text
+       FROM inventory_document_lines l
+       JOIN products p ON p.id = l.product_id
+       WHERE l.document_id = $1::uuid`,
+      [documentId]
+    );
+
+    const linesMap = new Map<string, { name: string; reference_code: string; barcode: string | null; maxQty: number }>();
+    for (const lr of lineRows) {
+      linesMap.set(lr.product_id, {
+        name: lr.name,
+        reference_code: lr.reference_code,
+        barcode: lr.barcode,
+        maxQty: Math.max(1, Math.floor(Math.abs(Number(lr.quantity)))),
+      });
+    }
+
+    const backupItems: BackupLabelItem[] = [];
+    let totalQty = 0;
+
+    for (const item of input.items) {
+      const q = Math.floor(Number(item.quantity) || 0);
+      if (q <= 0) continue;
+      const line = linesMap.get(item.productId);
+      if (!line) continue;
+      backupItems.push({
+        productId: item.productId,
+        productName: line.name,
+        referenceCode: line.reference_code,
+        barcode: line.barcode ?? null,
+        quantity: q,
+      });
+      totalQty += q;
+    }
+
+    if (backupItems.length === 0 || totalQty <= 0) {
+      throw Object.assign(new Error("empty_backup_quantities"), { code: "empty_backup_quantities" });
+    }
+
+    let requestedByName: string | null = null;
+    const { rows: userRows } = await client.query<{ full_name: string }>(
+      `SELECT full_name FROM users WHERE id = $1::uuid`,
+      [auth.userId]
+    );
+    if (userRows.length > 0) {
+      requestedByName = userRows[0]!.full_name;
+    }
+
+    const backupData: BackupLabelsData = {
+      status: "pending",
+      totalQuantity: totalQty,
+      items: backupItems,
+      requestedAt: new Date().toISOString(),
+      requestedBy: auth.userId,
+      requestedByName,
+      printedAt: null,
+      printedBy: null,
+      printedByName: null,
+    };
+
+    const nextMeta = { ...meta, backupLabels: backupData };
+    await client.query(
+      `UPDATE inventory_documents SET metadata = $2::jsonb WHERE id = $1::uuid`,
+      [documentId, JSON.stringify(nextMeta)]
+    );
+
+    await client.query(
+      `INSERT INTO document_status_events (document_id, status, comment, actor_id)
+       VALUES ($1::uuid, 'edited', $2, $3::uuid)`,
+      [
+        documentId,
+        `Respaldo de etiquetas generado: ${totalQty} unidades autorizadas para impresión`,
+        auth.userId,
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    const detail = await getDocument(pool, auth, documentId, doc.warehouse_id);
+    if (!detail) throw new Error("backup_labels_failed");
+    return detail;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Marca las etiquetas de respaldo como impresas por la sede (una sola vez).
+ */
+export async function markBackupLabelsPrinted(
+  pool: pg.Pool,
+  auth: AuthContext,
+  documentId: string,
+  _warehouseId?: string | null
+): Promise<InventoryDocumentDetail> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: docRows } = await client.query<{
+      warehouse_id: string;
+      status: string;
+      doc_type: string;
+      metadata: any;
+    }>(
+      `SELECT warehouse_id::text, status, doc_type, metadata
+       FROM inventory_documents
+       WHERE id = $1::uuid
+       FOR UPDATE`,
+      [documentId]
+    );
+
+    const doc = docRows[0];
+    if (!doc) {
+      throw Object.assign(new Error("document_not_found"), { code: "document_not_found" });
+    }
+    if (doc.status === "cancelled") {
+      throw Object.assign(new Error("document_already_cancelled"), { code: "document_already_cancelled" });
+    }
+
+    const meta = doc.metadata ?? {};
+    const backup: BackupLabelsData | undefined = meta.backupLabels;
+    if (!backup || !backup.items || backup.items.length === 0) {
+      throw Object.assign(new Error("no_pending_backup_labels"), { code: "no_pending_backup_labels" });
+    }
+    if (backup.status === "printed") {
+      throw Object.assign(new Error("backup_labels_already_printed"), { code: "backup_labels_already_printed" });
+    }
+
+    let printedByName: string | null = null;
+    const { rows: userRows } = await client.query<{ full_name: string }>(
+      `SELECT full_name FROM users WHERE id = $1::uuid`,
+      [auth.userId]
+    );
+    if (userRows.length > 0) {
+      printedByName = userRows[0]!.full_name;
+    }
+
+    const updatedBackup: BackupLabelsData = {
+      ...backup,
+      status: "printed",
+      printedAt: new Date().toISOString(),
+      printedBy: auth.userId,
+      printedByName,
+    };
+
+    const nextMeta = { ...meta, backupLabels: updatedBackup };
+    await client.query(
+      `UPDATE inventory_documents SET metadata = $2::jsonb WHERE id = $1::uuid`,
+      [documentId, JSON.stringify(nextMeta)]
+    );
+
+    await client.query(
+      `INSERT INTO document_status_events (document_id, status, comment, actor_id)
+       VALUES ($1::uuid, 'edited', $2, $3::uuid)`,
+      [
+        documentId,
+        `Respaldo de etiquetas impreso: ${backup.totalQuantity} unidades`,
+        auth.userId,
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    const detail = await getDocument(pool, auth, documentId, doc.warehouse_id);
+    if (!detail) throw new Error("mark_backup_labels_failed");
     return detail;
   } catch (err) {
     await client.query("ROLLBACK");
