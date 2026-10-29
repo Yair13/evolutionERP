@@ -4,12 +4,13 @@ import { createReceivable } from "../../api/finance.js";
 import { fetchCustomers, createCustomer, type Customer } from "../../api/inventory.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
-import { Receipt, X, PlusCircle, User, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Receipt, X, PlusCircle, User, AlertCircle, CheckCircle2, Building2 } from "lucide-react";
 
 type Props = {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  defaultWarehouseId?: string;
 };
 
 function formatMoney(n: number): string {
@@ -20,13 +21,14 @@ function formatMoney(n: number): string {
   }).format(n);
 }
 
-export function CreateReceivableModal({ open, onClose, onSuccess }: Props) {
+export function CreateReceivableModal({ open, onClose, onSuccess, defaultWarehouseId }: Props) {
   const { token } = useAuth();
   const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
 
-  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
-    isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || "")
-  );
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(() => {
+    if (!isAllWarehouses) return warehouseId || "";
+    return defaultWarehouseId || (warehouses[0]?.id || "");
+  });
 
   const [invoiceNumber, setInvoiceNumber] = useState<string>("");
   const [totalAmountStr, setTotalAmountStr] = useState<string>("");
@@ -55,7 +57,10 @@ export function CreateReceivableModal({ open, onClose, onSuccess }: Props) {
 
   useEffect(() => {
     if (open) {
-      setSelectedWarehouseId(isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || ""));
+      const initialWh = !isAllWarehouses
+        ? (warehouseId || "")
+        : (defaultWarehouseId || (warehouses[0]?.id || ""));
+      setSelectedWarehouseId(initialWh);
       setInvoiceNumber("");
       setTotalAmountStr("");
       setBalanceAmountStr("");
@@ -73,7 +78,7 @@ export function CreateReceivableModal({ open, onClose, onSuccess }: Props) {
       setNewAddress("");
       setError(null);
     }
-  }, [open, isAllWarehouses, warehouseId, warehouses]);
+  }, [open, isAllWarehouses, warehouseId, warehouses, defaultWarehouseId]);
 
   // Actualizar automáticamente el saldo cuando se digita el total (a menos que el usuario lo haya editado manualmente)
   const handleTotalChange = (val: string) => {
@@ -141,7 +146,8 @@ export function CreateReceivableModal({ open, onClose, onSuccess }: Props) {
     e.preventDefault();
     if (!token) return;
 
-    if (!selectedWarehouseId) {
+    const targetWhId = isAllWarehouses ? selectedWarehouseId : (warehouseId || selectedWarehouseId);
+    if (!targetWhId) {
       setError("Selecciona la sede correspondiente a la deuda.");
       return;
     }
@@ -179,7 +185,7 @@ export function CreateReceivableModal({ open, onClose, onSuccess }: Props) {
 
     try {
       await createReceivable(token, {
-        warehouseId: selectedWarehouseId,
+        warehouseId: targetWhId,
         customerId: selectedCustomer.id,
         invoiceNumber: invoiceNumber.trim(),
         totalAmount: totalNum,
@@ -260,8 +266,39 @@ export function CreateReceivableModal({ open, onClose, onSuccess }: Props) {
                 ))}
               </select>
             ) : (
-              <div style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid var(--inv-border)", background: "var(--inv-bg-elevated)", fontWeight: 600, fontSize: "0.9rem" }}>
-                {warehouses.find((w) => w.id === warehouseId)?.name ?? "Sede actual"}
+              <div
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  border: "1px solid var(--inv-border)",
+                  background: "var(--inv-bg-elevated)",
+                  fontWeight: 600,
+                  fontSize: "0.92rem",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  color: "var(--inv-text-primary, #0f172a)",
+                }}
+              >
+                <Building2 size={17} color="#6366f1" />
+                <span>
+                  {warehouses.find((w) => w.id === (warehouseId || selectedWarehouseId))?.name ?? "Sede actual"}
+                </span>
+                <span style={{ fontSize: "0.8rem", color: "var(--inv-text-muted, #64748b)", fontWeight: 400 }}>
+                  ({warehouses.find((w) => w.id === (warehouseId || selectedWarehouseId))?.code ?? ""})
+                </span>
+                <span
+                  style={{
+                    marginLeft: "auto",
+                    fontSize: "0.75rem",
+                    backgroundColor: "#e0e7ff",
+                    color: "#4338ca",
+                    padding: "2px 8px",
+                    borderRadius: 4,
+                  }}
+                >
+                  Asignada automáticamente
+                </span>
               </div>
             )}
           </label>

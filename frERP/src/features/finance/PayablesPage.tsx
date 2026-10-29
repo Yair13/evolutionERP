@@ -42,7 +42,7 @@ function formatDate(iso: string | null): string {
 
 export function PayablesPage() {
   const { token } = useAuth();
-  const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
+  const { warehouses, warehouseId, isAllWarehouses, loading: whLoading } = useWarehouse();
 
   const [activeTab, setActiveTab] = useState<"payables" | "suppliers">("payables");
 
@@ -92,7 +92,9 @@ export function PayablesPage() {
 
   // Cargar Cuentas por Pagar
   const loadPayables = useCallback(async () => {
-    if (!token) return;
+    if (!token || whLoading) return;
+    if (!isAllWarehouses && !warehouseId) return;
+
     setLoading(true);
     setError(null);
     try {

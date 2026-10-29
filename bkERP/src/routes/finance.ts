@@ -12,6 +12,8 @@ import {
   getReceivablesByWarehouseReport,
   listAccountsReceivable,
   createManualReceivable,
+  deleteManualReceivable,
+  resetInitialReceivablesByWarehouse,
 } from "../services/finance/receivables.js";
 import {
   addLayawayPayment,
@@ -159,17 +161,27 @@ export function createFinanceRouter(): Router {
       return;
     }
 
-    const warehouseId =
+    const auth = req.auth!;
+    const isSuperAdmin = auth.warehouseIds === null;
+    const isFromAdmin = isAdminSessionRequest(req);
+    const canSeeAllSystem = isSuperAdmin || (isFromAdmin && auth.hasAdminAccess);
+
+    let warehouseId =
       typeof req.body?.warehouseId === "string" && isUuid(req.body.warehouseId)
         ? req.body.warehouseId
         : null;
+
+    // Si se crea desde una sede física, asignar automáticamente la sede del usuario si no vino en el body
+    if (!warehouseId && !canSeeAllSystem && auth.warehouseIds && auth.warehouseIds.length > 0) {
+      warehouseId = auth.warehouseIds[0];
+    }
+
     if (!warehouseId) {
       res.status(400).json({ error: "warehouse_id_required" });
       return;
     }
 
-    const auth = req.auth!;
-    if (!auth.hasAdminAccess && (!auth.warehouseIds || !auth.warehouseIds.includes(warehouseId))) {
+    if (!canSeeAllSystem && (!auth.warehouseIds || !auth.warehouseIds.includes(warehouseId))) {
       res.status(403).json({ error: "warehouse_forbidden" });
       return;
     }
@@ -243,6 +255,97 @@ export function createFinanceRouter(): Router {
   /**
    * Detalle de un crédito específico.
    */
+  /**
+   * Resetear todos los saldos iniciales manuales de una sede.
+   * Solo permitido desde la Sede Administrativa.
+   */
+  r.post("/receivables/reset-initial", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const auth = req.auth!;
+    const isSuperAdmin = auth.warehouseIds === null;
+    const isFromAdmin = isAdminSessionRequest(req);
+    const canManageAdmin = isSuperAdmin || (isFromAdmin && auth.hasAdminAccess);
+
+    if (!canManageAdmin) {
+      res.status(403).json({
+        error: "admin_scope_required",
+        message: "Solo la sede administrativa tiene autorización para resetear saldos iniciales.",
+      });
+      return;
+    }
+
+    const warehouseId =
+      typeof req.body?.warehouseId === "string" && isUuid(req.body.warehouseId)
+        ? req.body.warehouseId
+        : null;
+
+    if (!warehouseId) {
+      res.status(400).json({ error: "warehouse_id_required" });
+      return;
+    }
+
+    try {
+      const result = await resetInitialReceivablesByWarehouse(pool, warehouseId);
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      next(err);
+    }
+  });
+
+  /**
+   * Eliminar un saldo inicial individual.
+   * Solo permitido desde la Sede Administrativa y únicamente para registros manuales (document_id IS NULL).
+   */
+  r.delete("/receivables/:id", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const auth = req.auth!;
+    const isSuperAdmin = auth.warehouseIds === null;
+    const isFromAdmin = isAdminSessionRequest(req);
+    const canManageAdmin = isSuperAdmin || (isFromAdmin && auth.hasAdminAccess);
+
+    if (!canManageAdmin) {
+      res.status(403).json({
+        error: "admin_scope_required",
+        message: "Solo la sede administrativa tiene autorización para eliminar saldos iniciales.",
+      });
+      return;
+    }
+
+    const id = String(req.params.id);
+    if (!isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+
+    try {
+      const result = await deleteManualReceivable(pool, id);
+      res.json({ ok: true, item: result });
+    } catch (err: any) {
+      if (err.code === "receivable_not_found") {
+        res.status(404).json({ error: "receivable_not_found" });
+        return;
+      }
+      if (err.code === "cannot_delete_sales_credit") {
+        res.status(400).json({
+          error: "cannot_delete_sales_credit",
+          message: err.message || "Solo se pueden eliminar saldos iniciales manuales.",
+        });
+        return;
+      }
+      next(err);
+    }
+  });
+
   r.get("/receivables/:id", requireAuth, async (req, res, next) => {
     const pool = getPool();
     if (!pool) {

@@ -358,12 +358,119 @@ export async function createManualReceivable(
 }
 
 /**
+ * Elimina una cuenta por cobrar manual (saldo inicial / factura previa).
+ * Solo se permite si document_id es NULL (no provino de una venta de inventario).
+ */
+export async function deleteManualReceivable(
+  pool: pg.Pool,
+  receivableId: string
+): Promise<{ deletedId: string; invoiceNumber: string; warehouseId: string }> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows } = await client.query<{
+      id: string;
+      document_id: string | null;
+      invoice_number: string;
+      warehouse_id: string;
+    }>(
+      `SELECT id::text, document_id::text, invoice_number, warehouse_id::text
+       FROM accounts_receivable
+       WHERE id = $1::uuid
+       FOR UPDATE`,
+      [receivableId]
+    );
+
+    if (rows.length === 0) {
+      throw Object.assign(new Error("receivable_not_found"), { code: "receivable_not_found", statusCode: 404 });
+    }
+
+    const ar = rows[0]!;
+    if (ar.document_id !== null) {
+      throw Object.assign(new Error("cannot_delete_sales_credit"), {
+        code: "cannot_delete_sales_credit",
+        statusCode: 400,
+        message: "Solo se pueden eliminar saldos iniciales creados manualmente. Los créditos originados en ventas deben anularse en el módulo de ventas.",
+      });
+    }
+
+    await client.query(`DELETE FROM receivable_payments WHERE receivable_id = $1::uuid`, [receivableId]);
+    await client.query(`DELETE FROM accounts_receivable WHERE id = $1::uuid`, [receivableId]);
+
+    await client.query("COMMIT");
+
+    return {
+      deletedId: ar.id,
+      invoiceNumber: ar.invoice_number,
+      warehouseId: ar.warehouse_id,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Resetea / elimina todos los saldos iniciales manuales registrados en una sede específica.
+ * Solo afecta registros donde document_id IS NULL.
+ */
+export async function resetInitialReceivablesByWarehouse(
+  pool: pg.Pool,
+  warehouseId: string
+): Promise<{ deletedCount: number; totalAmountReset: number }> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: sumRows } = await client.query<{ count: string; total: string }>(
+      `SELECT COUNT(*)::text AS count, COALESCE(SUM(total_amount), 0)::text AS total
+       FROM accounts_receivable
+       WHERE warehouse_id = $1::uuid AND document_id IS NULL`,
+      [warehouseId]
+    );
+
+    const deletedCount = Number(sumRows[0]?.count ?? 0);
+    const totalAmountReset = Number(sumRows[0]?.total ?? 0);
+
+    if (deletedCount > 0) {
+      await client.query(
+        `DELETE FROM receivable_payments
+         WHERE receivable_id IN (
+           SELECT id FROM accounts_receivable
+           WHERE warehouse_id = $1::uuid AND document_id IS NULL
+         )`,
+        [warehouseId]
+      );
+
+      await client.query(
+        `DELETE FROM accounts_receivable
+         WHERE warehouse_id = $1::uuid AND document_id IS NULL`,
+        [warehouseId]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return { deletedCount, totalAmountReset };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Consulta la lista de cuentas por cobrar con filtros y totales.
  */
 export async function listAccountsReceivable(
   pool: pg.Pool,
   opts: {
     warehouseId?: string | null;
+    allowedWarehouseIds?: string[] | null;
     status?: "all" | "pending" | "open" | "partial" | "paid" | "cancelled";
     customerId?: string | null;
     dateFrom?: string | null;
@@ -392,6 +499,9 @@ export async function listAccountsReceivable(
   if (opts.warehouseId) {
     params.push(opts.warehouseId);
     conditions.push(`ar.warehouse_id = $${params.length}::uuid`);
+  } else if (opts.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0) {
+    params.push(opts.allowedWarehouseIds);
+    conditions.push(`ar.warehouse_id = ANY($${params.length}::uuid[])`);
   }
 
   if (opts.customerId) {
@@ -819,7 +929,11 @@ export async function addReceivablePayment(
  */
 export async function getCustomerCreditProfile(
   pool: pg.Pool,
-  customerId: string
+  customerId: string,
+  opts?: {
+    warehouseId?: string | null;
+    allowedWarehouseIds?: string[] | null;
+  }
 ): Promise<CustomerCreditProfile | null> {
   const { rows: custRows } = await pool.query<{
     id: string;
@@ -841,6 +955,14 @@ export async function getCustomerCreditProfile(
 
   if (custRows.length === 0) return null;
   const c = custRows[0]!;
+
+  const recParams: unknown[] = [customerId, c.display_name, c.tax_id, c.phone];
+  let whRecFilter = "";
+  if (opts?.warehouseId) {
+    whRecFilter = ` AND ar.warehouse_id = $${recParams.push(opts.warehouseId)}::uuid`;
+  } else if (opts?.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0) {
+    whRecFilter = ` AND ar.warehouse_id = ANY($${recParams.push(opts.allowedWarehouseIds)}::uuid[])`;
+  }
 
   const { rows: recRows } = await pool.query<ReceivableSummaryItem>(
     `
@@ -868,11 +990,19 @@ export async function getCustomerCreditProfile(
     FROM accounts_receivable ar
     JOIN warehouses w ON w.id = ar.warehouse_id
     LEFT JOIN users u ON u.id = ar.created_by
-    WHERE ar.customer_id = $1::uuid
+    WHERE ar.customer_id = $1::uuid ${whRecFilter}
     ORDER BY ar.created_at DESC
     `,
-    [customerId, c.display_name, c.tax_id, c.phone]
+    recParams
   );
+
+  const payParams: unknown[] = [customerId];
+  let whPayFilter = "";
+  if (opts?.warehouseId) {
+    whPayFilter = ` AND rp.warehouse_id = $${payParams.push(opts.warehouseId)}::uuid`;
+  } else if (opts?.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0) {
+    whPayFilter = ` AND rp.warehouse_id = ANY($${payParams.push(opts.allowedWarehouseIds)}::uuid[])`;
+  }
 
   const { rows: payRows } = await pool.query<ReceivablePaymentItem>(
     `
@@ -896,11 +1026,11 @@ export async function getCustomerCreditProfile(
     JOIN accounts_receivable ar ON ar.id = rp.receivable_id
     JOIN warehouses w ON w.id = rp.warehouse_id
     LEFT JOIN users u ON u.id = rp.created_by
-    WHERE rp.customer_id = $1::uuid
+    WHERE rp.customer_id = $1::uuid ${whPayFilter}
     ORDER BY rp.created_at DESC
     LIMIT 50
     `,
-    [customerId]
+    payParams
   );
 
   const totalCreditsCount = recRows.length;
@@ -933,7 +1063,10 @@ export async function getCustomerCreditProfile(
 /**
  * Reporte consolidado de cartera y recaudos por sede.
  */
-export async function getReceivablesByWarehouseReport(pool: pg.Pool): Promise<{
+export async function getReceivablesByWarehouseReport(
+  pool: pg.Pool,
+  allowedWarehouseIds?: string[] | null
+): Promise<{
   warehouses: {
     warehouseId: string;
     warehouseCode: string;
@@ -950,6 +1083,13 @@ export async function getReceivablesByWarehouseReport(pool: pg.Pool): Promise<{
     collectedMonth: number;
   };
 }> {
+  const filterParams: unknown[] = [];
+  let whFilterSql = "";
+  if (allowedWarehouseIds && allowedWarehouseIds.length > 0) {
+    filterParams.push(allowedWarehouseIds);
+    whFilterSql = ` AND w.id = ANY($${filterParams.length}::uuid[])`;
+  }
+
   const { rows } = await pool.query<{
     warehouse_id: string;
     warehouse_code: string;
@@ -981,10 +1121,10 @@ export async function getReceivablesByWarehouseReport(pool: pg.Pool): Promise<{
       )::text AS collected_month
     FROM warehouses w
     LEFT JOIN accounts_receivable ar ON ar.warehouse_id = w.id
-    WHERE w.is_active = true
+    WHERE w.is_active = true ${whFilterSql}
     GROUP BY w.id, w.code, w.name
     ORDER BY w.name
-  `);
+  `, filterParams);
 
   const list = rows.map((r) => ({
     warehouseId: r.warehouse_id,
@@ -1016,6 +1156,7 @@ export async function getPaymentsCashSummary(
   pool: pg.Pool,
   opts: {
     warehouseId?: string | null;
+    allowedWarehouseIds?: string[] | null;
     dateFrom?: string | null;
     dateTo?: string | null;
   }
@@ -1038,12 +1179,17 @@ export async function getPaymentsCashSummary(
   }[];
 }> {
   const params: unknown[] = [];
-  const whDocFilter = opts.warehouseId
-    ? `AND d.warehouse_id = $${params.push(opts.warehouseId)}::uuid`
-    : "";
-  const whRpFilter = opts.warehouseId
-    ? `AND rp.warehouse_id = $${params.length}::uuid`
-    : "";
+  let whDocFilter = "";
+  let whRpFilter = "";
+  if (opts.warehouseId) {
+    const idx = params.push(opts.warehouseId);
+    whDocFilter = `AND d.warehouse_id = $${idx}::uuid`;
+    whRpFilter = `AND rp.warehouse_id = $${idx}::uuid`;
+  } else if (opts.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0) {
+    const idx = params.push(opts.allowedWarehouseIds);
+    whDocFilter = `AND d.warehouse_id = ANY($${idx}::uuid[])`;
+    whRpFilter = `AND rp.warehouse_id = ANY($${idx}::uuid[])`;
+  }
 
   let dateDocFilter = "";
   let dateRpFilter = "";

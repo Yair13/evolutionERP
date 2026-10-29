@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "./client.js";
+import { apiGet, apiPost, apiDelete } from "./client.js";
 
 export type ReceivableStatus = "open" | "partial" | "paid" | "cancelled";
 
@@ -156,6 +156,21 @@ export async function fetchReceivableDetail(token: string, id: string) {
   return apiGet<{ item: ReceivableDetail }>(`/finance/receivables/${id}`, token);
 }
 
+export async function deleteManualReceivable(token: string, id: string) {
+  return apiDelete<{ ok: boolean; item: { deletedId: string; invoiceNumber: string; warehouseId: string } }>(
+    `/finance/receivables/${id}`,
+    token
+  );
+}
+
+export async function resetInitialReceivables(token: string, warehouseId: string) {
+  return apiPost<{ ok: boolean; deletedCount: number; totalAmountReset: number }>(
+    "/finance/receivables/reset-initial",
+    { warehouseId },
+    token
+  );
+}
+
 export async function createReceivable(
   token: string,
   data: {
@@ -195,8 +210,9 @@ export async function addReceivablePayment(
   }>(`/finance/receivables/${id}/payments`, data, token);
 }
 
-export async function fetchCustomerCreditProfile(token: string, customerId: string) {
-  return apiGet<CustomerCreditProfile>(`/finance/customers/${customerId}/credit-profile`, token);
+export async function fetchCustomerCreditProfile(token: string, customerId: string, warehouseId?: string | null) {
+  const qs = warehouseId ? `?warehouseId=${encodeURIComponent(warehouseId)}` : "";
+  return apiGet<CustomerCreditProfile>(`/finance/customers/${customerId}/credit-profile${qs}`, token);
 }
 
 export async function fetchWarehouseReceivablesReport(token: string) {

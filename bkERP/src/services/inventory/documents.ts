@@ -106,6 +106,7 @@ export type DocumentLineView = {
 export type InventoryDocumentDetail = InventoryDocumentSummary & {
   lines: DocumentLineView[];
   events?: DocumentStatusEventView[];
+  customerTotalWarehouseDebt?: number;
   receivable?: {
     id: string;
     totalAmount: number;
@@ -386,6 +387,7 @@ export async function lookupOriginExitForEntry(
       d.id::text,
       d.warehouse_id::text,
       d.invoice_number,
+      d.customer_id::text AS customer_id,
       d.exit_kind,
       d.metadata->>'destinationWarehouseId' AS destination_warehouse_id,
       d.status
@@ -1220,6 +1222,7 @@ export async function listDocuments(
       d.completed_at::text,
       u.full_name AS created_by_name,
       d.invoice_number,
+      d.customer_id::text AS customer_id,
       d.exit_kind,
       COALESCE(c.display_name, d.metadata->>'customerName') AS customer_name,
       d.metadata->>'productionOrderCode' AS production_order_code,
@@ -1660,6 +1663,7 @@ export async function getDocument(
     metadata: any;
     warehouse_name: string;
     warehouse_code: string;
+    customer_id: string | null;
     customer_name: string | null;
     customer_tax_id: string | null;
     customer_phone: string | null;
@@ -1687,6 +1691,7 @@ export async function getDocument(
       d.completed_at::text,
       u.full_name AS created_by_name,
       d.invoice_number,
+      d.customer_id::text AS customer_id,
       d.exit_kind,
       d.metadata,
       w.name AS warehouse_name,
@@ -1721,7 +1726,7 @@ export async function getDocument(
     LEFT JOIN users u ON u.id = d.created_by
     LEFT JOIN customers c ON c.id = d.customer_id
     WHERE d.id = $1::uuid AND (${whFilter})
-    GROUP BY d.id, d.warehouse_id, u.full_name, w.name, w.code, c.display_name, c.tax_id, c.phone, c.address, d.metadata, d.reason, d.discount_amount, d.discount_reason
+    GROUP BY d.id, d.warehouse_id, d.customer_id, u.full_name, w.name, w.code, c.display_name, c.tax_id, c.phone, c.address, d.metadata, d.reason, d.discount_amount, d.discount_reason
     `,
     params
   );
@@ -1817,6 +1822,18 @@ export async function getDocument(
       unitCost: l.unit_cost != null ? Number(l.unit_cost) : null,
     })),
     events: await listDocumentEvents(pool, documentId),
+    customerTotalWarehouseDebt: await (async () => {
+      if (!head.customer_id || !head.warehouse_id) return 0;
+      const { rows } = await pool.query<{ total: string }>(
+        `SELECT COALESCE(SUM(balance_amount), 0)::text AS total
+         FROM accounts_receivable
+         WHERE customer_id = $1::uuid
+           AND warehouse_id = $2::uuid
+           AND status IN ('open', 'partial')`,
+        [head.customer_id, head.warehouse_id]
+      );
+      return Number(rows[0]?.total ?? 0);
+    })(),
     receivable: await (async () => {
       if (head.exit_kind !== "credit") return null;
       const { rows: arRows } = await pool.query<{

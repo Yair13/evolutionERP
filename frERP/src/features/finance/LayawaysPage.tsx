@@ -36,7 +36,7 @@ function formatDate(iso: string | null): string {
 
 export function LayawaysPage() {
   const { token } = useAuth();
-  const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
+  const { warehouses, warehouseId, isAllWarehouses, loading: whLoading } = useWarehouse();
 
   // Filtros
   const [selectedWarehouse, setSelectedWarehouse] = useState<string>(
@@ -48,6 +48,8 @@ export function LayawaysPage() {
       setSelectedWarehouse(warehouseId);
     }
   }, [isAllWarehouses, warehouseId]);
+
+  const effectiveWarehouse = isAllWarehouses ? selectedWarehouse : (warehouseId || "");
   const [selectedStatus, setSelectedStatus] = useState<string>("active");
   const [searchQuery, setSearchQuery] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -76,13 +78,15 @@ export function LayawaysPage() {
   const [selectedDetailId, setSelectedDetailId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!token) return;
+    if (!token || whLoading) return;
+    if (!isAllWarehouses && !warehouseId) return;
+
     setLoading(true);
     setError(null);
 
     try {
       const res = await fetchLayaways(token, {
-        warehouseId: selectedWarehouse || null,
+        warehouseId: effectiveWarehouse || null,
         status: selectedStatus === "all" ? null : (selectedStatus as LayawayStatus),
         q: searchQuery.trim() || null,
         dateFrom: dateFrom || null,
@@ -99,7 +103,7 @@ export function LayawaysPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, selectedWarehouse, selectedStatus, searchQuery, dateFrom, dateTo, page]);
+  }, [token, whLoading, isAllWarehouses, warehouseId, effectiveWarehouse, selectedStatus, searchQuery, dateFrom, dateTo, page]);
 
   useEffect(() => {
     void loadData();

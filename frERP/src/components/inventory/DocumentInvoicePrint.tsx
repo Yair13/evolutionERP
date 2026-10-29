@@ -336,9 +336,15 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                   </div>
                 )}
                 <div className="sale-voucher-balance-box">
-                  <span>SALDO PENDIENTE:</span>
+                  <span>SALDO ESTA FACTURA:</span>
                   <strong>{formatMoney(balancePending)}</strong>
                 </div>
+                {doc.customerTotalWarehouseDebt != null && doc.customerTotalWarehouseDebt > 0 && (
+                  <div className="sale-voucher-balance-box" style={{ background: "#fef2f2", borderColor: "#fecaca", marginTop: "4px" }}>
+                    <span style={{ color: "#991b1b" }}>CARTERA TOTAL EN ESTA SEDE:</span>
+                    <strong style={{ color: "#b91c1c" }}>{formatMoney(doc.customerTotalWarehouseDebt)}</strong>
+                  </div>
+                )}
                 {doc.receivable?.dueDate && (
                   <div className="sale-voucher-row" style={{ marginTop: "3px" }}>
                     <span>Fecha límite de pago:</span>
@@ -365,6 +371,12 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                   <div className="sale-voucher-row">
                     <span>Pago:</span>
                     <strong>Contado</strong>
+                  </div>
+                )}
+                {doc.customerTotalWarehouseDebt != null && doc.customerTotalWarehouseDebt > 0 && (
+                  <div className="sale-voucher-balance-box" style={{ background: "#fef2f2", borderColor: "#fecaca", marginTop: "6px" }}>
+                    <span style={{ color: "#991b1b" }}>CARTERA PENDIENTE EN ESTA SEDE:</span>
+                    <strong style={{ color: "#b91c1c" }}>{formatMoney(doc.customerTotalWarehouseDebt)}</strong>
                   </div>
                 )}
               </div>
@@ -701,7 +713,7 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                     <tr className="inv-invoice__row-credit-balance">
                       <td colSpan={4}>
                         <span style={{ textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 800 }}>
-                          SALDO PENDIENTE (POR COBRAR)
+                          SALDO PENDIENTE (ESTA FACTURA)
                         </span>
                       </td>
                       <td>
@@ -716,6 +728,20 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                         </strong>
                       </td>
                     </tr>
+                    {doc.customerTotalWarehouseDebt != null && doc.customerTotalWarehouseDebt > 0 && (
+                      <tr className="inv-invoice__row-credit-balance" style={{ background: "#fef2f2" }}>
+                        <td colSpan={4}>
+                          <span style={{ textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 800, color: "#991b1b" }}>
+                            CARTERA TOTAL EN ESTA SEDE
+                          </span>
+                        </td>
+                        <td>
+                          <strong style={{ color: "#b91c1c", fontSize: "1.15em", fontWeight: 800 }}>
+                            {formatMoney(doc.customerTotalWarehouseDebt)}
+                          </strong>
+                        </td>
+                      </tr>
+                    )}
                   </>
                 ) : (
                   <>
@@ -780,11 +806,19 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                   </div>
                 ) : null}
                 <div className="inv-invoice__credit-stat">
-                  <span>Saldo pendiente</span>
+                  <span>Saldo esta factura</span>
                   <strong className={balancePending > 0 ? "is-balance" : "is-paid-amount"}>
                     {formatMoney(balancePending)}
                   </strong>
                 </div>
+                {doc.customerTotalWarehouseDebt != null && doc.customerTotalWarehouseDebt > 0 && (
+                  <div className="inv-invoice__credit-stat" style={{ borderLeft: "2px solid #e11d48", paddingLeft: "8px" }}>
+                    <span style={{ color: "#991b1b" }}>Cartera total en sede</span>
+                    <strong style={{ color: "#b91c1c" }}>
+                      {formatMoney(doc.customerTotalWarehouseDebt)}
+                    </strong>
+                  </div>
+                )}
                 {doc.receivable?.dueDate ? (
                   <div className="inv-invoice__credit-stat">
                     <span>Fecha límite</span>

@@ -182,6 +182,7 @@ export type InventoryDocumentDetail = {
   metadata?: any;
   lines: InventoryDocumentLine[];
   events?: DocumentStatusEvent[];
+  customerTotalWarehouseDebt?: number;
   receivable?: {
     id: string;
     totalAmount: number;

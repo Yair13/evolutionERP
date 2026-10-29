@@ -3,6 +3,7 @@ import {
   fetchCustomerCreditProfile,
   fetchReceivables,
   fetchWarehouseReceivablesReport,
+  deleteManualReceivable,
   type CustomerCreditProfile,
   type ReceivableSummaryItem,
   type WarehouseReceivablesReport,
@@ -14,6 +15,7 @@ import { formatBogotaDate } from "../../lib/dateUtils.js";
 import { AddPaymentModal } from "../../components/finance/AddPaymentModal.js";
 import { ReceivableDetailModal } from "../../components/finance/ReceivableDetailModal.js";
 import { CreateReceivableModal } from "../../components/finance/CreateReceivableModal.js";
+import { ResetInitialReceivablesModal } from "../../components/finance/ResetInitialReceivablesModal.js";
 import {
   Building2,
   Clock,
@@ -25,6 +27,8 @@ import {
   ArrowDownRight,
   TrendingUp,
   PlusCircle,
+  RotateCcw,
+  Trash2,
 } from "lucide-react";
 
 function formatMoney(n: number): string {
@@ -43,10 +47,17 @@ type TabMode = "credits" | "customer" | "report";
 
 export function ReceivablesPage() {
   const { token } = useAuth();
-  const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
+  const { warehouses, warehouseId, isAllWarehouses, loading: whLoading } = useWarehouse();
   const canSeeAll = isAllWarehouses;
 
   const [activeTab, setActiveTab] = useState<TabMode>("credits");
+
+  // Si no puede ver todas las sedes y estaba en la pestaña de reporte, volver a créditos
+  useEffect(() => {
+    if (!canSeeAll && activeTab === "report") {
+      setActiveTab("credits");
+    }
+  }, [canSeeAll, activeTab]);
 
   // Tab 1: Créditos
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
@@ -58,6 +69,10 @@ export function ReceivablesPage() {
       setSelectedWarehouseId(warehouseId);
     }
   }, [isAllWarehouses, warehouseId]);
+
+  // La sede efectiva es siempre la sede actual si no está en Sede Administrativa
+  const effectiveWarehouseId = isAllWarehouses ? selectedWarehouseId : (warehouseId || "");
+
   const [statusFilter, setStatusFilter] = useState<string>("pending");
   const [searchQuery, setSearchQuery] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -87,17 +102,45 @@ export function ReceivablesPage() {
 
   // Modales
   const [openCreateReceivable, setOpenCreateReceivable] = useState(false);
+  const [openResetModal, setOpenResetModal] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDeleteInitial = async (c: ReceivableSummaryItem) => {
+    const confirmed = window.confirm(
+      `¿Deseas eliminar el saldo inicial "${c.invoiceNumber}" del cliente ${c.customerName}?\n\n` +
+      `Sede: ${c.warehouseName} (${c.warehouseCode})\n` +
+      `Total: ${formatMoney(c.totalAmount)}\n` +
+      `Saldo pendiente: ${formatMoney(c.balanceAmount)}\n\n` +
+      `Esta acción no se puede deshacer y borrará también sus abonos registrados.`
+    );
+    if (!confirmed || !token) return;
+
+    setDeletingId(c.id);
+    try {
+      await deleteManualReceivable(token, c.id);
+      await loadCredits();
+      if (selectedCustId) void loadCustomerProfile(selectedCustId);
+      if (activeTab === "report") void loadReport();
+    } catch (err: any) {
+      alert(err?.message || "Error al eliminar saldo inicial");
+    } finally {
+      setDeletingId(null);
+    }
+  };
   const [activeReceivableForPayment, setActiveReceivableForPayment] = useState<ReceivableSummaryItem | null>(null);
   const [activeReceivableDetailId, setActiveReceivableDetailId] = useState<string | null>(null);
 
   // Carga de listado de créditos
   const loadCredits = useCallback(async () => {
-    if (!token) return;
+    if (!token || whLoading) return;
+    // Si no está en Sede Administrativa, esperar a que warehouseId esté definido para no consultar sin sede
+    if (!isAllWarehouses && !warehouseId) return;
+
     setLoading(true);
     setError(null);
     try {
       const res = await fetchReceivables(token, {
-        warehouseId: selectedWarehouseId || undefined,
+        warehouseId: effectiveWarehouseId || undefined,
         status: (statusFilter as any) || "pending",
         q: searchQuery.trim() || undefined,
         dateFrom: dateFrom || undefined,
@@ -111,7 +154,7 @@ export function ReceivablesPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, selectedWarehouseId, statusFilter, searchQuery, dateFrom, dateTo]);
+  }, [token, whLoading, isAllWarehouses, warehouseId, effectiveWarehouseId, statusFilter, searchQuery, dateFrom, dateTo]);
 
   useEffect(() => {
     if (activeTab === "credits") {
@@ -139,10 +182,12 @@ export function ReceivablesPage() {
   // Carga de ficha de cliente
   const loadCustomerProfile = useCallback(
     async (customerId: string) => {
-      if (!token) return;
+      if (!token || whLoading) return;
+      if (!isAllWarehouses && !warehouseId) return;
+
       setCustLoading(true);
       try {
-        const profile = await fetchCustomerCreditProfile(token, customerId);
+        const profile = await fetchCustomerCreditProfile(token, customerId, effectiveWarehouseId || undefined);
         setCustProfile(profile);
       } catch (err: any) {
         setError(err?.message || "Error al cargar cliente");
@@ -150,7 +195,7 @@ export function ReceivablesPage() {
         setCustLoading(false);
       }
     },
-    [token]
+    [token, whLoading, isAllWarehouses, warehouseId, effectiveWarehouseId]
   );
 
   useEffect(() => {
@@ -159,9 +204,9 @@ export function ReceivablesPage() {
     }
   }, [activeTab, selectedCustId, loadCustomerProfile]);
 
-  // Carga de reporte por sede
+  // Carga de reporte por sede (solo permitido si canSeeAll)
   const loadReport = useCallback(async () => {
-    if (!token) return;
+    if (!token || !canSeeAll) return;
     setReportLoading(true);
     try {
       const rep = await fetchWarehouseReceivablesReport(token);
@@ -171,13 +216,13 @@ export function ReceivablesPage() {
     } finally {
       setReportLoading(false);
     }
-  }, [token]);
+  }, [token, canSeeAll]);
 
   useEffect(() => {
-    if (activeTab === "report") {
+    if (activeTab === "report" && canSeeAll) {
       void loadReport();
     }
-  }, [activeTab, loadReport]);
+  }, [activeTab, canSeeAll, loadReport]);
 
   return (
     <div className="fin-page">
@@ -209,6 +254,19 @@ export function ReceivablesPage() {
             <span>+ Saldo Inicial / Factura Anterior</span>
           </button>
 
+          {canSeeAll && (
+            <button
+              type="button"
+              className="fin-btn fin-btn--danger"
+              onClick={() => setOpenResetModal(true)}
+              style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
+              title="Resetear o limpiar saldos iniciales manuales por sede"
+            >
+              <RotateCcw size={16} />
+              <span>Resetear Saldos Iniciales</span>
+            </button>
+          )}
+
           <div className="fin-tabs">
             <button
               type="button"
@@ -226,14 +284,16 @@ export function ReceivablesPage() {
               <User size={16} />
               <span>Ficha por Cliente</span>
             </button>
-            <button
-              type="button"
-              className={`fin-tab ${activeTab === "report" ? "is-active" : ""}`}
-              onClick={() => setActiveTab("report")}
-            >
-              <Building2 size={16} />
-              <span>Reporte por Sede</span>
-            </button>
+            {canSeeAll && (
+              <button
+                type="button"
+                className={`fin-tab ${activeTab === "report" ? "is-active" : ""}`}
+                onClick={() => setActiveTab("report")}
+              >
+                <Building2 size={16} />
+                <span>Reporte por Sede</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -502,6 +562,18 @@ export function ReceivablesPage() {
                             >
                               Detalles
                             </button>
+                            {canSeeAll && c.documentId === null && (
+                              <button
+                                type="button"
+                                className="fin-btn fin-btn--ghost fin-btn--sm"
+                                style={{ color: "#ef4444" }}
+                                onClick={() => handleDeleteInitial(c)}
+                                disabled={deletingId === c.id}
+                                title="Eliminar saldo inicial erróneo"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -606,7 +678,9 @@ export function ReceivablesPage() {
 
                 <div className="fin-kpi-card fin-kpi-card--rose">
                   <div className="fin-kpi-top">
-                    <span className="fin-kpi-label" style={{ color: "#e11d48" }}>Deuda Actual Total</span>
+                    <span className="fin-kpi-label" style={{ color: "#e11d48" }}>
+                      {canSeeAll ? "Deuda Consolidada (Todas las Sedes)" : `Deuda en ${warehouses.find((w) => w.id === warehouseId)?.name ?? "esta Sede"}`}
+                    </span>
                     <div className="fin-kpi-icon fin-kpi-icon--rose">
                       <Clock size={18} />
                     </div>
@@ -615,7 +689,7 @@ export function ReceivablesPage() {
                     {formatMoney(custProfile.stats.totalCurrentDebt)}
                   </div>
                   <div className="fin-kpi-sub">
-                    {custProfile.stats.activeCreditsCount} crédito(s) con saldo pendiente
+                    {custProfile.stats.activeCreditsCount} crédito(s) con saldo en {canSeeAll ? "toda la empresa" : (warehouses.find((w) => w.id === warehouseId)?.name ?? "esta sede")}
                   </div>
                 </div>
 
@@ -694,6 +768,18 @@ export function ReceivablesPage() {
                                 Ver
                               </button>
                             )}
+                            {canSeeAll && r.documentId === null && (
+                              <button
+                                type="button"
+                                className="fin-btn fin-btn--ghost fin-btn--sm"
+                                style={{ color: "#ef4444", marginLeft: "0.25rem" }}
+                                onClick={() => handleDeleteInitial(r)}
+                                disabled={deletingId === r.id}
+                                title="Eliminar saldo inicial erróneo"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -767,7 +853,7 @@ export function ReceivablesPage() {
       )}
 
       {/* ────────────────── TAB 3: REPORTE POR SEDES ────────────────── */}
-      {activeTab === "report" && (
+      {canSeeAll && activeTab === "report" && (
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
             <h3 style={{ margin: 0, fontSize: "1.1rem", color: "#0f172a", fontWeight: 700 }}>
@@ -849,9 +935,20 @@ export function ReceivablesPage() {
       )}
 
       {/* Modal para Registrar Saldo Inicial / Factura Anterior */}
+      <ResetInitialReceivablesModal
+        open={openResetModal}
+        onClose={() => setOpenResetModal(false)}
+        onSuccess={() => {
+          void loadCredits();
+          if (selectedCustId) void loadCustomerProfile(selectedCustId);
+          if (activeTab === "report") void loadReport();
+        }}
+      />
+
       <CreateReceivableModal
         open={openCreateReceivable}
         onClose={() => setOpenCreateReceivable(false)}
+        defaultWarehouseId={effectiveWarehouseId || warehouseId || ""}
         onSuccess={() => {
           void loadCredits();
           if (selectedCustId) void loadCustomerProfile(selectedCustId);

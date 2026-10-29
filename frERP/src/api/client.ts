@@ -59,8 +59,17 @@ export async function apiGetPublic<T>(path: string): Promise<T> {
 export async function apiPatch<T>(path: string, body: unknown, token: string): Promise<T> {
   const res = await fetch(`${base}${path}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...sessionScopeHeaders() },
     body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json() as Promise<T>;
+}
+
+export async function apiDelete<T>(path: string, token: string): Promise<T> {
+  const res = await fetch(`${base}${path}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}`, ...sessionScopeHeaders() },
   });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json() as Promise<T>;

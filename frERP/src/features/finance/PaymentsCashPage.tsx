@@ -105,10 +105,9 @@ const METHOD_STYLE: Record<
 };
 
 export function PaymentsCashPage() {
-  const { token, user } = useAuth();
-  const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
-  const canSeeAll =
-    isAllWarehouses || user?.roles.includes("super_admin") || user?.roles.includes("secretaria");
+  const { token } = useAuth();
+  const { warehouses, warehouseId, isAllWarehouses, loading: whLoading } = useWarehouse();
+  const canSeeAll = isAllWarehouses;
 
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
     isAllWarehouses ? "" : warehouseId || ""
@@ -119,6 +118,8 @@ export function PaymentsCashPage() {
       setSelectedWarehouseId(warehouseId);
     }
   }, [isAllWarehouses, warehouseId]);
+
+  const effectiveWarehouseId = isAllWarehouses ? selectedWarehouseId : (warehouseId || "");
   const [dateFrom, setDateFrom] = useState(localTodayYmd);
   const [dateTo, setDateTo] = useState(localTodayYmd);
   const [data, setData] = useState<PaymentsCashSummary | null>(null);
@@ -126,12 +127,14 @@ export function PaymentsCashPage() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!token) return;
+    if (!token || whLoading) return;
+    if (!isAllWarehouses && !warehouseId) return;
+
     setLoading(true);
     setError(null);
     try {
       const res = await fetchPaymentsCashSummary(token, {
-        warehouseId: selectedWarehouseId || undefined,
+        warehouseId: effectiveWarehouseId || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
       });
@@ -141,7 +144,7 @@ export function PaymentsCashPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, selectedWarehouseId, dateFrom, dateTo]);
+  }, [token, whLoading, isAllWarehouses, warehouseId, effectiveWarehouseId, dateFrom, dateTo]);
 
   useEffect(() => {
     void load();
