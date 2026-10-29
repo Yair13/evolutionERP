@@ -706,7 +706,6 @@ async function calculateMovementsBetween(
     WHERE warehouse_id = $1::uuid
       ${fromTime ? `AND created_at > '${fromTime}'::timestamptz` : ""}
       AND created_at <= '${toTime}'::timestamptz
-      AND (is_initial IS NOT TRUE)
       AND LOWER(TRIM(payment_method)) = 'efectivo'
     `,
     [warehouseId]
@@ -751,7 +750,6 @@ async function calculateMovementsBetween(
     WHERE warehouse_id = $1::uuid
       ${fromTime ? `AND created_at > '${fromTime}'::timestamptz` : ""}
       AND created_at <= '${toTime}'::timestamptz
-      AND (is_initial IS NOT TRUE)
       AND LOWER(TRIM(payment_method)) = 'efectivo'
     `,
     [warehouseId]
@@ -774,7 +772,6 @@ async function calculateMovementsBetween(
     WHERE warehouse_id = $1::uuid
       ${fromTime ? `AND created_at > '${fromTime}'::timestamptz` : ""}
       AND created_at <= '${toTime}'::timestamptz
-      AND (is_initial IS NOT TRUE)
       AND LOWER(TRIM(payment_method)) = 'efectivo'
     `,
     [warehouseId]
@@ -789,7 +786,6 @@ async function calculateMovementsBetween(
     WHERE warehouse_id = $1::uuid
       ${fromTime ? `AND created_at > '${fromTime}'::timestamptz` : ""}
       AND created_at <= '${toTime}'::timestamptz
-      AND (is_initial IS NOT TRUE)
       AND LOWER(TRIM(payment_method)) = 'efectivo'
       AND deducted_from_cash_register = true
     `,
@@ -865,7 +861,6 @@ async function calculateMovementsBetween(
     WHERE warehouse_id = $1::uuid
       ${fromTime ? `AND created_at > '${fromTime}'::timestamptz` : ""}
       AND created_at <= '${toTime}'::timestamptz
-      AND (is_initial IS NOT TRUE)
       AND LOWER(TRIM(payment_method)) NOT IN ('efectivo', 'saldo_a_favor')
     GROUP BY LOWER(TRIM(payment_method))
     `,
@@ -882,7 +877,6 @@ async function calculateMovementsBetween(
     WHERE warehouse_id = $1::uuid
       ${fromTime ? `AND created_at > '${fromTime}'::timestamptz` : ""}
       AND created_at <= '${toTime}'::timestamptz
-      AND (is_initial IS NOT TRUE)
       AND LOWER(TRIM(payment_method)) NOT IN ('efectivo', 'saldo_a_favor')
     GROUP BY LOWER(TRIM(payment_method))
     `,

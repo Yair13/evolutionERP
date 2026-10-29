@@ -17,6 +17,7 @@ import { createInventoryRouter } from "./routes/inventory.js";
 import { createFinanceRouter } from "./routes/finance.js";
 import { createSystemRouter } from "./routes/system.js";
 import { createWarehousesRouter } from "./routes/warehouses.js";
+import { runMigrations } from "./migrate.js";
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -86,6 +87,11 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 await ensureUploadsDir();
+try {
+  await runMigrations();
+} catch (migErr) {
+  console.error("Warning: Falló la ejecución de migraciones automáticas:", migErr);
+}
 
 const server = app.listen(port, () => {
   console.log(`API listening on http://localhost:${port}`);

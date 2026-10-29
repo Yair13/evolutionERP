@@ -144,7 +144,7 @@ export function AddDirectPaymentModal({
         if (!active) return;
         setHasInitialAlready(res.hasInitial);
         if (res.hasInitial) {
-          setIsInitial(false); // No se puede marcar inicial si ya tiene
+          setIsInitial(false);
         }
       })
       .catch((err) => {
@@ -210,7 +210,7 @@ export function AddDirectPaymentModal({
         customerId: selectedCustomer.id,
         paymentMethod: method,
         amount,
-        isInitial,
+        isInitial: canManageInitial ? isInitial : false,
         notes: notes.trim() || null,
         receiptUrl: uploadedUrl,
         receiptFilename: uploadedFilename,
@@ -226,43 +226,74 @@ export function AddDirectPaymentModal({
     }
   }
 
+  const selectedWarehouseName =
+    warehouses.find((w) => w.id === selectedWarehouseId)?.name || "Esta sede";
+
   return (
     <div className="inv-modal-backdrop" role="presentation" onClick={() => !submitting && onClose()}>
       <div
-        className="inv-modal"
+        className="inv-modal inv-modal--checkout"
         role="dialog"
         aria-labelledby="direct-payment-title"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: "600px" }}
+        style={{
+          width: "min(620px, 95vw)",
+          maxHeight: "92vh",
+          overflowY: "auto",
+          background: "#ffffff",
+          borderRadius: 16,
+          padding: "24px",
+          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+        }}
       >
-        <div className="inv-modal__header" style={{ borderBottom: "1px solid var(--border-color)", paddingBottom: "1rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+        {/* Cabecera del modal */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            borderBottom: "1px solid #e2e8f0",
+            paddingBottom: "14px",
+            marginBottom: "16px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <div
               style={{
-                width: 36,
-                height: 36,
-                borderRadius: "8px",
-                background: "rgba(16, 185, 129, 0.12)",
-                color: "#10b981",
+                width: 42,
+                height: 42,
+                borderRadius: 10,
+                background: "#ecfdf5",
+                color: "#059669",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
+                flexShrink: 0,
               }}
             >
-              <Wallet size={20} />
+              <Wallet size={22} />
             </div>
             <div>
-              <h2 id="direct-payment-title" className="inv-modal__title" style={{ margin: 0, fontSize: "1.15rem" }}>
+              <h2
+                id="direct-payment-title"
+                style={{
+                  margin: 0,
+                  fontSize: "1.2rem",
+                  fontWeight: 700,
+                  color: "#0f172a",
+                }}
+              >
                 Registrar Abono sin Factura
               </h2>
-              <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "var(--text-muted)" }}>
+              <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#64748b" }}>
                 Abono anticipado de dinero para saldo a favor del cliente
               </p>
             </div>
           </div>
           <button
             type="button"
-            className="inv-modal__close"
+            className="inv-btn inv-btn--ghost"
+            style={{ width: 34, height: 34, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
             onClick={onClose}
             disabled={submitting}
             aria-label="Cerrar modal"
@@ -271,38 +302,46 @@ export function AddDirectPaymentModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem", marginTop: "1rem" }}>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           {error && (
             <div
               style={{
-                padding: "0.75rem 1rem",
-                borderRadius: "8px",
-                background: "rgba(239, 68, 68, 0.1)",
-                border: "1px solid rgba(239, 68, 68, 0.3)",
-                color: "#ef4444",
+                padding: "10px 14px",
+                borderRadius: 8,
+                background: "#fef2f2",
+                border: "1px solid #fecaca",
+                color: "#b91c1c",
                 fontSize: "0.85rem",
                 display: "flex",
                 alignItems: "center",
-                gap: "0.5rem",
+                gap: "8px",
               }}
             >
-              <AlertCircle size={16} />
+              <AlertCircle size={18} style={{ flexShrink: 0 }} />
               <span>{error}</span>
             </div>
           )}
 
           {/* Sede */}
           {isAllWarehouses && warehouses.length > 1 ? (
-            <div className="inv-form-group">
-              <label className="inv-form-label" style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                <Building2 size={15} style={{ color: "var(--text-muted)" }} />
-                <span>Sede donde se recibe el abono *</span>
-              </label>
+            <label className="field" style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <span style={{ fontSize: "0.84rem", fontWeight: 600, color: "#334155" }}>
+                Sede donde se recibe el abono *
+              </span>
               <select
-                className="inv-input"
                 value={selectedWarehouseId}
                 onChange={(e) => setSelectedWarehouseId(e.target.value)}
                 disabled={submitting}
+                style={{
+                  width: "100%",
+                  padding: "9px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #cbd5e1",
+                  background: "#ffffff",
+                  color: "#0f172a",
+                  fontSize: "0.9rem",
+                  boxSizing: "border-box",
+                }}
               >
                 {warehouses.map((w) => (
                   <option key={w.id} value={w.id}>
@@ -310,109 +349,134 @@ export function AddDirectPaymentModal({
                   </option>
                 ))}
               </select>
-            </div>
+            </label>
           ) : (
             <div
               style={{
-                padding: "0.55rem 0.85rem",
-                borderRadius: "6px",
-                background: "var(--surface-color)",
-                border: "1px solid var(--border-color)",
-                fontSize: "0.82rem",
-                color: "var(--text-muted)",
+                padding: "8px 12px",
+                borderRadius: 8,
+                background: "#f8fafc",
+                border: "1px solid #e2e8f0",
+                fontSize: "0.84rem",
+                color: "#475569",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
               }}
             >
-              Sede receptora: <strong>{warehouses.find((w) => w.id === selectedWarehouseId)?.name || "Esta sede"}</strong>
+              <Building2 size={16} color="#6366f1" />
+              <span>
+                Sede receptora: <strong style={{ color: "#0f172a" }}>{selectedWarehouseName}</strong>
+              </span>
             </div>
           )}
 
-          {/* Cliente */}
-          <div className="inv-form-group">
-            <label className="inv-form-label" style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-              <User size={15} style={{ color: "var(--text-muted)" }} />
-              <span>Cliente *</span>
-            </label>
+          {/* Sección de Cliente */}
+          <div
+            style={{
+              background: "#f8fafc",
+              padding: "12px 14px",
+              borderRadius: 10,
+              border: "1px solid #e2e8f0",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: "0.84rem", fontWeight: 600, color: "#334155" }}>
+                Cliente *
+              </span>
+            </div>
+
             {selectedCustomer ? (
               <div
                 style={{
                   display: "flex",
-                  alignItems: "center",
                   justifyContent: "space-between",
-                  padding: "0.6rem 0.85rem",
-                  background: "rgba(99, 102, 241, 0.08)",
-                  border: "1px solid rgba(99, 102, 241, 0.25)",
-                  borderRadius: "8px",
+                  alignItems: "center",
+                  background: "#ffffff",
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #cbd5e1",
                 }}
               >
                 <div>
-                  <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>
-                    {selectedCustomer.displayName}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <User size={16} color="#6366f1" />
+                    <strong style={{ color: "#0f172a", fontSize: "0.95rem" }}>
+                      {selectedCustomer.displayName}
+                    </strong>
                   </div>
-                  {selectedCustomer.taxId && (
-                    <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                      CC/NIT: {selectedCustomer.taxId}
+                  <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: 2 }}>
+                    CC / NIT: {selectedCustomer.taxId || "—"} · Tel: {selectedCustomer.phone || "—"}
+                  </div>
+                  {Number(selectedCustomer.creditBalance) > 0 && (
+                    <div style={{ color: "#059669", fontSize: "0.82rem", fontWeight: 600, marginTop: 4 }}>
+                      💰 Saldo a favor disponible: {formatMoney(Number(selectedCustomer.creditBalance))}
                     </div>
                   )}
                 </div>
+
                 {!defaultCustomerId && (
                   <button
                     type="button"
-                    className="fin-btn fin-btn--ghost fin-btn--sm"
+                    className="inv-btn inv-btn--ghost"
                     onClick={() => {
                       setSelectedCustomer(null);
                       setCustomerSearch("");
-                      setHasInitialAlready(false);
+                      setCustomerList([]);
                     }}
                     disabled={submitting}
+                    style={{ fontSize: "0.8rem", padding: "4px 10px", height: "auto" }}
                   >
                     Cambiar
                   </button>
                 )}
               </div>
             ) : (
-              <div style={{ position: "relative" }}>
+              <div>
                 <input
                   type="text"
-                  className="inv-input"
-                  placeholder="Buscar por nombre, cédula o teléfono..."
+                  placeholder="Buscar cliente por nombre, cédula o teléfono..."
                   value={customerSearch}
                   onChange={(e) => setCustomerSearch(e.target.value)}
                   disabled={submitting}
                   autoFocus
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                    color: "#0f172a",
+                    fontSize: "0.9rem",
+                    boxSizing: "border-box",
+                  }}
                 />
+
                 {searching && (
-                  <span
-                    style={{
-                      position: "absolute",
-                      right: "0.75rem",
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      fontSize: "0.75rem",
-                      color: "var(--text-muted)",
-                    }}
-                  >
-                    Buscando...
+                  <span style={{ fontSize: "0.75rem", color: "#64748b", display: "block", marginTop: 4 }}>
+                    Buscando clientes...
                   </span>
                 )}
+
                 {customerList.length > 0 && (
-                  <div
+                  <ul
                     style={{
-                      position: "absolute",
-                      top: "100%",
-                      left: 0,
-                      right: 0,
-                      background: "var(--surface-color)",
-                      border: "1px solid var(--border-color)",
-                      borderRadius: "8px",
-                      marginTop: "4px",
-                      maxHeight: "180px",
+                      maxHeight: 180,
                       overflowY: "auto",
-                      zIndex: 30,
-                      boxShadow: "0 6px 20px rgba(0,0,0,0.18)",
+                      margin: "8px 0 0",
+                      listStyle: "none",
+                      padding: 0,
+                      border: "1px solid #cbd5e1",
+                      borderRadius: 8,
+                      background: "#ffffff",
+                      boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)",
                     }}
                   >
                     {customerList.map((c) => (
-                      <div
+                      <li
                         key={c.id}
                         onClick={() => {
                           setSelectedCustomer(c);
@@ -420,63 +484,89 @@ export function AddDirectPaymentModal({
                           setCustomerList([]);
                         }}
                         style={{
-                          padding: "0.55rem 0.85rem",
                           cursor: "pointer",
-                          borderBottom: "1px solid var(--border-color)",
+                          padding: "9px 12px",
+                          borderBottom: "1px solid #f1f5f9",
                           display: "flex",
                           justifyContent: "space-between",
                           alignItems: "center",
-                          fontSize: "0.85rem",
+                          color: "#0f172a",
+                          fontSize: "0.88rem",
                         }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(99, 102, 241, 0.08)")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "#ffffff")}
                       >
                         <div>
                           <strong>{c.displayName}</strong>
-                          {c.taxId && <span style={{ color: "var(--text-muted)", marginLeft: "0.5rem" }}>({c.taxId})</span>}
+                          <span style={{ color: "#64748b", marginLeft: 6, fontSize: "0.8rem" }}>
+                            ({c.taxId || "Sin CC"})
+                          </span>
                         </div>
                         {c.creditBalance != null && c.creditBalance > 0 && (
-                          <span style={{ color: "#10b981", fontSize: "0.8rem", fontWeight: 600 }}>
+                          <span style={{ color: "#059669", fontSize: "0.8rem", fontWeight: 600 }}>
                             A favor: {formatMoney(c.creditBalance)}
                           </span>
                         )}
-                      </div>
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                 )}
               </div>
             )}
           </div>
 
           {/* Valor a abonar y Método de pago */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-            <div className="inv-form-group">
-              <label className="inv-form-label">Valor a abonar (COP) *</label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <label className="field" style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <span style={{ fontSize: "0.84rem", fontWeight: 600, color: "#334155" }}>
+                Valor a abonar (COP) *
+              </span>
               <input
                 type="number"
                 min="1"
                 step="any"
-                className="inv-input"
                 placeholder="0"
                 value={amountStr}
                 onChange={(e) => setAmountStr(e.target.value)}
                 disabled={submitting}
-                style={{ fontSize: "1.1rem", fontWeight: 700 }}
+                style={{
+                  width: "100%",
+                  padding: "9px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #cbd5e1",
+                  background: "#ffffff",
+                  fontSize: "1.1rem",
+                  fontWeight: 700,
+                  color: "#0f172a",
+                  boxSizing: "border-box",
+                }}
               />
               {amount > 0 && (
-                <div style={{ fontSize: "0.78rem", color: "#10b981", marginTop: "2px", fontWeight: 600 }}>
+                <span style={{ fontSize: "0.82rem", color: "#059669", fontWeight: 700 }}>
                   {formatMoney(amount)}
-                </div>
+                </span>
               )}
-            </div>
+            </label>
 
-            <div className="inv-form-group">
-              <label className="inv-form-label">Medio de pago *</label>
+            <label className="field" style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <span style={{ fontSize: "0.84rem", fontWeight: 600, color: "#334155" }}>
+                Medio de pago *
+              </span>
               <select
-                className="inv-input"
                 value={method}
                 onChange={(e) => setMethod(e.target.value)}
                 disabled={submitting}
+                style={{
+                  width: "100%",
+                  padding: "9px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #cbd5e1",
+                  background: "#ffffff",
+                  color: "#0f172a",
+                  fontSize: "0.9rem",
+                  boxSizing: "border-box",
+                  minHeight: 42,
+                }}
               >
                 {PAYMENT_METHODS.map((m) => (
                   <option key={m.value} value={m.value}>
@@ -484,19 +574,19 @@ export function AddDirectPaymentModal({
                   </option>
                 ))}
               </select>
-            </div>
+            </label>
           </div>
 
-          {/* CONTROL DE SALDO INICIAL (SOLO ADMINISTRADOR) O ABONO DE SEDE */}
+          {/* CONTROL DE SALDO INICIAL O AVISO DE RECAUDO EN CAJA */}
           <div
             style={{
-              padding: "0.75rem 0.9rem",
-              borderRadius: "8px",
-              background: isInitial ? "rgba(245, 158, 11, 0.08)" : "rgba(16, 185, 129, 0.06)",
-              border: `1px solid ${isInitial ? "rgba(245, 158, 11, 0.3)" : "rgba(16, 185, 129, 0.2)"}`,
+              padding: "12px 14px",
+              borderRadius: 10,
+              background: isInitial ? "#fffbeb" : "#f0fdf4",
+              border: `1px solid ${isInitial ? "#fcd34d" : "#bbf7d0"}`,
               display: "flex",
               flexDirection: "column",
-              gap: "0.5rem",
+              gap: "6px",
             }}
           >
             {canManageInitial ? (
@@ -505,11 +595,11 @@ export function AddDirectPaymentModal({
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
-                    gap: "0.55rem",
+                    gap: "8px",
                     cursor: hasInitialAlready ? "not-allowed" : "pointer",
                     fontWeight: 600,
-                    fontSize: "0.87rem",
-                    color: isInitial ? "#d97706" : "var(--text-primary)",
+                    fontSize: "0.88rem",
+                    color: isInitial ? "#92400e" : "#166534",
                   }}
                 >
                   <input
@@ -523,24 +613,24 @@ export function AddDirectPaymentModal({
                 </label>
 
                 {hasInitialAlready && (
-                  <div style={{ fontSize: "0.78rem", color: "#ef4444", display: "flex", alignItems: "center", gap: "0.35rem" }}>
-                    <AlertCircle size={14} />
+                  <div style={{ fontSize: "0.8rem", color: "#b91c1c", display: "flex", alignItems: "center", gap: 5 }}>
+                    <AlertCircle size={15} style={{ flexShrink: 0 }} />
                     <span>Este cliente ya tiene registrado un saldo inicial en esta sede (solo se permite 1 inicial). Se registrará como abono normal de hoy.</span>
                   </div>
                 )}
 
                 {!hasInitialAlready && isInitial && (
-                  <div style={{ fontSize: "0.78rem", color: "#d97706", display: "flex", alignItems: "center", gap: "0.35rem" }}>
-                    <Info size={14} />
+                  <div style={{ fontSize: "0.8rem", color: "#92400e", display: "flex", alignItems: "center", gap: 5 }}>
+                    <Info size={15} style={{ flexShrink: 0 }} />
                     <span>
-                      <strong>Atención:</strong> Al ser saldo inicial, este valor <strong>NO sumará a la caja ni al recaudo de hoy</strong>. Solo se registrará como saldo a favor disponible del cliente.
+                      <strong>Atención:</strong> Al ser saldo inicial, este valor <strong>NO sumará a la caja ni al recaudo de hoy</strong>. Solo se registrará como saldo a favor del cliente.
                     </span>
                   </div>
                 )}
 
                 {!isInitial && (
-                  <div style={{ fontSize: "0.78rem", color: "#059669", display: "flex", alignItems: "center", gap: "0.35rem" }}>
-                    <CheckCircle2 size={14} />
+                  <div style={{ fontSize: "0.8rem", color: "#166534", display: "flex", alignItems: "center", gap: 5 }}>
+                    <CheckCircle2 size={15} style={{ flexShrink: 0 }} />
                     <span>
                       El dinero ingresará a la <strong>caja / recaudos de hoy</strong> en esta sede ({method}) y sumará de inmediato al <strong>saldo a favor</strong> del cliente para cuando reclame productos.
                     </span>
@@ -548,8 +638,8 @@ export function AddDirectPaymentModal({
                 )}
               </>
             ) : (
-              <div style={{ fontSize: "0.82rem", color: "#059669", display: "flex", alignItems: "center", gap: "0.45rem" }}>
-                <CheckCircle2 size={16} />
+              <div style={{ fontSize: "0.84rem", color: "#166534", display: "flex", alignItems: "center", gap: 6 }}>
+                <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
                 <span>
                   <strong>Abono de sede física:</strong> El dinero entra a la caja/bancos de hoy ({method}) de esta sede y se acredita como saldo a favor disponible del cliente.
                 </span>
@@ -566,32 +656,46 @@ export function AddDirectPaymentModal({
           />
 
           {/* Notas */}
-          <div className="inv-form-group">
-            <label className="inv-form-label">Notas / Concepto (opcional)</label>
+          <label className="field" style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <span style={{ fontSize: "0.84rem", fontWeight: 600, color: "#334155" }}>
+              Notas / Concepto (opcional)
+            </span>
             <textarea
-              className="inv-input"
               rows={2}
               placeholder="Ej: Abono anticipado para separar o reclamar productos más adelante..."
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               disabled={submitting}
-              style={{ resize: "none" }}
+              style={{
+                width: "100%",
+                padding: "9px 12px",
+                borderRadius: 8,
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#0f172a",
+                fontSize: "0.88rem",
+                boxSizing: "border-box",
+                resize: "none",
+                fontFamily: "inherit",
+              }}
             />
-          </div>
+          </label>
 
+          {/* Acciones */}
           <div
+            className="inv-modal__actions"
             style={{
               display: "flex",
               justifyContent: "flex-end",
-              gap: "0.75rem",
-              borderTop: "1px solid var(--border-color)",
-              paddingTop: "1rem",
-              marginTop: "0.5rem",
+              gap: "10px",
+              borderTop: "1px solid #e2e8f0",
+              paddingTop: "14px",
+              marginTop: "4px",
             }}
           >
             <button
               type="button"
-              className="fin-btn fin-btn--ghost"
+              className="inv-btn inv-btn--ghost"
               onClick={onClose}
               disabled={submitting}
             >
@@ -599,11 +703,24 @@ export function AddDirectPaymentModal({
             </button>
             <button
               type="submit"
-              className="fin-btn fin-btn--primary"
+              className="inv-btn inv-btn--primary"
               disabled={submitting || amount <= 0 || !selectedCustomer}
-              style={{ minWidth: "160px" }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                background: "#059669",
+                color: "#ffffff",
+                padding: "9px 18px",
+                borderRadius: 8,
+                fontWeight: 600,
+                fontSize: "0.92rem",
+                cursor: (submitting || amount <= 0 || !selectedCustomer) ? "not-allowed" : "pointer",
+                opacity: (submitting || amount <= 0 || !selectedCustomer) ? 0.6 : 1,
+              }}
             >
-              {submitting ? "Guardando..." : "Guardar Abono"}
+              <CheckCircle2 size={16} />
+              <span>{submitting ? "Guardando..." : "Guardar Abono"}</span>
             </button>
           </div>
         </form>
