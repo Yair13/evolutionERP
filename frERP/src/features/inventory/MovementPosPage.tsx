@@ -972,6 +972,8 @@ export function MovementPosPage({ mode }: Props) {
         setError("Indica el nombre del cliente o selecciona uno para la venta.");
       } else if (msg === "payment_total_mismatch" || msg === "invalid_payment_breakdown") {
         setError("La suma de los métodos de pago debe ser igual al total de la venta.");
+      } else if (msg === "discount_exceeds_max_percent" || msg === "discount_exceeds_subtotal") {
+        setError("El descuento no puede superar el 10% del valor total de la factura.");
       } else if (msg === "related_invoice_required") {
         setError("Indica el número de factura de la salida original (cambios / garantías).");
       } else if (msg === "sale_price_below_suggested") {

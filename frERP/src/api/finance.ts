@@ -123,6 +123,25 @@ export interface PaymentCashOperationItem {
   createdByName: string | null;
   createdAt: string;
   receiptUrls: string[];
+  discountAmount?: number;
+  discountReason?: string | null;
+  subtotalAmount?: number;
+}
+
+export interface PaymentCashDiscountItem {
+  id: string;
+  invoiceNumber: string;
+  exitKind: string;
+  customerName: string;
+  subtotalAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  discountReason: string | null;
+  itemsSummary: string | null;
+  warehouseCode: string | null;
+  warehouseName: string | null;
+  createdByName: string | null;
+  createdAt: string;
 }
 
 export interface PaymentsCashSummary {
@@ -137,6 +156,9 @@ export interface PaymentsCashSummary {
   cashTransfersReturnedAmount?: number;
   cashTransfersSentAmount?: number;
   netCashInDrawer?: number;
+  totalDiscountsAmount?: number;
+  discountsCount?: number;
+  discounts?: PaymentCashDiscountItem[];
   methods: {
     method: string;
     label: string;
@@ -1296,6 +1318,25 @@ export interface DailyClosureWorksheet {
   receiptAuditList: ReceiptAuditItem[];
   pendingReceiptsCount: number;
   existingBankBreakdown?: Record<string, number>;
+
+  // Control de descuentos en facturas de venta
+  totalDiscountsAmount?: number;
+  discountsCount?: number;
+  discountItems?: DiscountInvoiceAuditItem[];
+}
+
+export interface DiscountInvoiceAuditItem {
+  id: string;
+  invoiceNumber: string;
+  exitKind: string;
+  customerName: string;
+  subtotalAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  discountReason: string | null;
+  itemsSummary: string | null;
+  createdByName: string | null;
+  createdAt: string;
 }
 
 export interface DailyClosureRecord {

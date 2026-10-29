@@ -89,6 +89,25 @@ export interface DailyClosureWorksheet {
     countedCash: number;
     cashierName?: string | null;
   }[];
+
+  // Control de descuentos en facturas de venta
+  totalDiscountsAmount?: number;
+  discountsCount?: number;
+  discountItems?: DiscountInvoiceAuditItem[];
+}
+
+export interface DiscountInvoiceAuditItem {
+  id: string;
+  invoiceNumber: string;
+  exitKind: string;
+  customerName: string;
+  subtotalAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  discountReason: string | null;
+  itemsSummary: string | null;
+  createdByName: string | null;
+  createdAt: string;
 }
 
 export interface DailyClosureRecord {
@@ -525,6 +544,88 @@ async function getReceiptAuditItemsBetween(
 }
 
 /**
+ * Obtener listado de facturas con descuento entre dos momentos temporales para una sede.
+ */
+async function getDiscountAuditItemsBetween(
+  pool: pg.Pool,
+  warehouseId: string,
+  fromTime: string | null,
+  toTime: string
+): Promise<DiscountInvoiceAuditItem[]> {
+  const { rows } = await pool.query<any>(
+    `
+    SELECT
+      d.id::text AS id,
+      COALESCE(d.invoice_number, 'DOC-' || SUBSTRING(d.id::text, 1, 6)) AS "invoiceNumber",
+      COALESCE(d.exit_kind, 'sale') AS "exitKind",
+      COALESCE(c.display_name, d.metadata->>'customerName', 'Cliente Mostrador') AS "customerName",
+      COALESCE(
+        (d.metadata->>'subtotalAmount')::numeric,
+        (
+          SELECT COALESCE(SUM(idl.quantity * COALESCE(idl.unit_sale_price, 0)), 0)
+          FROM inventory_document_lines idl
+          WHERE idl.document_id = d.id
+        ),
+        0
+      )::float AS "subtotalAmount",
+      COALESCE(
+        NULLIF(d.discount_amount, 0),
+        NULLIF((d.metadata->>'discountAmount')::numeric, 0),
+        0
+      )::float AS "discountAmount",
+      COALESCE(
+        (d.metadata->>'totalAmount')::numeric,
+        GREATEST(
+          0,
+          COALESCE(
+            (
+              SELECT COALESCE(SUM(idl.quantity * COALESCE(idl.unit_sale_price, 0)), 0)
+              FROM inventory_document_lines idl
+              WHERE idl.document_id = d.id
+            ),
+            0
+          ) - COALESCE(NULLIF(d.discount_amount, 0), NULLIF((d.metadata->>'discountAmount')::numeric, 0), 0)
+        )
+      )::float AS "totalAmount",
+      COALESCE(NULLIF(TRIM(d.discount_reason), ''), NULLIF(TRIM(d.metadata->>'discountReason'), ''), d.notes) AS "discountReason",
+      (
+        SELECT STRING_AGG(idl.quantity::text || 'x ' || pr.name, ', ')
+        FROM inventory_document_lines idl
+        JOIN products pr ON pr.id = idl.product_id
+        WHERE idl.document_id = d.id
+      ) AS "itemsSummary",
+      u.full_name AS "createdByName",
+      COALESCE(d.completed_at, d.created_at) AS "createdAt"
+    FROM inventory_documents d
+    LEFT JOIN customers c ON c.id = d.customer_id
+    LEFT JOIN users u ON u.id = d.created_by
+    WHERE d.status = 'completed'
+      AND d.doc_type IN ('exit', 'sale')
+      AND d.warehouse_id = $1::uuid
+      ${fromTime ? `AND COALESCE(d.completed_at, d.created_at) > '${fromTime}'::timestamptz` : ""}
+      AND COALESCE(d.completed_at, d.created_at) <= '${toTime}'::timestamptz
+      AND COALESCE(NULLIF(d.discount_amount, 0), NULLIF((d.metadata->>'discountAmount')::numeric, 0), 0) > 0
+    ORDER BY COALESCE(d.completed_at, d.created_at) DESC
+    `,
+    [warehouseId]
+  );
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    invoiceNumber: r.invoiceNumber || "S/N",
+    exitKind: r.exitKind || "sale",
+    customerName: r.customerName || "Cliente Mostrador",
+    subtotalAmount: Number(r.subtotalAmount || 0),
+    discountAmount: Number(r.discountAmount || 0),
+    totalAmount: Number(r.totalAmount || 0),
+    discountReason: r.discountReason || null,
+    itemsSummary: r.itemsSummary || null,
+    createdByName: r.createdByName || null,
+    createdAt: new Date(r.createdAt).toISOString(),
+  }));
+}
+
+/**
  * Calcular totales de movimientos entre dos momentos temporales para una sede.
  */
 async function calculateMovementsBetween(
@@ -548,6 +649,9 @@ async function calculateMovementsBetween(
   bankMethods: DailyClosureWorksheet["bankMethods"];
   receiptAuditList: ReceiptAuditItem[];
   pendingReceiptsCount: number;
+  totalDiscountsAmount: number;
+  discountsCount: number;
+  discountItems: DiscountInvoiceAuditItem[];
 }> {
   const fromTime = startedAt ? new Date(startedAt).toISOString() : null;
   const toTime = closedAt ? new Date(closedAt).toISOString() : new Date().toISOString();
@@ -800,9 +904,14 @@ async function calculateMovementsBetween(
   }));
   const bankPaymentsTotal = bankMethods.reduce((s, b) => s + b.amount, 0);
 
-  // 7. Auditoría de comprobantes
-  const auditList = await getReceiptAuditItemsBetween(pool, warehouseId, fromTime, toTime);
+  // 7. Auditoría de comprobantes y descuentos en facturas
+  const [auditList, discountItems] = await Promise.all([
+    getReceiptAuditItemsBetween(pool, warehouseId, fromTime, toTime),
+    getDiscountAuditItemsBetween(pool, warehouseId, fromTime, toTime),
+  ]);
   const pendingReceiptsCount = auditList.filter((a) => a.isMissing).length;
+  const totalDiscountsAmount = discountItems.reduce((s, d) => s + d.discountAmount, 0);
+  const discountsCount = discountItems.length;
 
   return {
     cashSales,
@@ -820,6 +929,9 @@ async function calculateMovementsBetween(
     bankMethods,
     receiptAuditList: auditList,
     pendingReceiptsCount,
+    totalDiscountsAmount,
+    discountsCount,
+    discountItems,
   };
 }
 
@@ -967,8 +1079,13 @@ export async function getDailyClosureData(
         count: 1,
       }));
 
-      const auditList = await getReceiptAuditItemsBetween(pool, warehouseId, startedAt, closedAt);
+      const [auditList, discountItems] = await Promise.all([
+        getReceiptAuditItemsBetween(pool, warehouseId, startedAt, closedAt),
+        getDiscountAuditItemsBetween(pool, warehouseId, startedAt, closedAt),
+      ]);
       const pendingReceiptsCount = auditList.filter((a) => a.isMissing).length;
+      const totalDiscountsAmount = discountItems.reduce((s, d) => s + d.discountAmount, 0);
+      const discountsCount = discountItems.length;
 
       const { rows: retRows } = await pool.query<{ amount: string }>(
         `
@@ -1055,6 +1172,9 @@ export async function getDailyClosureData(
         pendingReceiptsCount,
         existingBankBreakdown,
         dayShifts,
+        totalDiscountsAmount,
+        discountsCount,
+        discountItems,
       };
     }
   }
@@ -1186,6 +1306,9 @@ export async function getDailyClosureData(
     receiptAuditList: mov.receiptAuditList,
     pendingReceiptsCount: mov.pendingReceiptsCount,
     dayShifts,
+    totalDiscountsAmount: mov.totalDiscountsAmount,
+    discountsCount: mov.discountsCount,
+    discountItems: mov.discountItems,
   };
 }
 

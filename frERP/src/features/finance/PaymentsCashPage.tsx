@@ -3,6 +3,7 @@ import {
   fetchPaymentsCashSummary,
   type PaymentsCashSummary,
   type PaymentCashOperationItem,
+  type PaymentCashDiscountItem,
 } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
@@ -25,6 +26,7 @@ import {
   Camera,
   ArrowUpRight,
   ArrowDownRight,
+  Tag,
 } from "lucide-react";
 import { ViewReceiptPhotosModal } from "../../components/common/ViewReceiptPhotosModal.js";
 
@@ -202,6 +204,10 @@ export function PaymentsCashPage() {
   const [viewingReceiptUrls, setViewingReceiptUrls] = useState<string[] | null>(null);
   const [viewingReceiptRef, setViewingReceiptRef] = useState<string>("");
 
+  // Modal de control de descuentos en facturas
+  const [openDiscountsModal, setOpenDiscountsModal] = useState<boolean>(false);
+  const [discountSearch, setDiscountSearch] = useState<string>("");
+
   const openScopeModal = (scope: ModalScope) => {
     setModalScope(scope);
     setOpCategoryFilter(scope.initialFilter || "all");
@@ -364,6 +370,21 @@ export function PaymentsCashPage() {
     modalScope?.kind === "cash_net" ||
     (modalScope?.kind === "method" && modalScope.method === "efectivo");
 
+  const filteredDiscounts = useMemo<PaymentCashDiscountItem[]>(() => {
+    const list = data?.discounts ?? [];
+    if (!discountSearch.trim()) return list;
+    const q = discountSearch.trim().toLowerCase();
+    return list.filter(
+      (d) =>
+        d.invoiceNumber.toLowerCase().includes(q) ||
+        d.customerName.toLowerCase().includes(q) ||
+        (d.discountReason && d.discountReason.toLowerCase().includes(q)) ||
+        (d.itemsSummary && d.itemsSummary.toLowerCase().includes(q)) ||
+        (d.createdByName && d.createdByName.toLowerCase().includes(q)) ||
+        (d.warehouseName && d.warehouseName.toLowerCase().includes(q))
+    );
+  }, [data?.discounts, discountSearch]);
+
   return (
     <div className="fin-page">
       {/* Encabezado */}
@@ -473,7 +494,10 @@ export function PaymentsCashPage() {
 
       {/* KPI Summary Cards */}
       {data && (
-        <div className="fin-kpi-grid fin-kpi-grid--4">
+        <div
+          className="fin-kpi-grid fin-kpi-grid--4"
+          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))" }}
+        >
           {/* 1. Total Recaudado Global */}
           <div
             className="fin-kpi-card fin-kpi-card--emerald"
@@ -592,6 +616,38 @@ export function PaymentsCashPage() {
               </span>
               <span style={{ fontSize: "0.73rem", fontWeight: 700, color: "#0d9488", display: "inline-flex", alignItems: "center", gap: 3 }}>
                 <Eye size={13} /> Ver todos
+              </span>
+            </div>
+          </div>
+
+          {/* 5. Control de Descuentos en Facturas de Venta */}
+          <div
+            className="fin-kpi-card fin-kpi-card--rose"
+            style={{ cursor: "pointer" }}
+            title="Clic para auditar los descuentos otorgados en facturas de venta"
+            onClick={() => {
+              setDiscountSearch("");
+              setOpenDiscountsModal(true);
+            }}
+          >
+            <div className="fin-kpi-top">
+              <span className="fin-kpi-label">Descuentos en Facturas</span>
+              <div className="fin-kpi-icon fin-kpi-icon--rose">
+                <Tag size={18} />
+              </div>
+            </div>
+            <div className="fin-kpi-val fin-kpi-val--rose">
+              {(data.totalDiscountsAmount ?? 0) > 0
+                ? `- ${formatMoney(data.totalDiscountsAmount ?? 0)}`
+                : formatMoney(0)}
+            </div>
+            <div className="fin-kpi-sub" style={{ justifyContent: "space-between" }}>
+              <span>
+                {data.discountsCount ?? 0}{" "}
+                {(data.discountsCount ?? 0) === 1 ? "factura con descuento" : "facturas con descuento"}
+              </span>
+              <span style={{ fontSize: "0.73rem", fontWeight: 700, color: "#e11d48", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                <Eye size={13} /> Ver control
               </span>
             </div>
           </div>
@@ -978,6 +1034,124 @@ export function PaymentsCashPage() {
               </table>
             </div>
           </div>
+
+          {/* Card / Tabla de Control de Descuentos en Facturas de Venta */}
+          <div className="fin-table-card" style={{ marginTop: "1.25rem" }}>
+            <div className="fin-table-header">
+              <h3 className="fin-table-title">
+                <Tag size={18} color="#e11d48" />
+                <span>Control de Descuentos Otorgados en Facturas de Venta</span>
+              </h3>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+                <span className="fin-badge fin-badge--danger">
+                  {data.discountsCount ?? 0}{" "}
+                  {(data.discountsCount ?? 0) === 1 ? "factura" : "facturas"} · Total descontado:{" "}
+                  {formatMoney(data.totalDiscountsAmount ?? 0)}
+                </span>
+                {(data.discounts?.length ?? 0) > 0 && (
+                  <button
+                    type="button"
+                    className="fin-btn fin-btn--ghost"
+                    style={{ padding: "4px 10px", fontSize: "0.78rem" }}
+                    onClick={() => {
+                      setDiscountSearch("");
+                      setOpenDiscountsModal(true);
+                    }}
+                  >
+                    <Eye size={14} />
+                    <span>Ampliar / Buscar</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {!data.discounts || data.discounts.length === 0 ? (
+              <div style={{ padding: "1.75rem 1.25rem", textAlign: "center", color: "#64748b", fontSize: "0.86rem" }}>
+                No se registraron descuentos en facturas de venta durante este período ({periodLabel}).
+              </div>
+            ) : (
+              <div className="fin-table-wrap">
+                <table className="fin-table">
+                  <thead>
+                    <tr>
+                      <th>Fecha / Hora</th>
+                      <th>Factura</th>
+                      <th>Tipo</th>
+                      <th>Cliente</th>
+                      <th>Productos</th>
+                      <th>Motivo del Descuento</th>
+                      <th>Vendedor / Sede</th>
+                      <th style={{ textAlign: "right" }}>Subtotal</th>
+                      <th style={{ textAlign: "right" }}>Descuento</th>
+                      <th style={{ textAlign: "right" }}>Total Factura</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.discounts.map((d) => (
+                      <tr key={d.id}>
+                        <td style={{ whiteSpace: "nowrap", fontSize: "0.78rem", color: "#475569" }}>
+                          {formatBogotaDateTimeShort(d.createdAt)}
+                        </td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          <strong style={{ color: "#0f172a" }}>{d.invoiceNumber}</strong>
+                        </td>
+                        <td>
+                          <span
+                            className={`fin-badge ${
+                              d.exitKind === "credit" ? "fin-badge--warning" : "fin-badge--info"
+                            }`}
+                          >
+                            {d.exitKind === "credit" ? "Crédito" : "Contado"}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight: 600, color: "#0f172a" }}>{d.customerName}</td>
+                        <td style={{ maxWidth: 230, fontSize: "0.8rem", color: "#334155" }}>
+                          {d.itemsSummary || "—"}
+                        </td>
+                        <td style={{ maxWidth: 210, fontSize: "0.8rem", color: "#be123c", fontWeight: 600 }}>
+                          {d.discountReason || "Sin motivo especificado"}
+                        </td>
+                        <td style={{ fontSize: "0.78rem", color: "#64748b" }}>
+                          <div>{d.createdByName || "—"}</div>
+                          {d.warehouseCode && (
+                            <div style={{ fontSize: "0.7rem", color: "#94a3b8" }}>
+                              Sede: {d.warehouseCode}
+                            </div>
+                          )}
+                        </td>
+                        <td className="fin-table-num" style={{ color: "#64748b" }}>
+                          {formatMoney(d.subtotalAmount)}
+                        </td>
+                        <td className="fin-table-num" style={{ color: "#e11d48", fontWeight: 800 }}>
+                          - {formatMoney(d.discountAmount)}
+                        </td>
+                        <td className="fin-table-num" style={{ color: "#059669", fontWeight: 800 }}>
+                          {formatMoney(d.totalAmount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={7}>
+                        TOTAL DESCUENTOS OTORGADOS ({data.discounts.length}{" "}
+                        {data.discounts.length === 1 ? "factura" : "facturas"})
+                      </td>
+                      <td className="fin-table-num">
+                        {formatMoney(data.discounts.reduce((s, d) => s + d.subtotalAmount, 0))}
+                      </td>
+                      <td className="fin-table-num" style={{ color: "#e11d48", fontWeight: 900 }}>
+                        - {formatMoney(data.totalDiscountsAmount ?? 0)}
+                      </td>
+                      <td className="fin-table-num" style={{ color: "#059669", fontWeight: 800 }}>
+                        {formatMoney(data.discounts.reduce((s, d) => s + d.totalAmount, 0))}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
         </>
       ) : null}
 
@@ -1357,7 +1531,30 @@ export function PaymentsCashPage() {
                                 {op.concept}
                               </div>
                             )}
-                            {!op.itemsSummary && !op.concept && (
+                            {(op.discountAmount ?? 0) > 0 && (
+                              <div
+                                style={{
+                                  marginTop: 3,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 4,
+                                  padding: "1px 7px",
+                                  borderRadius: 999,
+                                  fontSize: "0.71rem",
+                                  fontWeight: 700,
+                                  background: "rgba(225, 29, 72, 0.1)",
+                                  color: "#be123c",
+                                  border: "1px solid rgba(225, 29, 72, 0.25)",
+                                }}
+                              >
+                                <Tag size={11} />
+                                <span>
+                                  Descuento factura: - {formatMoney(op.discountAmount!)}
+                                  {op.discountReason ? ` (${op.discountReason})` : ""}
+                                </span>
+                              </div>
+                            )}
+                            {!op.itemsSummary && !op.concept && !(op.discountAmount && op.discountAmount > 0) && (
                               <span style={{ color: "#94a3b8", fontSize: "0.78rem" }}>—</span>
                             )}
                           </td>
@@ -1443,6 +1640,226 @@ export function PaymentsCashPage() {
                       </td>
                     </tr>
                   </tfoot>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Control de Descuentos en Facturas */}
+      {openDiscountsModal && data && (
+        <div
+          className="inv-modal-backdrop"
+          role="presentation"
+          onClick={() => setOpenDiscountsModal(false)}
+        >
+          <div
+            className="inv-modal inv-modal--checkout"
+            style={{
+              maxWidth: 980,
+              width: "96vw",
+              maxHeight: "90vh",
+              display: "flex",
+              flexDirection: "column",
+            }}
+            role="dialog"
+            aria-labelledby="discounts-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: "1rem",
+                paddingBottom: "0.85rem",
+                borderBottom: "1px solid rgba(15, 23, 42, 0.08)",
+                marginBottom: "1rem",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 12,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "rgba(225, 29, 72, 0.1)",
+                    border: "1px solid rgba(225, 29, 72, 0.25)",
+                  }}
+                >
+                  <Tag size={22} color="#e11d48" />
+                </div>
+                <div>
+                  <h2
+                    id="discounts-modal-title"
+                    style={{ margin: 0, fontSize: "1.2rem", fontWeight: 800, color: "#0f172a" }}
+                  >
+                    Control de Descuentos en Facturas de Venta
+                  </h2>
+                  <div style={{ fontSize: "0.82rem", color: "#64748b", marginTop: 2 }}>
+                    {periodLabel} · Auditoría detallada de descuentos aplicados en ventas y créditos
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="fin-btn fin-btn--ghost"
+                style={{ padding: "6px 10px" }}
+                onClick={() => setOpenDiscountsModal(false)}
+              >
+                <X size={18} />
+                <span>Cerrar</span>
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+                gap: "0.75rem",
+                marginBottom: "1rem",
+              }}
+            >
+              <div
+                style={{
+                  background: "#f8fafc",
+                  border: "1px solid rgba(15, 23, 42, 0.08)",
+                  borderRadius: 12,
+                  padding: "0.75rem 1rem",
+                }}
+              >
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", color: "#64748b" }}>
+                  Facturas con Descuento
+                </div>
+                <div style={{ fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", marginTop: 2 }}>
+                  {filteredDiscounts.length}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: "rgba(225, 29, 72, 0.06)",
+                  border: "1px solid rgba(225, 29, 72, 0.22)",
+                  borderRadius: 12,
+                  padding: "0.75rem 1rem",
+                }}
+              >
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", color: "#e11d48" }}>
+                  Total Descontado
+                </div>
+                <div style={{ fontSize: "1.3rem", fontWeight: 800, color: "#e11d48", marginTop: 2 }}>
+                  - {formatMoney(filteredDiscounts.reduce((s, d) => s + d.discountAmount, 0))}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: "rgba(5, 150, 105, 0.06)",
+                  border: "1px solid rgba(5, 150, 105, 0.22)",
+                  borderRadius: 12,
+                  padding: "0.75rem 1rem",
+                }}
+              >
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", color: "#059669" }}>
+                  Total Neto Facturado
+                </div>
+                <div style={{ fontSize: "1.3rem", fontWeight: 800, color: "#059669", marginTop: 2 }}>
+                  {formatMoney(filteredDiscounts.reduce((s, d) => s + d.totalAmount, 0))}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.85rem" }}>
+              <div className="fin-search-wrap" style={{ maxWidth: 340, width: "100%" }}>
+                <Search size={16} className="fin-search-wrap__icon" />
+                <input
+                  type="text"
+                  className="fin-input"
+                  style={{ height: 36, fontSize: "0.82rem" }}
+                  placeholder="Buscar por factura, cliente, motivo, vendedor..."
+                  value={discountSearch}
+                  onChange={(e) => setDiscountSearch(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div style={{ overflowY: "auto", flex: 1, border: "1px solid rgba(15, 23, 42, 0.08)", borderRadius: 12 }}>
+              {filteredDiscounts.length === 0 ? (
+                <div style={{ padding: "3rem 1.5rem", textAlign: "center", color: "#64748b" }}>
+                  <Tag size={32} style={{ opacity: 0.35, marginBottom: "0.5rem" }} />
+                  <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "0.25rem" }}>
+                    Sin descuentos registrados
+                  </div>
+                  <div style={{ fontSize: "0.84rem" }}>
+                    No se encontraron facturas de venta con descuento para el filtro seleccionado.
+                  </div>
+                </div>
+              ) : (
+                <table className="fin-table" style={{ margin: 0 }}>
+                  <thead>
+                    <tr>
+                      <th>Fecha / Hora</th>
+                      <th>Factura</th>
+                      <th>Tipo</th>
+                      <th>Cliente</th>
+                      <th>Productos</th>
+                      <th>Motivo del Descuento</th>
+                      <th>Vendedor / Sede</th>
+                      <th style={{ textAlign: "right" }}>Subtotal</th>
+                      <th style={{ textAlign: "right" }}>Descuento</th>
+                      <th style={{ textAlign: "right" }}>Total Factura</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredDiscounts.map((d) => (
+                      <tr key={d.id}>
+                        <td style={{ whiteSpace: "nowrap", fontSize: "0.78rem", color: "#475569" }}>
+                          {formatBogotaDateTimeShort(d.createdAt)}
+                        </td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          <strong style={{ color: "#0f172a" }}>{d.invoiceNumber}</strong>
+                        </td>
+                        <td>
+                          <span
+                            className={`fin-badge ${
+                              d.exitKind === "credit" ? "fin-badge--warning" : "fin-badge--info"
+                            }`}
+                          >
+                            {d.exitKind === "credit" ? "Crédito" : "Contado"}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight: 600, color: "#0f172a" }}>{d.customerName}</td>
+                        <td style={{ maxWidth: 230, fontSize: "0.8rem", color: "#334155" }}>
+                          {d.itemsSummary || "—"}
+                        </td>
+                        <td style={{ maxWidth: 210, fontSize: "0.8rem", color: "#be123c", fontWeight: 600 }}>
+                          {d.discountReason || "Sin motivo especificado"}
+                        </td>
+                        <td style={{ fontSize: "0.78rem", color: "#64748b" }}>
+                          <div>{d.createdByName || "—"}</div>
+                          {d.warehouseCode && (
+                            <div style={{ fontSize: "0.7rem", color: "#94a3b8" }}>
+                              Sede: {d.warehouseCode}
+                            </div>
+                          )}
+                        </td>
+                        <td className="fin-table-num" style={{ color: "#64748b" }}>
+                          {formatMoney(d.subtotalAmount)}
+                        </td>
+                        <td className="fin-table-num" style={{ color: "#e11d48", fontWeight: 800 }}>
+                          - {formatMoney(d.discountAmount)}
+                        </td>
+                        <td className="fin-table-num" style={{ color: "#059669", fontWeight: 800 }}>
+                          {formatMoney(d.totalAmount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
                 </table>
               )}
             </div>

@@ -1169,6 +1169,25 @@ export interface PaymentCashOperationItem {
   createdByName: string | null;
   createdAt: string;
   receiptUrls: string[];
+  discountAmount?: number;
+  discountReason?: string | null;
+  subtotalAmount?: number;
+}
+
+export interface PaymentCashDiscountItem {
+  id: string;
+  invoiceNumber: string;
+  exitKind: string;
+  customerName: string;
+  subtotalAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  discountReason: string | null;
+  itemsSummary: string | null;
+  warehouseCode: string | null;
+  warehouseName: string | null;
+  createdByName: string | null;
+  createdAt: string;
 }
 
 function parseOpReceiptUrls(raw: any, singleFallback: string | null): string[] {
@@ -1210,6 +1229,9 @@ export async function getPaymentsCashSummary(
   cashTransfersReturnedAmount?: number;
   cashTransfersSentAmount?: number;
   netCashInDrawer: number;
+  totalDiscountsAmount?: number;
+  discountsCount?: number;
+  discounts?: PaymentCashDiscountItem[];
   methods: {
     method: string;
     label: string;
@@ -1379,7 +1401,14 @@ export async function getPaymentsCashSummary(
       u.full_name AS "createdByName",
       COALESCE(d.completed_at, d.created_at) AS "createdAt",
       d.receipt_url AS "receiptUrl",
-      COALESCE(d.receipt_urls, '[]'::jsonb) AS "receiptUrls"
+      COALESCE(d.receipt_urls, '[]'::jsonb) AS "receiptUrls",
+      COALESCE(
+        NULLIF(d.discount_amount, 0),
+        NULLIF((d.metadata->>'discountAmount')::numeric, 0),
+        0
+      )::float AS "discountAmount",
+      COALESCE(NULLIF(TRIM(d.discount_reason), ''), NULLIF(TRIM(d.metadata->>'discountReason'), '')) AS "discountReason",
+      COALESCE((d.metadata->>'subtotalAmount')::numeric, 0)::float AS "subtotalAmount"
     FROM inventory_documents d
     JOIN warehouses w ON w.id = d.warehouse_id
     LEFT JOIN customers c ON c.id = d.customer_id
@@ -1639,6 +1668,63 @@ export async function getPaymentsCashSummary(
       ${dateTransferApprovedFilter}
   `;
 
+  const discountsDetailQuery = `
+    SELECT
+      d.id::text AS id,
+      COALESCE(d.invoice_number, 'DOC-' || SUBSTRING(d.id::text, 1, 6)) AS "invoiceNumber",
+      COALESCE(d.exit_kind, 'sale') AS "exitKind",
+      COALESCE(c.display_name, d.metadata->>'customerName', 'Cliente Mostrador') AS "customerName",
+      COALESCE(
+        NULLIF(d.discount_amount, 0),
+        NULLIF((d.metadata->>'discountAmount')::numeric, 0),
+        0
+      )::float AS "discountAmount",
+      COALESCE(NULLIF(TRIM(d.discount_reason), ''), NULLIF(TRIM(d.metadata->>'discountReason'), ''), d.notes) AS "discountReason",
+      COALESCE(
+        (d.metadata->>'subtotalAmount')::numeric,
+        (
+          SELECT COALESCE(SUM(idl.quantity * COALESCE(idl.unit_sale_price, 0)), 0)
+          FROM inventory_document_lines idl
+          WHERE idl.document_id = d.id
+        ),
+        0
+      )::float AS "subtotalAmount",
+      COALESCE(
+        (d.metadata->>'totalAmount')::numeric,
+        GREATEST(
+          0,
+          COALESCE(
+            (
+              SELECT COALESCE(SUM(idl.quantity * COALESCE(idl.unit_sale_price, 0)), 0)
+              FROM inventory_document_lines idl
+              WHERE idl.document_id = d.id
+            ),
+            0
+          ) - COALESCE(NULLIF(d.discount_amount, 0), NULLIF((d.metadata->>'discountAmount')::numeric, 0), 0)
+        )
+      )::float AS "totalAmount",
+      (
+        SELECT STRING_AGG(idl.quantity::text || 'x ' || pr.name, ', ')
+        FROM inventory_document_lines idl
+        JOIN products pr ON pr.id = idl.product_id
+        WHERE idl.document_id = d.id
+      ) AS "itemsSummary",
+      w.code AS "warehouseCode",
+      w.name AS "warehouseName",
+      u.full_name AS "createdByName",
+      COALESCE(d.completed_at, d.created_at) AS "createdAt"
+    FROM inventory_documents d
+    JOIN warehouses w ON w.id = d.warehouse_id
+    LEFT JOIN customers c ON c.id = d.customer_id
+    LEFT JOIN users u ON u.id = d.created_by
+    WHERE d.status = 'completed'
+      AND d.doc_type IN ('exit', 'sale')
+      AND COALESCE(NULLIF(d.discount_amount, 0), NULLIF((d.metadata->>'discountAmount')::numeric, 0), 0) > 0
+      ${whDocFilter}
+      ${dateDocFilter}
+    ORDER BY COALESCE(d.completed_at, d.created_at) DESC
+  `;
+
   const [
     { rows: salesRows },
     { rows: payRows },
@@ -1655,6 +1741,7 @@ export async function getPaymentsCashSummary(
     { rows: transferSentDetailRows },
     { rows: transferReturnedDetailRows },
     { rows: transferReceivedDetailRows },
+    { rows: discountDetailRows },
   ] = await Promise.all([
     pool.query<{ method: string; amount: string; count: number }>(salesQuery, params),
     pool.query<{ method: string; amount: string; count: number }>(paymentsQuery, params),
@@ -1671,6 +1758,7 @@ export async function getPaymentsCashSummary(
     pool.query<any>(transferSentDetailQuery, transferOrigParams),
     pool.query<any>(transferReturnedDetailQuery, transferOrigParams),
     pool.query<any>(transferReceivedDetailQuery, transferDestParams),
+    pool.query<any>(discountsDetailQuery, params),
   ]);
 
   const map = new Map<
@@ -1792,6 +1880,9 @@ export async function getPaymentsCashSummary(
       createdByName: r.createdByName || null,
       createdAt: new Date(r.createdAt).toISOString(),
       receiptUrls: parseOpReceiptUrls(r.receiptUrls, r.receiptUrl || null),
+      discountAmount: Number(r.discountAmount || 0),
+      discountReason: r.discountReason || null,
+      subtotalAmount: Number(r.subtotalAmount || 0),
     });
   }
 
@@ -1990,6 +2081,25 @@ export async function getPaymentsCashSummary(
 
   operations.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+  const discounts: PaymentCashDiscountItem[] = discountDetailRows.map((r: any) => ({
+    id: String(r.id),
+    invoiceNumber: r.invoiceNumber || "S/N",
+    exitKind: r.exitKind || "sale",
+    customerName: r.customerName || "Cliente Mostrador",
+    subtotalAmount: Number(r.subtotalAmount || 0),
+    discountAmount: Number(r.discountAmount || 0),
+    totalAmount: Number(r.totalAmount || 0),
+    discountReason: r.discountReason || null,
+    itemsSummary: r.itemsSummary || null,
+    warehouseCode: r.warehouseCode || null,
+    warehouseName: r.warehouseName || null,
+    createdByName: r.createdByName || null,
+    createdAt: new Date(r.createdAt).toISOString(),
+  }));
+
+  const totalDiscountsAmount = discounts.reduce((sum, d) => sum + d.discountAmount, 0);
+  const discountsCount = discounts.length;
+
   return {
     dateFrom: opts.dateFrom || getTodayBogotaYmd(),
     dateTo: opts.dateTo || getTodayBogotaYmd(),
@@ -2002,6 +2112,9 @@ export async function getPaymentsCashSummary(
     cashTransfersReturnedAmount,
     cashTransfersSentAmount,
     netCashInDrawer,
+    totalDiscountsAmount,
+    discountsCount,
+    discounts,
     methods,
     operations,
   };

@@ -19,6 +19,7 @@ import {
   Info,
   CreditCard,
   Lock,
+  Tag,
 } from "lucide-react";
 import {
   fetchDailyClosureWorksheet,
@@ -969,7 +970,10 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
               )}
 
               {/* Tarjetas de Saldo de Arranque y Resumen de Efectivo */}
-              <div className="fin-kpi-grid fin-kpi-grid--4">
+              <div
+                className="fin-kpi-grid fin-kpi-grid--4"
+                style={{ gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))" }}
+              >
                 {/* 1. Saldo de Arranque */}
                 {worksheet.hasPreviousClosure ? (
                   <div className="fin-kpi-card fin-kpi-card--teal">
@@ -1106,6 +1110,43 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                   </div>
                   <div className="fin-kpi-sub">
                     Arranque + Entradas − Salidas
+                  </div>
+                </div>
+
+                {/* 5. Control de Descuentos en Facturas de Venta */}
+                <div
+                  className="fin-kpi-card fin-kpi-card--rose"
+                  style={{ cursor: "pointer" }}
+                  title="Ver detalle de descuentos otorgados en facturas de venta durante este turno"
+                  onClick={() => {
+                    document
+                      .getElementById("daily-closure-discounts-card")
+                      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }}
+                >
+                  <div className="fin-kpi-top">
+                    <span className="fin-kpi-label" style={{ color: "#e11d48" }}>
+                      Descuentos en Facturas
+                    </span>
+                    <div className="fin-kpi-icon fin-kpi-icon--rose">
+                      <Tag size={18} />
+                    </div>
+                  </div>
+                  <div className="fin-kpi-val fin-kpi-val--rose">
+                    {(worksheet.totalDiscountsAmount ?? 0) > 0
+                      ? `- ${formatMoney(worksheet.totalDiscountsAmount ?? 0)}`
+                      : formatMoney(0)}
+                  </div>
+                  <div className="fin-kpi-sub" style={{ justifyContent: "space-between" }}>
+                    <span>
+                      {worksheet.discountsCount ?? 0}{" "}
+                      {(worksheet.discountsCount ?? 0) === 1
+                        ? "factura con descuento"
+                        : "facturas con descuento"}
+                    </span>
+                    <span style={{ fontSize: "0.73rem", fontWeight: 700, color: "#e11d48", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                      <Eye size={13} /> Ver detalle
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1606,6 +1647,109 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                           );
                         })}
                       </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Control de Descuentos Generados en Facturas de Venta del Turno */}
+              <div id="daily-closure-discounts-card" className="fin-table-card">
+                <div className="fin-table-header">
+                  <div>
+                    <h3 className="fin-table-title">
+                      <Tag size={18} color="#e11d48" />
+                      <span>Control de Descuentos en Facturas de Venta (Turno {worksheet.shiftNumber || 1})</span>
+                    </h3>
+                    <p style={{ margin: "4px 0 0 0", fontSize: "0.82rem", color: "#64748b" }}>
+                      Registro informativo y de control sobre los descuentos aplicados en facturas de venta al contado o crédito durante este turno.
+                    </p>
+                  </div>
+
+                  <span className="fin-badge fin-badge--danger">
+                    {worksheet.discountsCount ?? 0}{" "}
+                    {(worksheet.discountsCount ?? 0) === 1 ? "factura" : "facturas"} · Total descontado:{" "}
+                    {formatMoney(worksheet.totalDiscountsAmount ?? 0)}
+                  </span>
+                </div>
+
+                {!worksheet.discountItems || worksheet.discountItems.length === 0 ? (
+                  <div style={{ padding: "1.75rem 1.25rem", textAlign: "center", color: "#64748b", fontSize: "0.86rem" }}>
+                    No se generaron descuentos en facturas de venta durante este turno.
+                  </div>
+                ) : (
+                  <div className="fin-table-wrap">
+                    <table className="fin-table">
+                      <thead>
+                        <tr>
+                          <th>Hora</th>
+                          <th>Factura</th>
+                          <th>Tipo</th>
+                          <th>Cliente</th>
+                          <th>Productos</th>
+                          <th>Motivo del Descuento</th>
+                          <th>Vendedor</th>
+                          <th style={{ textAlign: "right" }}>Subtotal</th>
+                          <th style={{ textAlign: "right" }}>Descuento</th>
+                          <th style={{ textAlign: "right" }}>Total Factura</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {worksheet.discountItems.map((d) => (
+                          <tr key={d.id}>
+                            <td style={{ whiteSpace: "nowrap", fontSize: "0.78rem", color: "#475569" }}>
+                              {formatBogotaDateTime(d.createdAt)}
+                            </td>
+                            <td style={{ whiteSpace: "nowrap" }}>
+                              <strong style={{ color: "#0f172a" }}>{d.invoiceNumber}</strong>
+                            </td>
+                            <td>
+                              <span
+                                className={`fin-badge ${
+                                  d.exitKind === "credit" ? "fin-badge--warning" : "fin-badge--info"
+                                }`}
+                              >
+                                {d.exitKind === "credit" ? "Crédito" : "Contado"}
+                              </span>
+                            </td>
+                            <td style={{ fontWeight: 600, color: "#0f172a" }}>{d.customerName}</td>
+                            <td style={{ maxWidth: 230, fontSize: "0.8rem", color: "#334155" }}>
+                              {d.itemsSummary || "—"}
+                            </td>
+                            <td style={{ maxWidth: 210, fontSize: "0.8rem", color: "#be123c", fontWeight: 600 }}>
+                              {d.discountReason || "Sin motivo especificado"}
+                            </td>
+                            <td style={{ fontSize: "0.8rem", color: "#64748b" }}>
+                              {d.createdByName || "—"}
+                            </td>
+                            <td className="fin-table-num" style={{ color: "#64748b" }}>
+                              {formatMoney(d.subtotalAmount)}
+                            </td>
+                            <td className="fin-table-num" style={{ color: "#e11d48", fontWeight: 800 }}>
+                              - {formatMoney(d.discountAmount)}
+                            </td>
+                            <td className="fin-table-num" style={{ color: "#059669", fontWeight: 800 }}>
+                              {formatMoney(d.totalAmount)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td colSpan={7}>
+                            TOTAL DESCUENTOS DEL TURNO ({worksheet.discountItems.length}{" "}
+                            {worksheet.discountItems.length === 1 ? "factura" : "facturas"})
+                          </td>
+                          <td className="fin-table-num">
+                            {formatMoney(worksheet.discountItems.reduce((s, d) => s + d.subtotalAmount, 0))}
+                          </td>
+                          <td className="fin-table-num" style={{ color: "#e11d48", fontWeight: 900 }}>
+                            - {formatMoney(worksheet.totalDiscountsAmount ?? 0)}
+                          </td>
+                          <td className="fin-table-num" style={{ color: "#059669", fontWeight: 800 }}>
+                            {formatMoney(worksheet.discountItems.reduce((s, d) => s + d.totalAmount, 0))}
+                          </td>
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
                 )}

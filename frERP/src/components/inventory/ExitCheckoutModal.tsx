@@ -134,11 +134,14 @@ export function ExitCheckoutModal({
   const [newPhone, setNewPhone] = useState("");
   const [newAddress, setNewAddress] = useState("");
 
-  // Descuento a la factura (en pesos COP)
+  // Descuento a la factura (en pesos COP) - Restricción máximo 10%
   const [discountAmount, setDiscountAmount] = useState<number>(0);
   const [discountReason, setDiscountReason] = useState<string>("");
+  const [discountLimitWarning, setDiscountLimitWarning] = useState<string | null>(null);
 
   const subtotal = totalValue;
+  const maxDiscount = Math.round(subtotal * 0.10);
+  const discountPercent = subtotal > 0 ? Math.round((discountAmount / subtotal) * 1000) / 10 : 0;
   const netTotal = Math.max(0, subtotal - discountAmount);
 
   // Métodos de pago y destinos
@@ -182,10 +185,12 @@ export function ExitCheckoutModal({
       setShowCreateNew(false);
       setDestinationWarehouseId(existingDraft?.destinationWarehouseId ?? "");
 
-      const initDiscount = existingDraft?.discountAmount ?? 0;
+      const maxAllowedDiscount = Math.round(totalValue * 0.10);
+      const initDiscount = Math.min(existingDraft?.discountAmount ?? 0, maxAllowedDiscount);
       const initDiscountReason = existingDraft?.discountReason ?? "";
       setDiscountAmount(initDiscount);
       setDiscountReason(initDiscountReason);
+      setDiscountLimitWarning(null);
       const initialNetTotal = Math.max(0, totalValue - initDiscount);
 
       // Restaurar fotos previamente seleccionadas si la tablet se recargó
@@ -379,6 +384,13 @@ export function ExitCheckoutModal({
       }
     }
 
+    if (discountAmount > maxDiscount) {
+      setError(
+        `El descuento no puede superar el 10% del valor de la factura (máximo permitido: ${formatMoney(maxDiscount)}).`
+      );
+      return;
+    }
+
     const paymentBreakdown: PaymentPart[] =
       exitKind === "sale" || exitKind === "credit"
         ? payments
@@ -489,29 +501,44 @@ export function ExitCheckoutModal({
 
   function handleDiscountChange(rawVal: string) {
     const digits = rawVal.replace(/[^\d]/g, "");
-    const val = digits ? Math.min(Number(digits), subtotal) : 0;
-    setDiscountAmount(val);
-    const newNet = Math.max(0, subtotal - val);
+    const parsed = digits ? Number(digits) : 0;
+    if (parsed > maxDiscount) {
+      setDiscountAmount(maxDiscount);
+      const newNet = Math.max(0, subtotal - maxDiscount);
+      if (payments.length === 1 && exitKind === "sale") {
+        setPayments([{ ...payments[0], amount: String(newNet) }]);
+      }
+      setDiscountLimitWarning(
+        `Restricción: El descuento máximo permitido es el 10% de la factura (${formatMoney(maxDiscount)}).`
+      );
+      return;
+    }
+    setDiscountLimitWarning(null);
+    setDiscountAmount(parsed);
+    const newNet = Math.max(0, subtotal - parsed);
     if (payments.length === 1 && exitKind === "sale") {
       setPayments([{ ...payments[0], amount: String(newNet) }]);
     }
     setError(null);
   }
 
-  function handleSetFullGift() {
-    setDiscountAmount(subtotal);
+  function handleSetMaxDiscount() {
+    setDiscountAmount(maxDiscount);
+    setDiscountLimitWarning(null);
     if (!discountReason) {
-      setDiscountReason("Obsequio 100%");
+      setDiscountReason("Descuento comercial (10%)");
     }
+    const newNet = Math.max(0, subtotal - maxDiscount);
     if (payments.length === 1 && exitKind === "sale") {
-      setPayments([{ ...payments[0], amount: "0" }]);
+      setPayments([{ ...payments[0], amount: String(newNet) }]);
     }
     setError(null);
   }
 
   function handleClearDiscount() {
     setDiscountAmount(0);
-    if (discountReason === "Obsequio 100%") {
+    setDiscountLimitWarning(null);
+    if (discountReason === "Obsequio 100%" || discountReason === "Descuento comercial (10%)") {
       setDiscountReason("");
     }
     if (payments.length === 1 && exitKind === "sale") {
@@ -917,11 +944,24 @@ export function ExitCheckoutModal({
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap", gap: "0.5rem" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
                 <span style={{ fontSize: "1.1rem" }}>🏷️</span>
                 <strong style={{ fontSize: "0.95rem", color: "var(--inv-text-main, #1e293b)" }}>
                   Descuento a la Factura
                 </strong>
+                <span
+                  style={{
+                    fontSize: "0.73rem",
+                    fontWeight: 600,
+                    padding: "2px 8px",
+                    borderRadius: 999,
+                    background: "rgba(245, 158, 11, 0.12)",
+                    color: "#b45309",
+                    border: "1px solid rgba(245, 158, 11, 0.3)",
+                  }}
+                >
+                  Máx. 10% ({formatMoney(maxDiscount)})
+                </span>
                 {discountAmount > 0 && (
                   <span
                     style={{
@@ -934,7 +974,7 @@ export function ExitCheckoutModal({
                       border: "1px solid #bbf7d0",
                     }}
                   >
-                    -{formatMoney(discountAmount)} aplicado
+                    -{formatMoney(discountAmount)} ({discountPercent}%) aplicado
                   </span>
                 )}
               </div>
@@ -951,12 +991,12 @@ export function ExitCheckoutModal({
                 ) : (
                   <button
                     type="button"
-                    onClick={handleSetFullGift}
+                    onClick={handleSetMaxDiscount}
                     className="inv-btn inv-btn--ghost"
                     style={{ fontSize: "0.75rem", padding: "3px 8px", height: "auto", color: "#16a34a" }}
-                    title="Aplica 100% de descuento para obsequio total"
+                    title="Aplica el descuento máximo permitido del 10%"
                   >
-                    🎁 Obsequio total (100%)
+                    🏷️ Aplicar máx. (10%)
                   </button>
                 )}
               </div>
@@ -964,7 +1004,9 @@ export function ExitCheckoutModal({
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "0.75rem" }}>
               <label className="field" style={{ margin: 0 }}>
-                <span style={{ fontSize: "0.8rem", fontWeight: 600 }}>Valor a descontar ($ en plata)</span>
+                <span style={{ fontSize: "0.8rem", fontWeight: 600 }}>
+                  Valor a descontar ($ — máx. {formatMoney(maxDiscount)})
+                </span>
                 <div style={{ position: "relative" }}>
                   <span style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8", fontWeight: 600 }}>
                     $
@@ -981,15 +1023,33 @@ export function ExitCheckoutModal({
               </label>
 
               <label className="field" style={{ margin: 0 }}>
-                <span style={{ fontSize: "0.8rem", fontWeight: 600 }}>Motivo del descuento u obsequio</span>
+                <span style={{ fontSize: "0.8rem", fontWeight: 600 }}>Motivo del descuento</span>
                 <input
                   type="text"
-                  placeholder="Ej: Promoción, Obsequio de producto, Fidelización..."
+                  placeholder="Ej: Promoción, Fidelización, Descuento autorizado..."
                   value={discountReason}
                   onChange={(e) => setDiscountReason(e.target.value)}
                 />
               </label>
             </div>
+
+            {discountLimitWarning && (
+              <div
+                role="alert"
+                style={{
+                  marginTop: "0.6rem",
+                  padding: "0.45rem 0.7rem",
+                  borderRadius: "6px",
+                  background: "rgba(239, 68, 68, 0.1)",
+                  border: "1px solid rgba(239, 68, 68, 0.3)",
+                  color: "#dc2626",
+                  fontSize: "0.8rem",
+                  fontWeight: 600,
+                }}
+              >
+                ⚠️ {discountLimitWarning}
+              </div>
+            )}
 
             {/* Resumen numérico claro */}
             <div

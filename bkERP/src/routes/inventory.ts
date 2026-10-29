@@ -664,6 +664,7 @@ export function createInventoryRouter(): Router {
         available?: number;
         requested?: number;
         suggested?: number;
+        maxDiscount?: number;
       };
       const clientCodes = new Set([
         "sale_price_below_suggested",
@@ -671,6 +672,7 @@ export function createInventoryRouter(): Router {
         "customer_name_required",
         "payment_total_mismatch",
         "discount_exceeds_subtotal",
+        "discount_exceeds_max_percent",
         "related_invoice_required",
         "destination_warehouse_required",
         "destination_warehouse_not_found",
@@ -692,6 +694,7 @@ export function createInventoryRouter(): Router {
           available: e.available,
           requested: e.requested,
           suggested: e.suggested,
+          maxDiscount: e.maxDiscount,
         });
         return;
       }

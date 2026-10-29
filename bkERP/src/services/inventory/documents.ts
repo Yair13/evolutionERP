@@ -751,46 +751,16 @@ export async function confirmExitDocument(
     throw Object.assign(new Error("lines_required"), { code: "lines_required" });
   }
 
-  if (exitKind === "sale" && input.paymentBreakdown) {
-    const saleTotal = cleaned.reduce(
-      (sum, line) => sum + line.quantity * (Number(line.unitSalePrice) || 0),
-      0
-    );
-    const paidTotal = input.paymentBreakdown.reduce(
-      (sum, payment) => sum + Number(payment.amount),
-      0
-    );
+  if ((exitKind === "sale" || exitKind === "credit") && input.paymentBreakdown && input.paymentBreakdown.length > 0) {
     const invalidPayment = input.paymentBreakdown.some(
       (payment) =>
         !payment.method?.trim() ||
         !Number.isFinite(Number(payment.amount)) ||
         Number(payment.amount) <= 0
     );
-    if (invalidPayment || Math.abs(saleTotal - paidTotal) >= 0.01) {
+    if (invalidPayment) {
       throw Object.assign(new Error("payment_total_mismatch"), {
         code: "payment_total_mismatch",
-      });
-    }
-  }
-
-  if (exitKind === "credit" && input.paymentBreakdown && input.paymentBreakdown.length > 0) {
-    const saleTotal = cleaned.reduce(
-      (sum, line) => sum + line.quantity * (Number(line.unitSalePrice) || 0),
-      0
-    );
-    const paidTotal = input.paymentBreakdown.reduce(
-      (sum, payment) => sum + Number(payment.amount),
-      0
-    );
-    const invalidPayment = input.paymentBreakdown.some(
-      (payment) =>
-        !payment.method?.trim() ||
-        !Number.isFinite(Number(payment.amount)) ||
-        Number(payment.amount) <= 0
-    );
-    if (invalidPayment || paidTotal > saleTotal + 0.01) {
-      throw Object.assign(new Error("initial_payment_exceeds_total"), {
-        code: "initial_payment_exceeds_total",
       });
     }
   }
@@ -869,11 +839,13 @@ export async function confirmExitDocument(
       (sum, line) => sum + line.quantity * (Number(line.unitSalePrice) || 0),
       0
     );
+    const maxDiscount = Math.round(subtotal * 0.10);
     const discountAmount = Math.max(0, Math.round(Number(input.discountAmount) || 0));
-    if (discountAmount > subtotal) {
-      throw Object.assign(new Error("discount_exceeds_subtotal"), {
-        code: "discount_exceeds_subtotal",
+    if (discountAmount > maxDiscount) {
+      throw Object.assign(new Error("discount_exceeds_max_percent"), {
+        code: "discount_exceeds_max_percent",
         subtotal,
+        maxDiscount,
         requested: discountAmount,
       });
     }
