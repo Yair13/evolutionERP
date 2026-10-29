@@ -269,13 +269,12 @@ export function createFinanceRouter(): Router {
 
     const auth = req.auth!;
     const isSuperAdmin = auth.warehouseIds === null;
-    const isFromAdmin = isAdminSessionRequest(req);
-    const canManageAdmin = isSuperAdmin || (isFromAdmin && auth.hasAdminAccess);
+    const canManageAdmin = isSuperAdmin || auth.hasAdminAccess === true;
 
     if (!canManageAdmin) {
       res.status(403).json({
-        error: "admin_scope_required",
-        message: "Solo la sede administrativa tiene autorización para resetear saldos iniciales.",
+        error: "admin_required",
+        message: "Solo los usuarios administradores tienen autorización para resetear saldos iniciales.",
       });
       return;
     }
@@ -311,13 +310,12 @@ export function createFinanceRouter(): Router {
 
     const auth = req.auth!;
     const isSuperAdmin = auth.warehouseIds === null;
-    const isFromAdmin = isAdminSessionRequest(req);
-    const canManageAdmin = isSuperAdmin || (isFromAdmin && auth.hasAdminAccess);
+    const canManageAdmin = isSuperAdmin || auth.hasAdminAccess === true;
 
     if (!canManageAdmin) {
       res.status(403).json({
-        error: "admin_scope_required",
-        message: "Solo la sede administrativa tiene autorización para eliminar saldos iniciales.",
+        error: "admin_required",
+        message: "Solo los usuarios administradores tienen autorización para eliminar saldos iniciales.",
       });
       return;
     }

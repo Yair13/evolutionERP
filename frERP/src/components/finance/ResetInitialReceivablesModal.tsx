@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { resetInitialReceivables } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
@@ -8,6 +8,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  initialWarehouseId?: string;
 };
 
 function formatMoney(n: number): string {
@@ -18,11 +19,11 @@ function formatMoney(n: number): string {
   }).format(n);
 }
 
-export function ResetInitialReceivablesModal({ open, onClose, onSuccess }: Props) {
+export function ResetInitialReceivablesModal({ open, onClose, onSuccess, initialWarehouseId }: Props) {
   const { token } = useAuth();
   const { warehouses } = useWarehouse();
 
-  const [targetWarehouseId, setTargetWarehouseId] = useState<string>("");
+  const [targetWarehouseId, setTargetWarehouseId] = useState<string>(initialWarehouseId || "");
   const [confirmed, setConfirmed] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +32,15 @@ export function ResetInitialReceivablesModal({ open, onClose, onSuccess }: Props
     totalAmountReset: number;
     warehouseName: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setTargetWarehouseId(initialWarehouseId || (warehouses[0]?.id || ""));
+      setConfirmed(false);
+      setError(null);
+      setSuccessResult(null);
+    }
+  }, [open, initialWarehouseId, warehouses]);
 
   if (!open) return null;
 

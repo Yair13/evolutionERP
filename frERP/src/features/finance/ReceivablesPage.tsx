@@ -47,8 +47,9 @@ type TabMode = "credits" | "customer" | "report";
 
 export function ReceivablesPage() {
   const { token } = useAuth();
-  const { warehouses, warehouseId, isAllWarehouses, loading: whLoading } = useWarehouse();
+  const { warehouses, warehouseId, isAllWarehouses, canViewAllWarehouses, loading: whLoading } = useWarehouse();
   const canSeeAll = isAllWarehouses;
+  const canManageInitial = canViewAllWarehouses;
 
   const [activeTab, setActiveTab] = useState<TabMode>("credits");
 
@@ -254,7 +255,7 @@ export function ReceivablesPage() {
             <span>+ Saldo Inicial / Factura Anterior</span>
           </button>
 
-          {canSeeAll && (
+          {canManageInitial && (
             <button
               type="button"
               className="fin-btn fin-btn--danger"
@@ -562,7 +563,7 @@ export function ReceivablesPage() {
                             >
                               Detalles
                             </button>
-                            {canSeeAll && c.documentId === null && (
+                            {canManageInitial && c.documentId === null && (
                               <button
                                 type="button"
                                 className="fin-btn fin-btn--ghost fin-btn--sm"
@@ -768,7 +769,7 @@ export function ReceivablesPage() {
                                 Ver
                               </button>
                             )}
-                            {canSeeAll && r.documentId === null && (
+                            {canManageInitial && r.documentId === null && (
                               <button
                                 type="button"
                                 className="fin-btn fin-btn--ghost fin-btn--sm"
@@ -938,6 +939,7 @@ export function ReceivablesPage() {
       <ResetInitialReceivablesModal
         open={openResetModal}
         onClose={() => setOpenResetModal(false)}
+        initialWarehouseId={warehouseId || selectedWarehouseId || ""}
         onSuccess={() => {
           void loadCredits();
           if (selectedCustId) void loadCustomerProfile(selectedCustId);
