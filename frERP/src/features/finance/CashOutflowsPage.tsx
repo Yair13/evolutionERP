@@ -120,8 +120,9 @@ export function CashOutflowsPage() {
     setLoading(true);
     setError(null);
     try {
+      const targetWh = isAllWarehouses ? (selectedWarehouse || null) : (warehouseId || null);
       const res = await fetchCashTransfers(token, {
-        warehouseId: selectedWarehouse || null,
+        warehouseId: targetWh,
       });
       setTransfers(res.items);
       setTotalTransfers(res.total);
@@ -138,11 +139,12 @@ export function CashOutflowsPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, selectedWarehouse, warehouseId]);
+  }, [token, isAllWarehouses, selectedWarehouse, warehouseId]);
 
   useEffect(() => {
     if (activeTab === "outflows") {
       void loadOutflows();
+      void loadTransfers();
     } else {
       void loadTransfers();
     }
@@ -169,10 +171,12 @@ export function CashOutflowsPage() {
 
     try {
       await rejectCashTransfer(token, t.id, reason.trim());
-      setActionSuccess(`Traslado ${t.code} rechazado.`);
+      setActionSuccess(
+        `Traslado ${t.code} rechazado. El dinero (${formatMoney(t.amount)}) ha retornado automáticamente a la caja de ${t.originWarehouseName}.`
+      );
       void loadTransfers();
       setIncomingTransfers((prev) => prev.filter((item) => item.id !== t.id));
-      window.setTimeout(() => setActionSuccess(null), 4000);
+      window.setTimeout(() => setActionSuccess(null), 5000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al rechazar traslado.");
     }
@@ -754,9 +758,19 @@ export function CashOutflowsPage() {
                             </span>
                           )}
                           {t.status === "rejected" && (
-                            <span className="fin-badge fin-badge--danger" title={t.rejectionReason || ""}>
-                              Rechazado
-                            </span>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" }}>
+                              <span
+                                className="fin-badge fin-badge--danger"
+                                title={t.rejectionReason ? `Motivo: ${t.rejectionReason}` : "Rechazado y retornado a sede origen"}
+                              >
+                                Rechazado · Retornado a origen
+                              </span>
+                              {t.rejectionReason && (
+                                <span style={{ fontSize: "0.73rem", color: "#64748b" }}>
+                                  Motivo: {t.rejectionReason}
+                                </span>
+                              )}
+                            </div>
                           )}
                         </td>
                         <td style={{ fontSize: "0.82rem", color: "#64748b", whiteSpace: "nowrap" }}>

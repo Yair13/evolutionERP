@@ -1150,7 +1150,10 @@ export interface PaymentCashOperationItem {
     | "layaway_payment"
     | "cash_income"
     | "cash_outflow"
-    | "cash_payroll";
+    | "cash_payroll"
+    | "transfer_in"
+    | "transfer_out"
+    | "transfer_returned";
   sourceLabel: string;
   direction: "in" | "out";
   paymentMethod: string;
@@ -1203,6 +1206,9 @@ export async function getPaymentsCashSummary(
   cashCollected: number;
   cashPayrollAmount: number;
   cashOutflowsAmount: number;
+  cashTransfersReceivedAmount?: number;
+  cashTransfersReturnedAmount?: number;
+  cashTransfersSentAmount?: number;
   netCashInDrawer: number;
   methods: {
     method: string;
@@ -1517,6 +1523,122 @@ export async function getPaymentsCashSummary(
       ${dateOutflowFilter}
   `;
 
+  const transferOrigParams: unknown[] = [];
+  const whTransferOrigFilter = opts.warehouseId
+    ? `AND ct.origin_warehouse_id = $${transferOrigParams.push(opts.warehouseId)}::uuid`
+    : opts.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0
+      ? `AND ct.origin_warehouse_id = ANY($${transferOrigParams.push(opts.allowedWarehouseIds)}::uuid[])`
+      : "";
+  let dateTransferCreatedFilter = "";
+  let dateTransferRejectedFilter = "";
+  if (opts.dateFrom) {
+    const idx = transferOrigParams.push(opts.dateFrom);
+    dateTransferCreatedFilter += ` AND ct.created_at::date >= $${idx}::date`;
+    dateTransferRejectedFilter += ` AND COALESCE(ct.approved_at, ct.created_at)::date >= $${idx}::date`;
+  }
+  if (opts.dateTo) {
+    const idx = transferOrigParams.push(opts.dateTo);
+    dateTransferCreatedFilter += ` AND ct.created_at::date <= $${idx}::date`;
+    dateTransferRejectedFilter += ` AND COALESCE(ct.approved_at, ct.created_at)::date <= $${idx}::date`;
+  }
+
+  const transferDestParams: unknown[] = [];
+  const whTransferDestFilter = opts.warehouseId
+    ? `AND ct.destination_warehouse_id = $${transferDestParams.push(opts.warehouseId)}::uuid`
+    : opts.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0
+      ? `AND ct.destination_warehouse_id = ANY($${transferDestParams.push(opts.allowedWarehouseIds)}::uuid[])`
+      : "";
+  let dateTransferApprovedFilter = "";
+  if (opts.dateFrom) {
+    const idx = transferDestParams.push(opts.dateFrom);
+    dateTransferApprovedFilter += ` AND COALESCE(ct.approved_at, ct.created_at)::date >= $${idx}::date`;
+  }
+  if (opts.dateTo) {
+    const idx = transferDestParams.push(opts.dateTo);
+    dateTransferApprovedFilter += ` AND COALESCE(ct.approved_at, ct.created_at)::date <= $${idx}::date`;
+  }
+
+  const transferSentDetailQuery = `
+    SELECT
+      ct.id::text AS id,
+      LOWER(TRIM(ct.payment_method)) AS method,
+      COALESCE(ct.amount, 0)::float AS amount,
+      ct.transfer_code AS reference,
+      ct.reference_code AS "relatedReference",
+      wd.name AS "thirdPartyName",
+      ct.concept,
+      ct.notes,
+      ct.status,
+      wo.code AS "warehouseCode",
+      wo.name AS "warehouseName",
+      u.full_name AS "createdByName",
+      ct.created_at AS "createdAt",
+      ct.receipt_url AS "receiptUrl",
+      COALESCE(ct.receipt_urls, '[]'::jsonb) AS "receiptUrls"
+    FROM cash_transfers ct
+    JOIN warehouses wo ON wo.id = ct.origin_warehouse_id
+    JOIN warehouses wd ON wd.id = ct.destination_warehouse_id
+    LEFT JOIN users u ON u.id = ct.sent_by
+    WHERE LOWER(TRIM(ct.payment_method)) = 'efectivo'
+      ${whTransferOrigFilter}
+      ${dateTransferCreatedFilter}
+  `;
+
+  const transferReturnedDetailQuery = `
+    SELECT
+      ct.id::text AS id,
+      LOWER(TRIM(ct.payment_method)) AS method,
+      COALESCE(ct.amount, 0)::float AS amount,
+      ct.transfer_code AS reference,
+      ct.reference_code AS "relatedReference",
+      wd.name AS "thirdPartyName",
+      ct.concept,
+      ct.notes,
+      ct.rejection_reason AS "rejectionReason",
+      wo.code AS "warehouseCode",
+      wo.name AS "warehouseName",
+      COALESCE(ua.full_name, us.full_name) AS "createdByName",
+      COALESCE(ct.approved_at, ct.created_at) AS "createdAt",
+      ct.receipt_url AS "receiptUrl",
+      COALESCE(ct.receipt_urls, '[]'::jsonb) AS "receiptUrls"
+    FROM cash_transfers ct
+    JOIN warehouses wo ON wo.id = ct.origin_warehouse_id
+    JOIN warehouses wd ON wd.id = ct.destination_warehouse_id
+    LEFT JOIN users us ON us.id = ct.sent_by
+    LEFT JOIN users ua ON ua.id = ct.approved_by
+    WHERE ct.status = 'rejected'
+      AND LOWER(TRIM(ct.payment_method)) = 'efectivo'
+      ${whTransferOrigFilter}
+      ${dateTransferRejectedFilter}
+  `;
+
+  const transferReceivedDetailQuery = `
+    SELECT
+      ct.id::text AS id,
+      LOWER(TRIM(ct.payment_method)) AS method,
+      COALESCE(ct.amount, 0)::float AS amount,
+      ct.transfer_code AS reference,
+      ct.reference_code AS "relatedReference",
+      wo.name AS "thirdPartyName",
+      ct.concept,
+      ct.notes,
+      wd.code AS "warehouseCode",
+      wd.name AS "warehouseName",
+      COALESCE(ua.full_name, us.full_name) AS "createdByName",
+      COALESCE(ct.approved_at, ct.created_at) AS "createdAt",
+      COALESCE(ct.receive_receipt_url, ct.receipt_url) AS "receiptUrl",
+      COALESCE(ct.receive_receipt_urls, ct.receipt_urls, '[]'::jsonb) AS "receiptUrls"
+    FROM cash_transfers ct
+    JOIN warehouses wo ON wo.id = ct.origin_warehouse_id
+    JOIN warehouses wd ON wd.id = ct.destination_warehouse_id
+    LEFT JOIN users us ON us.id = ct.sent_by
+    LEFT JOIN users ua ON ua.id = ct.approved_by
+    WHERE ct.status = 'approved'
+      AND LOWER(TRIM(ct.payment_method)) = 'efectivo'
+      ${whTransferDestFilter}
+      ${dateTransferApprovedFilter}
+  `;
+
   const [
     { rows: salesRows },
     { rows: payRows },
@@ -1530,6 +1652,9 @@ export async function getPaymentsCashSummary(
     { rows: incomeDetailRows },
     { rows: payrollDetailRows },
     { rows: outflowDetailRows },
+    { rows: transferSentDetailRows },
+    { rows: transferReturnedDetailRows },
+    { rows: transferReceivedDetailRows },
   ] = await Promise.all([
     pool.query<{ method: string; amount: string; count: number }>(salesQuery, params),
     pool.query<{ method: string; amount: string; count: number }>(paymentsQuery, params),
@@ -1543,6 +1668,9 @@ export async function getPaymentsCashSummary(
     pool.query<any>(incomesDetailQuery, params),
     pool.query<any>(payrollDetailQuery, payrollParams),
     pool.query<any>(outflowDetailQuery, outflowParams),
+    pool.query<any>(transferSentDetailQuery, transferOrigParams),
+    pool.query<any>(transferReturnedDetailQuery, transferOrigParams),
+    pool.query<any>(transferReceivedDetailQuery, transferDestParams),
   ]);
 
   const map = new Map<
@@ -1631,7 +1759,16 @@ export async function getPaymentsCashSummary(
   const cashCollected = cashMethod ? cashMethod.totalAmount : 0;
   const cashPayrollAmount = Number(payrollRows[0]?.amount || 0);
   const cashOutflowsAmount = Number(outflowRows[0]?.amount || 0);
-  const netCashInDrawer = cashCollected - cashPayrollAmount - cashOutflowsAmount;
+  const cashTransfersSentAmount = transferSentDetailRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const cashTransfersReturnedAmount = transferReturnedDetailRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const cashTransfersReceivedAmount = transferReceivedDetailRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const netCashInDrawer =
+    cashCollected +
+    cashTransfersReceivedAmount +
+    cashTransfersReturnedAmount -
+    cashPayrollAmount -
+    cashOutflowsAmount -
+    cashTransfersSentAmount;
 
   const operations: PaymentCashOperationItem[] = [];
 
@@ -1776,6 +1913,81 @@ export async function getPaymentsCashSummary(
     });
   }
 
+  for (const r of transferSentDetailRows) {
+    const m = r.method || "efectivo";
+    const conceptText = [r.concept, r.notes].filter(Boolean).join(" · ") || "Traslado de dinero enviado";
+    operations.push({
+      id: `ct-out-${r.id}`,
+      sourceType: "transfer_out",
+      sourceLabel: "Traslado Enviado",
+      direction: "out",
+      paymentMethod: m,
+      paymentMethodLabel: methodLabels[m] || m.toUpperCase(),
+      amount: Number(r.amount || 0),
+      reference: r.reference || "S/N",
+      relatedReference: r.relatedReference || null,
+      thirdPartyName: r.thirdPartyName ? `Destino: ${r.thirdPartyName}` : "Sede Destino",
+      concept: conceptText,
+      itemsSummary: null,
+      warehouseCode: r.warehouseCode || null,
+      warehouseName: r.warehouseName || null,
+      createdByName: r.createdByName || null,
+      createdAt: new Date(r.createdAt).toISOString(),
+      receiptUrls: parseOpReceiptUrls(r.receiptUrls, r.receiptUrl || null),
+    });
+  }
+
+  for (const r of transferReturnedDetailRows) {
+    const m = r.method || "efectivo";
+    const conceptText = [
+      r.concept ? `Retorno por rechazo: ${r.concept}` : "Retorno de traslado rechazado",
+      r.rejectionReason ? `Motivo: ${r.rejectionReason}` : null,
+    ].filter(Boolean).join(" · ");
+    operations.push({
+      id: `ct-ret-${r.id}`,
+      sourceType: "transfer_returned",
+      sourceLabel: "Retorno Traslado Rechazado",
+      direction: "in",
+      paymentMethod: m,
+      paymentMethodLabel: methodLabels[m] || m.toUpperCase(),
+      amount: Number(r.amount || 0),
+      reference: r.reference || "S/N",
+      relatedReference: r.relatedReference || null,
+      thirdPartyName: r.thirdPartyName ? `Rechazado por: ${r.thirdPartyName}` : "Sede Destino",
+      concept: conceptText,
+      itemsSummary: null,
+      warehouseCode: r.warehouseCode || null,
+      warehouseName: r.warehouseName || null,
+      createdByName: r.createdByName || null,
+      createdAt: new Date(r.createdAt).toISOString(),
+      receiptUrls: parseOpReceiptUrls(r.receiptUrls, r.receiptUrl || null),
+    });
+  }
+
+  for (const r of transferReceivedDetailRows) {
+    const m = r.method || "efectivo";
+    const conceptText = [r.concept, r.notes].filter(Boolean).join(" · ") || "Traslado de dinero recibido";
+    operations.push({
+      id: `ct-in-${r.id}`,
+      sourceType: "transfer_in",
+      sourceLabel: "Traslado Recibido",
+      direction: "in",
+      paymentMethod: m,
+      paymentMethodLabel: methodLabels[m] || m.toUpperCase(),
+      amount: Number(r.amount || 0),
+      reference: r.reference || "S/N",
+      relatedReference: r.relatedReference || null,
+      thirdPartyName: r.thirdPartyName ? `Origen: ${r.thirdPartyName}` : "Sede Origen",
+      concept: conceptText,
+      itemsSummary: null,
+      warehouseCode: r.warehouseCode || null,
+      warehouseName: r.warehouseName || null,
+      createdByName: r.createdByName || null,
+      createdAt: new Date(r.createdAt).toISOString(),
+      receiptUrls: parseOpReceiptUrls(r.receiptUrls, r.receiptUrl || null),
+    });
+  }
+
   operations.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   return {
@@ -1786,6 +1998,9 @@ export async function getPaymentsCashSummary(
     cashCollected,
     cashPayrollAmount,
     cashOutflowsAmount,
+    cashTransfersReceivedAmount,
+    cashTransfersReturnedAmount,
+    cashTransfersSentAmount,
     netCashInDrawer,
     methods,
     operations,

@@ -431,6 +431,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
       worksheet.cashCreditPayments +
       worksheet.cashLayawayPayments +
       worksheet.cashTransfersReceived +
+      (worksheet.cashTransfersReturned ?? 0) +
       (worksheet.cashOtherIncomes ?? 0)
     : 0;
 
@@ -891,6 +892,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                             cashCreditPayments: worksheet.cashCreditPayments,
                             cashLayawayPayments: worksheet.cashLayawayPayments,
                             cashTransfersReceived: worksheet.cashTransfersReceived,
+                            cashTransfersReturned: worksheet.cashTransfersReturned ?? 0,
                             cashOtherIncomes: worksheet.cashOtherIncomes ?? 0,
                             cashTransfersSent: worksheet.cashTransfersSent,
                             cashOutflows: worksheet.cashOutflows,
@@ -1050,6 +1052,11 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                     {worksheet.cashTransfersReceived > 0 && (
                       <div style={{ display: "flex", justifyContent: "space-between", color: "#0284c7" }}>
                         <span>Remesas recibidas:</span> <strong>+ {formatMoney(worksheet.cashTransfersReceived)}</strong>
+                      </div>
+                    )}
+                    {(worksheet.cashTransfersReturned ?? 0) > 0 && (
+                      <div style={{ display: "flex", justifyContent: "space-between", color: "#059669" }}>
+                        <span>Retorno traslados rechazados:</span> <strong>+ {formatMoney(worksheet.cashTransfersReturned ?? 0)}</strong>
                       </div>
                     )}
                     {(worksheet.cashOtherIncomes ?? 0) > 0 && (
@@ -1672,6 +1679,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                             cashCreditPayments: worksheet.cashCreditPayments,
                             cashLayawayPayments: worksheet.cashLayawayPayments,
                             cashTransfersReceived: worksheet.cashTransfersReceived,
+                            cashTransfersReturned: worksheet.cashTransfersReturned ?? 0,
                             cashOtherIncomes: worksheet.cashOtherIncomes ?? 0,
                             cashTransfersSent: worksheet.cashTransfersSent,
                             cashOutflows: worksheet.cashOutflows,
@@ -2199,7 +2207,11 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                     {formatMoney(generalWorksheet.totalNetCash)}
                   </div>
                   <div className="fin-kpi-sub">
-                    Remesas: +{formatMoney(generalWorksheet.totalTransfersReceived)} / -{formatMoney(generalWorksheet.totalTransfersSent)}
+                    Remesas: +{formatMoney(generalWorksheet.totalTransfersReceived)}
+                    {(generalWorksheet.totalTransfersReturned ?? 0) > 0
+                      ? ` (Retorno: +${formatMoney(generalWorksheet.totalTransfersReturned ?? 0)})`
+                      : ""}{" "}
+                    / -{formatMoney(generalWorksheet.totalTransfersSent)}
                   </div>
                 </div>
               </div>

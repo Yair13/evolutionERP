@@ -55,6 +55,7 @@ export interface DailyClosureWorksheet {
   cashCreditPayments: number;
   cashLayawayPayments: number;
   cashTransfersReceived: number;
+  cashTransfersReturned?: number;
   cashOtherIncomes: number;
   totalCashIn: number;
 
@@ -106,6 +107,7 @@ export interface DailyClosureRecord {
   cashCreditPayments: number;
   cashLayawayPayments: number;
   cashTransfersReceived: number;
+  cashTransfersReturned?: number;
   cashOtherIncomes: number;
   cashTransfersSent: number;
   cashOutflows: number;
@@ -535,6 +537,7 @@ async function calculateMovementsBetween(
   cashCreditPayments: number;
   cashLayawayPayments: number;
   cashTransfersReceived: number;
+  cashTransfersReturned?: number;
   cashOtherIncomes: number;
   totalCashIn: number;
   cashOutflows: number;
@@ -600,7 +603,7 @@ async function calculateMovementsBetween(
   );
   const cashLayawayPayments = Number(layawayPayRows[0]?.amount || 0);
 
-  // 4. Remesas recibidas en efectivo
+  // 4. Remesas recibidas en efectivo (aprobadas en sede destino)
   const { rows: transferInRows } = await pool.query<{ amount: string }>(
     `
     SELECT COALESCE(SUM(amount), 0)::text AS amount
@@ -615,6 +618,21 @@ async function calculateMovementsBetween(
   );
   const cashTransfersReceived = Number(transferInRows[0]?.amount || 0);
 
+  // 4a. Retorno de traslados rechazados en efectivo (devuelven el dinero a la sede origen donde se hizo el traslado)
+  const { rows: transferRetRows } = await pool.query<{ amount: string }>(
+    `
+    SELECT COALESCE(SUM(amount), 0)::text AS amount
+    FROM cash_transfers
+    WHERE origin_warehouse_id = $1::uuid
+      AND status = 'rejected'
+      ${fromTime ? `AND COALESCE(approved_at, created_at) > '${fromTime}'::timestamptz` : ""}
+      AND COALESCE(approved_at, created_at) <= '${toTime}'::timestamptz
+      AND LOWER(TRIM(payment_method)) = 'efectivo'
+    `,
+    [warehouseId]
+  );
+  const cashTransfersReturned = Number(transferRetRows[0]?.amount || 0);
+
   // 4b. Otros ingresos en efectivo (devoluciones conductores, venta de rezagos/cuero, etc.)
   const { rows: otherIncomesRows } = await pool.query<{ amount: string }>(
     `
@@ -628,7 +646,13 @@ async function calculateMovementsBetween(
     [warehouseId]
   );
   const cashOtherIncomes = Number(otherIncomesRows[0]?.amount || 0);
-  const totalCashIn = cashSales + cashCreditPayments + cashLayawayPayments + cashTransfersReceived + cashOtherIncomes;
+  const totalCashIn =
+    cashSales +
+    cashCreditPayments +
+    cashLayawayPayments +
+    cashTransfersReceived +
+    cashTransfersReturned +
+    cashOtherIncomes;
 
   // 5. Salidas de efectivo
   // 5a. Egresos
@@ -660,7 +684,7 @@ async function calculateMovementsBetween(
   );
   const cashPayroll = Number(payrollRows[0]?.amount || 0);
 
-  // 5c. Remesas enviadas en efectivo
+  // 5c. Remesas enviadas en efectivo (salen al crearse; si luego se rechazan, reingresan en cashTransfersReturned en la fecha/hora del rechazo)
   const { rows: transferOutRows } = await pool.query<{ amount: string }>(
     `
     SELECT COALESCE(SUM(amount), 0)::text AS amount
@@ -669,7 +693,6 @@ async function calculateMovementsBetween(
       ${fromTime ? `AND created_at > '${fromTime}'::timestamptz` : ""}
       AND created_at <= '${toTime}'::timestamptz
       AND LOWER(TRIM(payment_method)) = 'efectivo'
-      AND status <> 'rejected'
     `,
     [warehouseId]
   );
@@ -786,6 +809,7 @@ async function calculateMovementsBetween(
     cashCreditPayments,
     cashLayawayPayments,
     cashTransfersReceived,
+    cashTransfersReturned,
     cashOtherIncomes,
     totalCashIn,
     cashOutflows,
@@ -800,6 +824,90 @@ async function calculateMovementsBetween(
 }
 
 /**
+ * Auto-repara cierres ya cerrados en los que un traslado enviado en un turno anterior
+ * (created_at <= started_at) fue rechazado durante ese turno (approved_at > started_at AND approved_at <= closed_at),
+ * pero por el comportamiento anterior no había retornado el dinero al saldo esperado/contado de la sede origen.
+ */
+async function repairMissedRejectedTransferReturns(
+  pool: pg.Pool,
+  warehouseId: string
+): Promise<void> {
+  try {
+    const { rows: missedRows } = await pool.query<{
+      id: string;
+      closed_time: string;
+      missing_return: string;
+    }>(
+      `
+      SELECT
+        dc.id,
+        COALESCE(dc.closed_at, dc.created_at)::text AS closed_time,
+        (
+          COALESCE((
+            SELECT SUM(ct.amount)
+            FROM cash_transfers ct
+            WHERE ct.destination_warehouse_id = dc.warehouse_id
+              AND ct.status = 'approved'
+              AND LOWER(TRIM(ct.payment_method)) = 'efectivo'
+              AND ct.approved_at > dc.started_at
+              AND ct.approved_at <= COALESCE(dc.closed_at, dc.created_at)
+          ), 0)
+          +
+          COALESCE((
+            SELECT SUM(ct.amount)
+            FROM cash_transfers ct
+            WHERE ct.origin_warehouse_id = dc.warehouse_id
+              AND ct.status = 'rejected'
+              AND LOWER(TRIM(ct.payment_method)) = 'efectivo'
+              AND ct.created_at <= dc.started_at
+              AND COALESCE(ct.approved_at, ct.created_at) > dc.started_at
+              AND COALESCE(ct.approved_at, ct.created_at) <= COALESCE(dc.closed_at, dc.created_at)
+          ), 0)
+          - dc.cash_transfers_received
+        )::text AS missing_return
+      FROM daily_closures dc
+      WHERE dc.warehouse_id = $1::uuid
+        AND dc.status <> 'voided'
+        AND dc.started_at IS NOT NULL
+      ORDER BY COALESCE(dc.closed_at, dc.created_at) ASC, dc.id ASC
+      `,
+      [warehouseId]
+    );
+
+    for (const r of missedRows) {
+      const missingReturn = Number(r.missing_return || 0);
+      if (missingReturn > 0.009) {
+        await pool.query(
+          `
+          UPDATE daily_closures
+          SET cash_transfers_received = cash_transfers_received + $2::numeric,
+              expected_cash = expected_cash + $2::numeric,
+              counted_cash = counted_cash + $2::numeric
+          WHERE id = $1::uuid
+          `,
+          [r.id, missingReturn]
+        );
+        await pool.query(
+          `
+          UPDATE daily_closures
+          SET opening_cash = opening_cash + $3::numeric,
+              expected_cash = expected_cash + $3::numeric,
+              counted_cash = counted_cash + $3::numeric
+          WHERE warehouse_id = $1::uuid
+            AND status <> 'voided'
+            AND id <> $2::uuid
+            AND COALESCE(closed_at, created_at) > $4::timestamptz
+          `,
+          [warehouseId, r.id, missingReturn, r.closed_time]
+        );
+      }
+    }
+  } catch (e) {
+    console.warn("[daily-closures] repairMissedRejectedTransferReturns warning:", e);
+  }
+}
+
+/**
  * Obtener hoja de trabajo de cierre diario continuo (basado en horas y fechas entre cierres).
  */
 export async function getDailyClosureData(
@@ -809,6 +917,8 @@ export async function getDailyClosureData(
 ): Promise<DailyClosureWorksheet> {
   const date = typeof dateOrOptions === "string" ? dateOrOptions : (dateOrOptions?.date || new Date().toISOString().slice(0, 10));
   const requestedClosureId = typeof dateOrOptions === "object" ? dateOrOptions?.closureId : undefined;
+
+  await repairMissedRejectedTransferReturns(pool, warehouseId);
 
   // 1. Obtener almacén
   const { rows: whRows } = await pool.query<{ id: string; code: string; name: string }>(
@@ -859,6 +969,23 @@ export async function getDailyClosureData(
 
       const auditList = await getReceiptAuditItemsBetween(pool, warehouseId, startedAt, closedAt);
       const pendingReceiptsCount = auditList.filter((a) => a.isMissing).length;
+
+      const { rows: retRows } = await pool.query<{ amount: string }>(
+        `
+        SELECT COALESCE(SUM(amount), 0)::text AS amount
+        FROM cash_transfers
+        WHERE origin_warehouse_id = $1::uuid
+          AND status = 'rejected'
+          ${startedAt ? `AND COALESCE(approved_at, created_at) > '${startedAt}'::timestamptz` : ""}
+          AND COALESCE(approved_at, created_at) <= '${closedAt}'::timestamptz
+          AND LOWER(TRIM(payment_method)) = 'efectivo'
+        `,
+        [warehouseId]
+      );
+      const rawReturned = Number(retRows[0]?.amount || 0);
+      const rawPersistedReceived = Number(existing.cash_transfers_received || 0);
+      const existingTransfersReturned = Math.min(rawPersistedReceived, rawReturned);
+      const existingTransfersReceived = Math.max(0, rawPersistedReceived - existingTransfersReturned);
 
       const dateStr = existing.closure_date instanceof Date
         ? existing.closure_date.toISOString().slice(0, 10)
@@ -911,9 +1038,10 @@ export async function getDailyClosureData(
         cashSales: Number(existing.cash_sales),
         cashCreditPayments: Number(existing.cash_credit_payments),
         cashLayawayPayments: Number(existing.cash_layaway_payments),
-        cashTransfersReceived: Number(existing.cash_transfers_received),
+        cashTransfersReceived: existingTransfersReceived,
+        cashTransfersReturned: existingTransfersReturned,
         cashOtherIncomes: Number(existing.cash_other_incomes || 0),
-        totalCashIn: Number(existing.cash_sales) + Number(existing.cash_credit_payments) + Number(existing.cash_layaway_payments) + Number(existing.cash_transfers_received) + Number(existing.cash_other_incomes || 0),
+        totalCashIn: Number(existing.cash_sales) + Number(existing.cash_credit_payments) + Number(existing.cash_layaway_payments) + rawPersistedReceived + Number(existing.cash_other_incomes || 0),
 
         cashOutflows: Number(existing.cash_outflows),
         cashPayroll: Number(existing.cash_payroll),
@@ -1043,6 +1171,7 @@ export async function getDailyClosureData(
     cashCreditPayments: mov.cashCreditPayments,
     cashLayawayPayments: mov.cashLayawayPayments,
     cashTransfersReceived: mov.cashTransfersReceived,
+    cashTransfersReturned: mov.cashTransfersReturned,
     cashOtherIncomes: mov.cashOtherIncomes,
     totalCashIn: mov.totalCashIn,
 
@@ -1160,7 +1289,7 @@ export async function saveDailyClosure(
       ws.cashSales,
       ws.cashCreditPayments,
       ws.cashLayawayPayments,
-      ws.cashTransfersReceived,
+      ws.cashTransfersReceived + (ws.cashTransfersReturned || 0),
       ws.cashOtherIncomes,
       ws.cashTransfersSent,
       ws.cashOutflows,

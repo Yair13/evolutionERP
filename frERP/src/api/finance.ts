@@ -104,7 +104,10 @@ export interface PaymentCashOperationItem {
     | "layaway_payment"
     | "cash_income"
     | "cash_outflow"
-    | "cash_payroll";
+    | "cash_payroll"
+    | "transfer_in"
+    | "transfer_out"
+    | "transfer_returned";
   sourceLabel: string;
   direction: "in" | "out";
   paymentMethod: string;
@@ -130,6 +133,9 @@ export interface PaymentsCashSummary {
   cashCollected?: number;
   cashPayrollAmount?: number;
   cashOutflowsAmount?: number;
+  cashTransfersReceivedAmount?: number;
+  cashTransfersReturnedAmount?: number;
+  cashTransfersSentAmount?: number;
   netCashInDrawer?: number;
   methods: {
     method: string;
@@ -1264,6 +1270,7 @@ export interface DailyClosureWorksheet {
   cashCreditPayments: number;
   cashLayawayPayments: number;
   cashTransfersReceived: number;
+  cashTransfersReturned?: number;
   cashOtherIncomes?: number;
   totalCashIn: number;
 
@@ -1307,6 +1314,7 @@ export interface DailyClosureRecord {
   cashCreditPayments: number;
   cashLayawayPayments: number;
   cashTransfersReceived: number;
+  cashTransfersReturned?: number;
   cashOtherIncomes?: number;
   cashTransfersSent: number;
   cashOutflows: number;
@@ -1490,6 +1498,7 @@ export interface GeneralClosureWorksheet {
   totalPayroll: number;
   totalCashPayroll: number;
   totalTransfersReceived: number;
+  totalTransfersReturned?: number;
   totalTransfersSent: number;
 
   // Base inicial y efectivo total

@@ -35,6 +35,7 @@ export interface GeneralClosureWorksheet {
   totalPayroll: number;
   totalCashPayroll: number;
   totalTransfersReceived: number;
+  totalTransfersReturned?: number;
   totalTransfersSent: number;
 
   // Base inicial y efectivo total
@@ -243,6 +244,10 @@ export async function getGeneralClosureData(
     ? `AND ct.approved_at > '${new Date(fromTime).toISOString()}'::timestamptz AND (ct.approved_at AT TIME ZONE 'America/Bogota')::date <= $2::date`
     : `AND (ct.approved_at AT TIME ZONE 'America/Bogota')::date >= $1::date AND (ct.approved_at AT TIME ZONE 'America/Bogota')::date <= $2::date`;
 
+  const timeFilterRetCt = fromTime
+    ? `AND COALESCE(ct.approved_at, ct.created_at) > '${new Date(fromTime).toISOString()}'::timestamptz AND (COALESCE(ct.approved_at, ct.created_at) AT TIME ZONE 'America/Bogota')::date <= $2::date`
+    : `AND (COALESCE(ct.approved_at, ct.created_at) AT TIME ZONE 'America/Bogota')::date >= $1::date AND (COALESCE(ct.approved_at, ct.created_at) AT TIME ZONE 'America/Bogota')::date <= $2::date`;
+
   const timeFilterOrigCt = fromTime
     ? `AND ct.created_at > '${new Date(fromTime).toISOString()}'::timestamptz AND (ct.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`
     : `AND (ct.created_at AT TIME ZONE 'America/Bogota')::date >= $1::date AND (ct.created_at AT TIME ZONE 'America/Bogota')::date <= $2::date`;
@@ -398,6 +403,7 @@ export async function getGeneralClosureData(
 
   // 6. Remesas entre sedes
   let totalTransfersReceived = 0;
+  let totalTransfersReturned = 0;
   let totalTransfersSent = 0;
   if (opts.warehouseId) {
     const { rows: trIn } = await pool.query<{ total: string }>(
@@ -413,11 +419,24 @@ export async function getGeneralClosureData(
     );
     totalTransfersReceived = Number(trIn[0]?.total || 0);
 
+    const { rows: trRet } = await pool.query<{ total: string }>(
+      `
+      SELECT COALESCE(SUM(amount), 0)::text AS total
+      FROM cash_transfers ct
+      WHERE ct.status = 'rejected'
+        ${whFilterOrigCt}
+        ${timeFilterRetCt}
+        AND LOWER(ct.payment_method) = 'efectivo'
+      `,
+      [opts.dateFrom, opts.dateTo]
+    );
+    totalTransfersReturned = Number(trRet[0]?.total || 0);
+
     const { rows: trOut } = await pool.query<{ total: string }>(
       `
       SELECT COALESCE(SUM(amount), 0)::text AS total
       FROM cash_transfers ct
-      WHERE ct.status <> 'rejected'
+      WHERE 1=1
         ${whFilterOrigCt}
         ${timeFilterOrigCt}
         AND LOWER(ct.payment_method) = 'efectivo'
@@ -485,6 +504,7 @@ export async function getGeneralClosureData(
     totalCashSales +
     totalCashCredits +
     totalTransfersReceived +
+    totalTransfersReturned +
     totalCashOtherIncomes -
     totalCashOutflows -
     totalCashPayroll -
@@ -522,6 +542,7 @@ export async function getGeneralClosureData(
     totalPayroll,
     totalCashPayroll,
     totalTransfersReceived,
+    totalTransfersReturned,
     totalTransfersSent,
     totalNetCash,
     paymentBreakdown,

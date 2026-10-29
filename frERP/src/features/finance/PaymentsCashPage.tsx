@@ -156,6 +156,21 @@ const SOURCE_BADGE_STYLE: Record<
     color: "#d97706",
     border: "rgba(217, 119, 6, 0.25)",
   },
+  transfer_in: {
+    bg: "rgba(2, 132, 199, 0.1)",
+    color: "#0284c7",
+    border: "rgba(2, 132, 199, 0.25)",
+  },
+  transfer_out: {
+    bg: "rgba(225, 29, 72, 0.1)",
+    color: "#e11d48",
+    border: "rgba(225, 29, 72, 0.25)",
+  },
+  transfer_returned: {
+    bg: "rgba(5, 150, 105, 0.1)",
+    color: "#059669",
+    border: "rgba(5, 150, 105, 0.25)",
+  },
 };
 
 export function PaymentsCashPage() {
@@ -252,7 +267,12 @@ export function PaymentsCashPage() {
     const allOps = data.operations;
 
     if (modalScope.kind === "all_incomes") {
-      return allOps.filter((op) => op.direction === "in");
+      return allOps.filter(
+        (op) =>
+          op.direction === "in" &&
+          op.sourceType !== "transfer_in" &&
+          op.sourceType !== "transfer_returned"
+      );
     }
     if (modalScope.kind === "cash_net") {
       return allOps.filter((op) => op.paymentMethod === "efectivo");
@@ -687,7 +707,13 @@ export function PaymentsCashPage() {
 
                   {/* Detalle interno */}
                   <div style={{ marginTop: "0.85rem", paddingTop: "0.75rem", borderTop: "1px solid rgba(15, 23, 42, 0.07)", fontSize: "0.78rem" }}>
-                    {m.method === "efectivo" && (data.cashPayrollAmount || data.cashOutflowsAmount) ? (
+                    {m.method === "efectivo" && (
+                      data.cashPayrollAmount ||
+                      data.cashOutflowsAmount ||
+                      data.cashTransfersReceivedAmount ||
+                      data.cashTransfersReturnedAmount ||
+                      data.cashTransfersSentAmount
+                    ) ? (
                       <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                         <div
                           style={{ display: "flex", justifyContent: "space-between", color: "#64748b", borderRadius: 4, padding: "2px 4px" }}
@@ -705,6 +731,42 @@ export function PaymentsCashPage() {
                           <span>Recaudo bruto:</span>
                           <span style={{ fontWeight: 600 }}>{formatMoney(m.totalAmount)}</span>
                         </div>
+                        {Boolean(data.cashTransfersReceivedAmount) && (
+                          <div
+                            style={{ display: "flex", justifyContent: "space-between", color: "#0284c7", borderRadius: 4, padding: "2px 4px" }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openScopeModal({
+                                kind: "method",
+                                method: "efectivo",
+                                label: m.label,
+                                initialFilter: "in",
+                              });
+                            }}
+                            title="Ver traslados de dinero recibidos en efectivo"
+                          >
+                            <span>(+) Traslados recibidos:</span>
+                            <span style={{ fontWeight: 600 }}>+ {formatMoney(data.cashTransfersReceivedAmount!)}</span>
+                          </div>
+                        )}
+                        {Boolean(data.cashTransfersReturnedAmount) && (
+                          <div
+                            style={{ display: "flex", justifyContent: "space-between", color: "#059669", borderRadius: 4, padding: "2px 4px" }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openScopeModal({
+                                kind: "method",
+                                method: "efectivo",
+                                label: m.label,
+                                initialFilter: "in",
+                              });
+                            }}
+                            title="Ver retorno de traslados rechazados"
+                          >
+                            <span>(+) Retorno traslados rechazados:</span>
+                            <span style={{ fontWeight: 600 }}>+ {formatMoney(data.cashTransfersReturnedAmount!)}</span>
+                          </div>
+                        )}
                         {Boolean(data.cashPayrollAmount) && (
                           <div
                             style={{ display: "flex", justifyContent: "space-between", color: "#e11d48", borderRadius: 4, padding: "2px 4px" }}
@@ -739,6 +801,24 @@ export function PaymentsCashPage() {
                           >
                             <span>(-) Egresos de caja:</span>
                             <span style={{ fontWeight: 600 }}>- {formatMoney(data.cashOutflowsAmount!)}</span>
+                          </div>
+                        )}
+                        {Boolean(data.cashTransfersSentAmount) && (
+                          <div
+                            style={{ display: "flex", justifyContent: "space-between", color: "#e11d48", borderRadius: 4, padding: "2px 4px" }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openScopeModal({
+                                kind: "method",
+                                method: "efectivo",
+                                label: m.label,
+                                initialFilter: "out",
+                              });
+                            }}
+                            title="Ver traslados de dinero enviados"
+                          >
+                            <span>(-) Traslados enviados:</span>
+                            <span style={{ fontWeight: 600 }}>- {formatMoney(data.cashTransfersSentAmount!)}</span>
                           </div>
                         )}
                         <div style={{ display: "flex", justifyContent: "space-between", color: "#059669", fontWeight: 700, borderTop: "1px dashed rgba(15, 23, 42, 0.1)", paddingTop: "0.35rem", marginTop: "0.2rem", paddingLeft: 4, paddingRight: 4 }}>
