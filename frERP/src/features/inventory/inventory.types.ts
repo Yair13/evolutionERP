@@ -160,10 +160,12 @@ export type InventoryDocumentDetail = {
   createdByName: string | null;
   invoiceNumber?: string | null;
   exitKind?: ExitKind | null;
+  customerId?: string | null;
   customerName?: string | null;
   customerTaxId?: string | null;
   customerPhone?: string | null;
   customerAddress?: string | null;
+  customerCreditBalance?: number;
   relatedInvoiceNumber?: string | null;
   productionOrderCode?: string | null;
   purchaseOrderCode?: string | null;

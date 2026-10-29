@@ -24,7 +24,6 @@ import {
   User,
   Wallet,
   ArrowDownRight,
-  TrendingUp,
   PlusCircle,
   Trash2,
 } from "lucide-react";
@@ -87,6 +86,8 @@ export function ReceivablesPage() {
     totalBalance: 0,
     countPending: 0,
     countPaid: 0,
+    totalCustomerCreditBalance: 0,
+    countWithCreditBalance: 0,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -149,7 +150,11 @@ export function ReceivablesPage() {
         limit: 50,
       });
       setItems(res.items);
-      setSummary(res.summary);
+      setSummary({
+        ...res.summary,
+        totalCustomerCreditBalance: res.summary.totalCustomerCreditBalance ?? 0,
+        countWithCreditBalance: res.summary.countWithCreditBalance ?? 0,
+      });
     } catch (err: any) {
       setError(err?.message || "Error al cargar créditos");
     } finally {
@@ -290,7 +295,7 @@ export function ReceivablesPage() {
       {activeTab === "credits" && (
         <>
           {/* Tarjetas KPI */}
-          <div className="fin-kpi-grid fin-kpi-grid--4">
+          <div className="fin-kpi-grid fin-kpi-grid--4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))" }}>
             <div className="fin-kpi-card fin-kpi-card--indigo">
               <div className="fin-kpi-top">
                 <span className="fin-kpi-label">Total Cartera Emitida</span>
@@ -336,20 +341,23 @@ export function ReceivablesPage() {
               </div>
             </div>
 
-            <div className="fin-kpi-card fin-kpi-card--teal">
+            <div
+              className="fin-kpi-card fin-kpi-card--teal"
+              style={{ cursor: "pointer", border: statusFilter === "with_favour" ? "2px solid #10b981" : undefined }}
+              onClick={() => setStatusFilter(statusFilter === "with_favour" ? "pending" : "with_favour")}
+              title="Click para filtrar créditos de clientes con saldo a favor"
+            >
               <div className="fin-kpi-top">
-                <span className="fin-kpi-label">Efectividad de Cobro</span>
+                <span className="fin-kpi-label" style={{ color: "#059669" }}>Saldo a Favor Clientes</span>
                 <div className="fin-kpi-icon fin-kpi-icon--teal">
-                  <TrendingUp size={18} />
+                  <Wallet size={18} />
                 </div>
               </div>
-              <div className="fin-kpi-val fin-kpi-val--teal">
-                {summary.totalAmount > 0
-                  ? `${Math.round((summary.totalPaid / summary.totalAmount) * 100)}%`
-                  : "0%"}
+              <div className="fin-kpi-val fin-kpi-val--teal" style={{ color: "#059669" }}>
+                {formatMoney(summary.totalCustomerCreditBalance || 0)}
               </div>
               <div className="fin-kpi-sub">
-                {summary.countPending + summary.countPaid} créditos en historial
+                {summary.countWithCreditBalance || 0} cliente(s) con saldo a favor disponible
               </div>
             </div>
           </div>
@@ -406,6 +414,7 @@ export function ReceivablesPage() {
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
                 <option value="pending">Con Saldo (Pendientes)</option>
+                <option value="with_favour">Con Saldo a Favor</option>
                 <option value="all">Todos los Créditos</option>
                 <option value="paid">Completamente Pagados</option>
               </select>
@@ -503,7 +512,25 @@ export function ReceivablesPage() {
                           </td>
                         )}
                         <td>
-                          <strong style={{ display: "block", color: "#0f172a" }}>{c.customerName}</strong>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+                            <strong style={{ color: "#0f172a" }}>{c.customerName}</strong>
+                            {c.customerCreditBalance != null && c.customerCreditBalance > 0 && (
+                              <span
+                                style={{
+                                  fontSize: "0.72rem",
+                                  fontWeight: 700,
+                                  padding: "1px 6px",
+                                  borderRadius: 999,
+                                  background: "rgba(16, 185, 129, 0.15)",
+                                  color: "#059669",
+                                  border: "1px solid rgba(16, 185, 129, 0.35)",
+                                }}
+                                title="Saldo a favor disponible del cliente"
+                              >
+                                💰 {formatMoney(c.customerCreditBalance)} a favor
+                              </span>
+                            )}
+                          </div>
                           <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
                             CC: {c.customerTaxId || "—"} · Tel: {c.customerPhone || "—"}
                           </span>
@@ -513,6 +540,11 @@ export function ReceivablesPage() {
                         </td>
                         <td className="fin-table-num" style={{ color: "#059669" }}>
                           {formatMoney(c.paidAmount)}
+                          {c.excessPaidTotal != null && c.excessPaidTotal > 0 && (
+                            <div style={{ fontSize: "0.72rem", color: "#059669", fontWeight: 600 }}>
+                              (+{formatMoney(c.excessPaidTotal)} a favor)
+                            </div>
+                          )}
                         </td>
                         <td className="fin-table-num">
                           <strong style={{ color: c.balanceAmount > 0 ? "#e11d48" : "#059669", fontSize: "0.95rem" }}>
@@ -938,6 +970,7 @@ export function ReceivablesPage() {
         <AddPaymentModal
           open={Boolean(activeReceivableForPayment)}
           receivable={activeReceivableForPayment}
+          customerCreditBalance={activeReceivableForPayment.customerCreditBalance}
           onClose={() => setActiveReceivableForPayment(null)}
           onSuccess={() => {
             void loadCredits();

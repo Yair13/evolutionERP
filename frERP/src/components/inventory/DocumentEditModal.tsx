@@ -340,6 +340,7 @@ export function DocumentEditModal({
           onQtyChange={onQtyChange}
           onRemove={onRemove}
           onUnitSalePriceChange={cartMode === "exit" ? onUnitSalePriceChange : undefined}
+          lockBarcodeQty={false}
         />
 
         {displayError ? (

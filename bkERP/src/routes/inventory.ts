@@ -1205,7 +1205,7 @@ export function createInventoryRouter(): Router {
       const { rows: docRows } = await pool.query<{ id: string; warehouse_id: string }>(
         `SELECT id::text, warehouse_id::text
          FROM inventory_documents
-         WHERE upper(replace(invoice_number, ' ', '')) = upper(replace($1, ' ', ''))
+         WHERE upper(replace(replace(replace(invoice_number, ' ', ''), '–', '-'), '—', '-')) = upper(replace(replace(replace($1, ' ', ''), '–', '-'), '—', '-'))
          LIMIT 1`,
         [invoiceNumber]
       );
@@ -1242,13 +1242,27 @@ export function createInventoryRouter(): Router {
     }
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
     try {
-      let queryStr = `SELECT id::text, display_name AS "displayName", tax_id AS "taxId", phone, address, COALESCE(credit_balance, 0)::float AS "creditBalance" FROM customers`;
+      let queryStr = `
+        SELECT
+          c.id::text,
+          c.display_name AS "displayName",
+          c.tax_id AS "taxId",
+          c.phone,
+          c.address,
+          COALESCE(c.credit_balance, 0)::float AS "creditBalance",
+          COALESCE((
+            SELECT SUM(ar.balance_amount)
+            FROM accounts_receivable ar
+            WHERE ar.customer_id = c.id AND ar.status IN ('open', 'partial')
+          ), 0)::float AS "totalDebt"
+        FROM customers c
+      `;
       const params: any[] = [];
       if (q) {
-        queryStr += ` WHERE display_name ILIKE $1 OR tax_id ILIKE $1 OR phone ILIKE $1`;
+        queryStr += ` WHERE c.display_name ILIKE $1 OR c.tax_id ILIKE $1 OR c.phone ILIKE $1`;
         params.push(`%${q}%`);
       }
-      queryStr += ` ORDER BY display_name LIMIT 50`;
+      queryStr += ` ORDER BY (COALESCE(c.credit_balance, 0) > 0) DESC, c.display_name LIMIT 60`;
       const { rows } = await pool.query(queryStr, params);
       res.json({ items: rows });
     } catch (err) {
@@ -1271,10 +1285,51 @@ export function createInventoryRouter(): Router {
       const { rows } = await pool.query(
         `INSERT INTO customers (display_name, tax_id, phone, address)
          VALUES ($1, $2, $3, $4)
-         RETURNING id::text, display_name AS "displayName", tax_id AS "taxId", phone, address, COALESCE(credit_balance, 0)::float AS "creditBalance"`,
+         RETURNING id::text, display_name AS "displayName", tax_id AS "taxId", phone, address, COALESCE(credit_balance, 0)::float AS "creditBalance", 0::float AS "totalDebt"`,
         [displayName.trim(), taxId?.trim() || null, phone?.trim() || null, address?.trim() || null]
       );
       res.status(201).json({ item: rows[0] });
+    } catch (err: any) {
+      if (err.code === "23505") {
+        res.status(409).json({ error: "customer_already_exists" });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  r.patch("/customers/:id", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+    const id = firstPathParam(req.params.id);
+    if (!id || !isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+    const { displayName, taxId, phone, address } = req.body ?? {};
+    if (!displayName?.trim()) {
+      res.status(400).json({ error: "displayName_required" });
+      return;
+    }
+    try {
+      const { rows } = await pool.query(
+        `UPDATE customers
+         SET display_name = $1,
+             tax_id = $2,
+             phone = $3,
+             address = $4
+         WHERE id = $5::uuid
+         RETURNING id::text, display_name AS "displayName", tax_id AS "taxId", phone, address, COALESCE(credit_balance, 0)::float AS "creditBalance"`,
+        [displayName.trim(), taxId?.trim() || null, phone?.trim() || null, address?.trim() || null, id]
+      );
+      if (rows.length === 0) {
+        res.status(404).json({ error: "customer_not_found" });
+        return;
+      }
+      res.json({ item: rows[0] });
     } catch (err: any) {
       if (err.code === "23505") {
         res.status(409).json({ error: "customer_already_exists" });

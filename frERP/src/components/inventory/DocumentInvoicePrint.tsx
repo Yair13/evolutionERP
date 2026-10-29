@@ -28,6 +28,8 @@ function paymentMethodLabel(method: string): string {
     addi: "Addi",
     sistecredito: "Sistecrédito",
     bold: "Bold",
+    saldo_a_favor: "Saldo a favor",
+    apartado: "Apartado / Plan Separe",
   };
   return labels[method] ?? method;
 }
@@ -103,25 +105,50 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
     doc.metadata?.isCredit === true ||
     kind === "Crédito" ||
     Boolean(doc.receivable);
-  const isPurchase = Boolean(
-    doc.purchaseOrderCode || doc.entryType === "purchase" || doc.metadata?.entryType === "purchase"
-  );
-  const title = isAdjustment
-    ? "Comprobante de ajuste de inventario"
-    : isPurchase
-      ? "Comprobante de entrada · Compra"
-      : isEntry
-        ? "Comprobante de entrada"
-        : isCredit
-          ? "Comprobante de salida · Venta a crédito"
-          : "Comprobante de salida";
   const isOp = Boolean(
     doc.productionOrderCode || doc.entryType === "production_order" || doc.metadata?.entryType === "production_order"
   );
-  const accent = isOp || isPurchase ? "op" : isEntry || isAdjustment ? "entry" : "exit";
+  const isPurchase = Boolean(
+    doc.purchaseOrderCode || doc.entryType === "purchase" || doc.metadata?.entryType === "purchase"
+  );
   // Movimientos internos entre almacenes o ajustes de conteo: no se muestran valores de venta
   const internalExit =
     doc.exitKind === "distribution" || doc.exitKind === "transfer" || doc.exitKind === "return_to_factory";
+  const isExchange =
+    doc.exitKind === "exchange" ||
+    doc.metadata?.exitKind === "exchange" ||
+    kind === "Cambio";
+  const title = isAdjustment
+    ? "Comprobante de ajuste de inventario"
+    : isOp
+      ? "Comprobante de entrada · Orden de producción"
+      : isPurchase
+        ? "Comprobante de entrada · Compra"
+        : isEntry
+          ? "Comprobante de entrada"
+          : isCredit
+            ? "Comprobante de salida · Venta a crédito"
+            : isExchange
+              ? "Comprobante de cambio de producto"
+              : internalExit
+                ? "Comprobante de traslado"
+                : "Comprobante de salida";
+  const voucherDocType = isAdjustment
+    ? "COMPROBANTE DE AJUSTE"
+    : isEntry
+      ? "COMPROBANTE DE ENTRADA"
+      : doc.docType === "warranty"
+        ? "COMPROBANTE DE GARANTÍA"
+        : doc.docType === "return"
+          ? "COMPROBANTE DE DEVOLUCIÓN"
+          : isExchange
+            ? "COMPROBANTE DE CAMBIO"
+            : internalExit
+              ? "COMPROBANTE DE TRASLADO"
+              : isCredit
+                ? "COMPROBANTE DE SALIDA · CRÉDITO"
+                : "COMPROBANTE DE SALIDA / VENTA";
+  const accent = isOp || isPurchase ? "op" : isEntry || isAdjustment ? "entry" : "exit";
   const showValues = !isEntry && !isAdjustment && !internalExit;
   const lineCount = doc.lines.length;
   const density =
@@ -183,13 +210,7 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
           {doc.warehouseCode ? ` (${doc.warehouseCode})` : ""}
         </div>
         <div className="sale-voucher-doc-type">
-          {internalExit
-            ? "COMPROBANTE DE TRASLADO"
-            : isAdjustment
-              ? "COMPROBANTE DE AJUSTE"
-              : isCredit
-                ? "COMPROBANTE DE SALIDA · CRÉDITO"
-                : "COMPROBANTE DE SALIDA / VENTA"}
+          {voucherDocType}
         </div>
         <div className="sale-voucher-number">
           Nº {doc.invoiceNumber ?? "—"}
@@ -243,7 +264,9 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
         )}
         {doc.createdByName && (
           <div className="sale-voucher-row">
-            <span className="sale-voucher-label">Atendido por:</span>
+            <span className="sale-voucher-label">
+              {isEntry || isAdjustment ? "Registrado por:" : "Atendido por:"}
+            </span>
             <span className="sale-voucher-val">{doc.createdByName}</span>
           </div>
         )}
@@ -259,19 +282,27 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
         </div>
         {doc.lines.map((line) => {
           const unit = line.unitSalePrice ?? 0;
+          const isReturnLine = line.quantity < 0;
           const sub = unit * line.quantity;
           return (
             <div key={line.id} className="sale-voucher-item">
               <div className="sale-voucher-item-main">
-                <span className="sale-voucher-item-qty">{line.quantity}x</span>
-                <span className="sale-voucher-item-name">{line.productName}</span>
+                <span className="sale-voucher-item-qty">
+                  {isReturnLine ? `+${Math.abs(line.quantity)}x` : `${line.quantity}x`}
+                </span>
+                <span className="sale-voucher-item-name">
+                  {line.productName}
+                  {isReturnLine ? " (Retorno / Entrada almacén)" : ""}
+                </span>
               </div>
               <div className="sale-voucher-item-sub">
                 <span className="sale-voucher-item-ref">Ref: {line.referenceCode}</span>
                 {showValues && (
                   <span className="sale-voucher-item-prices">
-                    {line.quantity > 1 ? `(${formatMoney(unit)}) ` : ""}
-                    <strong>{formatMoney(sub)}</strong>
+                    {Math.abs(line.quantity) > 1 ? `(${formatMoney(unit)}) ` : ""}
+                    <strong>
+                      {isReturnLine ? `- ${formatMoney(Math.abs(sub))}` : formatMoney(sub)}
+                    </strong>
                   </span>
                 )}
               </div>
@@ -304,7 +335,9 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
 
         {showValues && (
           <div className="sale-voucher-total-box">
-            <span className="sale-voucher-total-label">TOTAL {discountAmount > 0 ? "NETO" : "VENTA"}:</span>
+            <span className="sale-voucher-total-label">
+              {isExchange ? "TOTAL EXCEDENTE:" : discountAmount > 0 ? "TOTAL NETO:" : "TOTAL VENTA:"}
+            </span>
             <span className="sale-voucher-total-amount">{formatMoney(totalSaleAmount)}</span>
           </div>
         )}
@@ -348,6 +381,12 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                     <strong style={{ color: "#b91c1c" }}>{formatMoney(doc.customerTotalWarehouseDebt)}</strong>
                   </div>
                 )}
+                {doc.customerCreditBalance != null && doc.customerCreditBalance > 0 && (
+                  <div className="sale-voucher-balance-box" style={{ background: "#ecfdf5", borderColor: "#a7f3d0", marginTop: "4px" }}>
+                    <span style={{ color: "#065f46" }}>SALDO A FAVOR DISPONIBLE:</span>
+                    <strong style={{ color: "#047857" }}>{formatMoney(doc.customerCreditBalance)}</strong>
+                  </div>
+                )}
                 {doc.receivable?.dueDate && (
                   <div className="sale-voucher-row" style={{ marginTop: "3px" }}>
                     <span>Fecha límite de pago:</span>
@@ -380,6 +419,12 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                   <div className="sale-voucher-balance-box" style={{ background: "#fef2f2", borderColor: "#fecaca", marginTop: "6px" }}>
                     <span style={{ color: "#991b1b" }}>CARTERA PENDIENTE EN ESTA SEDE:</span>
                     <strong style={{ color: "#b91c1c" }}>{formatMoney(doc.customerTotalWarehouseDebt)}</strong>
+                  </div>
+                )}
+                {doc.customerCreditBalance != null && doc.customerCreditBalance > 0 && (
+                  <div className="sale-voucher-balance-box" style={{ background: "#ecfdf5", borderColor: "#a7f3d0", marginTop: "6px" }}>
+                    <span style={{ color: "#065f46" }}>SALDO A FAVOR DISPONIBLE:</span>
+                    <strong style={{ color: "#047857" }}>{formatMoney(doc.customerCreditBalance)}</strong>
                   </div>
                 )}
               </div>
@@ -416,13 +461,29 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
 
       {/* Pie del baucher */}
       <div className="sale-voucher-footer">
-        <p className="sale-voucher-thanks">¡Gracias por su compra!</p>
-        <p className="sale-voucher-footer-sub">
-          Evolution Colchones S.A.S · Calidad y Confort
-        </p>
-        <p className="sale-voucher-footer-sub">
-          Conserve este comprobante para trámites de soporte o garantía.
-        </p>
+        {!isEntry && !isAdjustment && !internalExit ? (
+          <>
+            <p className="sale-voucher-thanks">¡Gracias por su compra!</p>
+            <p className="sale-voucher-footer-sub">
+              Evolution Colchones S.A.S · Calidad y Confort
+            </p>
+            <p className="sale-voucher-footer-sub">
+              Conserve este comprobante para trámites de soporte o garantía.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="sale-voucher-thanks" style={{ fontSize: "11px", letterSpacing: "0.04em" }}>
+              CONTROL INTERNO DE INVENTARIO
+            </p>
+            <p className="sale-voucher-footer-sub">
+              Evolution Colchones S.A.S · Calidad y Confort
+            </p>
+            <p className="sale-voucher-footer-sub">
+              Documento interno de bodega · No válido como factura
+            </p>
+          </>
+        )}
       </div>
     </div>
   );
@@ -641,16 +702,20 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
               <tbody>
                 {doc.lines.map((line) => {
                   const unit = line.unitSalePrice ?? 0;
+                  const isReturnLine = line.quantity < 0;
                   const sub = unit * line.quantity;
                   return (
-                    <tr key={line.id}>
+                    <tr key={line.id} className={isReturnLine ? "is-return-row" : undefined}>
                       <td>{line.referenceCode}</td>
-                      <td>{line.productName}</td>
-                      <td>{line.quantity}</td>
+                      <td>
+                        {line.productName}
+                        {isReturnLine ? " (Retorno / Entrada almacén)" : ""}
+                      </td>
+                      <td>{isReturnLine ? `+${Math.abs(line.quantity)}` : line.quantity}</td>
                       {showValues ? (
                         <>
                           <td>{formatMoney(unit)}</td>
-                          <td>{formatMoney(sub)}</td>
+                          <td>{isReturnLine ? `- ${formatMoney(Math.abs(sub))}` : formatMoney(sub)}</td>
                         </>
                       ) : null}
                     </tr>
@@ -745,6 +810,20 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                         </td>
                       </tr>
                     )}
+                    {doc.customerCreditBalance != null && doc.customerCreditBalance > 0 && (
+                      <tr className="inv-invoice__row-credit-balance" style={{ background: "#ecfdf5" }}>
+                        <td colSpan={4}>
+                          <span style={{ textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 800, color: "#065f46" }}>
+                            SALDO A FAVOR DISPONIBLE DEL CLIENTE
+                          </span>
+                        </td>
+                        <td>
+                          <strong style={{ color: "#047857", fontSize: "1.15em", fontWeight: 800 }}>
+                            {formatMoney(doc.customerCreditBalance)}
+                          </strong>
+                        </td>
+                      </tr>
+                    )}
                   </>
                 ) : (
                   <>
@@ -779,6 +858,20 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                         <strong>{formatMoney(doc.totalAmount ?? 0)}</strong>
                       </td>
                     </tr>
+                    {doc.customerCreditBalance != null && doc.customerCreditBalance > 0 && (
+                      <tr style={{ background: "#ecfdf5" }}>
+                        <td colSpan={4}>
+                          <span style={{ textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 800, color: "#065f46" }}>
+                            SALDO A FAVOR DISPONIBLE DEL CLIENTE
+                          </span>
+                        </td>
+                        <td>
+                          <strong style={{ color: "#047857", fontSize: "1.1em", fontWeight: 800 }}>
+                            {formatMoney(doc.customerCreditBalance)}
+                          </strong>
+                        </td>
+                      </tr>
+                    )}
                   </>
                 )}
               </tfoot>

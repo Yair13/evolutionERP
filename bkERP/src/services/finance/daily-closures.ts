@@ -8,6 +8,7 @@ export interface ReceiptAuditItem {
   concept: string;
   amount: number;
   paymentMethod: string;
+  warehouseId?: string;
   receiptUrl: string | null;
   receiptUrls?: string[];
   receiptFilename: string | null;
@@ -411,6 +412,7 @@ async function getReceiptAuditItemsBetween(
       concept: `Remesa a ${st.destName} (Mensajero: ${st.carrierName})`,
       amount: Number(st.amount),
       paymentMethod: st.paymentMethod,
+      warehouseId,
       receiptUrl: urls[0] || st.receiptUrl || null,
       receiptUrls: urls,
       receiptFilename: st.receiptFilename || null,
@@ -452,6 +454,7 @@ async function getReceiptAuditItemsBetween(
       concept: `Remesa de ${rt.originName} (Mensajero: ${rt.carrierName})`,
       amount: Number(rt.amount),
       paymentMethod: rt.paymentMethod,
+      warehouseId,
       receiptUrl: urls[0] || rt.receiptUrl || null,
       receiptUrls: urls,
       receiptFilename: rt.receiptFilename || null,
@@ -1609,6 +1612,8 @@ export async function attachReceiptToOperation(
     receiptUrl: string;
     receiptUrls?: string[];
     receiptFilename: string;
+    callerWarehouseId?: string | null;
+    allowedWarehouseIds?: string[] | null;
   }
 ): Promise<void> {
   const urls = (data.receiptUrls && data.receiptUrls.length > 0)
@@ -1616,6 +1621,65 @@ export async function attachReceiptToOperation(
     : (data.receiptUrl ? [data.receiptUrl] : []);
   const primaryUrl = urls[0] || data.receiptUrl;
   const jsonUrls = JSON.stringify(urls);
+
+  if (data.type === "transfer_sent" || data.type === "transfer_received") {
+    const { rows: trRows } = await pool.query<{
+      originWarehouseId: string;
+      destinationWarehouseId: string;
+      status: string;
+    }>(
+      `
+      SELECT
+        origin_warehouse_id::text AS "originWarehouseId",
+        destination_warehouse_id::text AS "destinationWarehouseId",
+        status
+      FROM cash_transfers
+      WHERE id = $1::uuid
+      `,
+      [data.id]
+    );
+    const tr = trRows[0];
+    if (!tr) {
+      const err: any = new Error("Traslado de dinero no encontrado.");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (data.type === "transfer_sent") {
+      if (data.callerWarehouseId && data.callerWarehouseId !== tr.originWarehouseId) {
+        const err: any = new Error("Solo la sede de origen que envía el dinero puede subir el soporte del envío.");
+        err.statusCode = 403;
+        throw err;
+      }
+      if (
+        Array.isArray(data.allowedWarehouseIds) &&
+        !data.allowedWarehouseIds.includes(tr.originWarehouseId)
+      ) {
+        const err: any = new Error("Solo la sede de origen puede subir el soporte del envío.");
+        err.statusCode = 403;
+        throw err;
+      }
+    } else if (data.type === "transfer_received") {
+      if (tr.status === "rejected") {
+        const err: any = new Error("No se puede adjuntar soporte de recepción a un traslado rechazado.");
+        err.statusCode = 400;
+        throw err;
+      }
+      if (data.callerWarehouseId && data.callerWarehouseId !== tr.destinationWarehouseId) {
+        const err: any = new Error("Solo la sede destinataria que recibe el dinero puede subir el soporte de recepción.");
+        err.statusCode = 403;
+        throw err;
+      }
+      if (
+        Array.isArray(data.allowedWarehouseIds) &&
+        !data.allowedWarehouseIds.includes(tr.destinationWarehouseId)
+      ) {
+        const err: any = new Error("Solo la sede destinataria puede subir el soporte de recepción.");
+        err.statusCode = 403;
+        throw err;
+      }
+    }
+  }
 
   switch (data.type) {
     case "sale":

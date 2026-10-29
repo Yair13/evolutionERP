@@ -11,6 +11,7 @@ import {
   getReceivableDetail,
   getReceivablesByWarehouseReport,
   listAccountsReceivable,
+  listCustomersWithSummary,
   createManualReceivable,
   deleteManualReceivable,
   resetInitialReceivablesByWarehouse,
@@ -451,6 +452,58 @@ export function createFinanceRouter(): Router {
   /**
    * Estado de cuenta y perfil de crédito de un cliente.
    */
+  r.get("/customers-summary", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const auth = req.auth!;
+    const canSeeAllSystem = auth.hasAdminAccess === true || auth.warehouseIds === null;
+    const requestedWh = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
+
+    let targetWh: string | null = null;
+    if (requestedWh) {
+      if (!isUuid(requestedWh)) {
+        res.status(400).json({ error: "invalid_warehouse_id" });
+        return;
+      }
+      if (!canSeeAllSystem && (!auth.warehouseIds || !auth.warehouseIds.includes(requestedWh))) {
+        res.status(403).json({ error: "warehouse_forbidden" });
+        return;
+      }
+      targetWh = requestedWh;
+    } else if (!canSeeAllSystem) {
+      if (!auth.warehouseIds || auth.warehouseIds.length === 0) {
+        res.status(403).json({ error: "no_warehouse_assigned" });
+        return;
+      }
+      targetWh = auth.warehouseIds[0]!;
+    }
+
+    const filterRaw = typeof req.query.filter === "string" ? req.query.filter.trim() : "all";
+    const filter = (["all", "with_debt", "with_favour", "with_activity"].includes(filterRaw)
+      ? filterRaw
+      : "all") as "all" | "with_debt" | "with_favour" | "with_activity";
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : null;
+    const limit = req.query.limit ? Number(req.query.limit) : 100;
+    const offset = req.query.offset ? Number(req.query.offset) : 0;
+
+    try {
+      const result = await listCustomersWithSummary(pool, {
+        warehouseId: targetWh,
+        filter,
+        query: q,
+        limit,
+        offset,
+      });
+      res.json(result);
+    } catch (err: any) {
+      next(err);
+    }
+  });
+
   r.get("/customers/:customerId/credit-profile", requireAuth, async (req, res, next) => {
     const pool = getPool();
     if (!pool) {
@@ -986,6 +1039,31 @@ export function createFinanceRouter(): Router {
   /**
    * Actualizar proveedor.
    */
+  r.patch("/suppliers/:id", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const id = String(req.params.id);
+    if (!isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+
+    try {
+      const item = await updateSupplier(pool, id, req.body || {});
+      res.json({ item });
+    } catch (err: any) {
+      if (err.code === "supplier_not_found") {
+        res.status(404).json({ error: "supplier_not_found" });
+        return;
+      }
+      next(err);
+    }
+  });
+
   r.put("/suppliers/:id", requireAuth, async (req, res, next) => {
     const pool = getPool();
     if (!pool) {
@@ -2425,6 +2503,17 @@ export function createFinanceRouter(): Router {
       ? body.receiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
       : (body.receiptUrl ? [body.receiptUrl] : []);
 
+    const headerWh =
+      typeof req.headers["x-warehouse-id"] === "string" && isUuid(req.headers["x-warehouse-id"].trim())
+        ? req.headers["x-warehouse-id"].trim()
+        : null;
+    const bodyWh =
+      typeof body.warehouseId === "string" && isUuid(body.warehouseId.trim())
+        ? body.warehouseId.trim()
+        : null;
+    const callerWarehouseId = headerWh || bodyWh || null;
+    const allowedWarehouseIds = req.auth!.hasAdminAccess ? null : req.auth!.warehouseIds;
+
     try {
       await attachReceiptToOperation(pool, {
         type: body.type,
@@ -2432,6 +2521,8 @@ export function createFinanceRouter(): Router {
         receiptUrl: receiptUrls[0] || body.receiptUrl,
         receiptUrls,
         receiptFilename: body.receiptFilename || "comprobante.jpg",
+        callerWarehouseId,
+        allowedWarehouseIds,
       });
       res.json({ ok: true });
     } catch (err: any) {

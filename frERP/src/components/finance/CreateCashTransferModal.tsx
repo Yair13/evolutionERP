@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { createCashTransfer, uploadClosureReceiptFiles } from "../../api/finance.js";
+import { createCashTransfer, uploadClosureReceiptFiles, type CashTransferItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { ArrowLeftRight, X, AlertCircle, Check, Loader2 } from "lucide-react";
@@ -8,7 +8,7 @@ import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
 type Props = {
   open: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (transfer: CashTransferItem) => void;
 };
 
 export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
@@ -123,7 +123,7 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
         }
       }
 
-      await createCashTransfer(token, {
+      const res = await createCashTransfer(token, {
         originWarehouseId,
         destinationWarehouseId,
         amount,
@@ -136,7 +136,7 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
         senderReceiptFilename: uploadedReceiptFilename,
       });
 
-      onSuccess();
+      onSuccess(res.item);
       onClose();
     } catch (err: any) {
       setError(err instanceof Error ? err.message : "Error al registrar el traslado de dinero.");
@@ -269,7 +269,7 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
           >
             <AlertCircle size={18} style={{ flexShrink: 0 }} />
             <span>
-              Al confirmar, el dinero quedará <strong>en tránsito</strong> y se notificará a la sede de destino. Una vez recibido allí, ingresará a su caja de efectivo.
+              Al confirmar, el dinero quedará <strong>en tránsito</strong>, se notificará a la sede de destino y se abrirá automáticamente el <strong>voucher obligatorio para impresión y firma</strong>.
             </span>
           </div>
 
@@ -409,8 +409,8 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
             files={receiptFiles}
             onChange={setReceiptFiles}
             disabled={submitting}
-            label="Fotos / Soporte del Envío (Recibo, comprobante o guía)"
-            helperText="Puedes tomar fotos con la cámara o seleccionar archivos para dejar registro del dinero despachado."
+            label="Fotos / Soporte del Envío (Exclusivo Sede de Origen)"
+            helperText="Sube únicamente el comprobante de salida/envío del dinero. El soporte de recepción será cargado exclusivamente por la sede destinataria."
           />
 
           {/* Modal Footer Actions */}

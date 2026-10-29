@@ -55,6 +55,7 @@ export function UploadReceiptModal({ token, item, onClose, onSuccess }: Props) {
         receiptUrl: uploaded[0].url,
         receiptUrls: uploaded.map((u) => u.url),
         receiptFilename: uploaded[0].filename,
+        warehouseId: item.warehouseId || null,
       });
 
       onSuccess();

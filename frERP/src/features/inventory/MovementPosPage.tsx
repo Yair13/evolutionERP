@@ -11,6 +11,7 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowDownToLine,
+  ArrowLeftRight,
   ArrowUpFromLine,
   Camera,
   Check,
@@ -20,6 +21,7 @@ import {
   Minus,
   Package,
   Plus,
+  RotateCcw,
   ScanLine,
   Search,
   ShoppingCart,
@@ -134,6 +136,12 @@ export function MovementPosPage({ mode }: Props) {
   const [originInvoiceNumber, setOriginInvoiceNumber] = useState("");
   const [preloading, setPreloading] = useState(false);
   const [preloadError, setPreloadError] = useState<string | null>(null);
+
+  // Venta de cambio
+  const [exchangeInvoiceCode, setExchangeInvoiceCode] = useState("");
+  const [exchangeDoc, setExchangeDoc] = useState<InventoryDocumentDetail | null>(null);
+  const [exchangeLoading, setExchangeLoading] = useState(false);
+  const [exchangeError, setExchangeError] = useState<string | null>(null);
   // Verificación de recepción: unidades escaneadas por producto (entradas ligadas a un código)
   const [scannedByProduct, setScannedByProduct] = useState<Record<string, number>>({});
   const [verifyFlash, setVerifyFlash] = useState<string | null>(null);
@@ -279,6 +287,94 @@ export function MovementPosPage({ mode }: Props) {
   );
 
   const cartTotalUnits = useMemo(() => cart.reduce((s, l) => s + l.quantity, 0), [cart]);
+
+  // Venta de cambio: cálculo de retorno, salidas y excedente
+  const returnLine = useMemo(() => cart.find((l) => Boolean(l.isReturn)), [cart]);
+  const outboundLines = useMemo(() => cart.filter((l) => !l.isReturn), [cart]);
+  const outboundTotal = useMemo(
+    () => outboundLines.reduce((s, l) => s + l.quantity * l.unitSalePrice, 0),
+    [outboundLines]
+  );
+  const returnTotal = useMemo(
+    () => (returnLine ? returnLine.quantity * returnLine.unitSalePrice : 0),
+    [returnLine]
+  );
+  const calculatedExcess = useMemo(
+    () => (outboundLines.length > 0 && returnLine ? outboundTotal - returnTotal : null),
+    [outboundLines.length, returnLine, outboundTotal, returnTotal]
+  );
+
+  async function handleSearchExchangeInvoice() {
+    const code = exchangeInvoiceCode.trim();
+    if (!token || !code) return;
+    setExchangeLoading(true);
+    setExchangeError(null);
+    try {
+      const res = await fetchDocumentByInvoice(token, code);
+      const doc = res.item;
+      if (!doc || !doc.lines || doc.lines.length === 0) {
+        setExchangeError("No se encontraron productos en la factura ingresada.");
+        return;
+      }
+      const eligibleLines = doc.lines.filter((l) => l.quantity > 0);
+      if (eligibleLines.length === 0) {
+        setExchangeError("La factura no contiene productos de salida válidos para cambio.");
+        return;
+      }
+      setExchangeDoc(doc);
+      setOriginInvoiceNumber(doc.invoiceNumber || code.toUpperCase());
+    } catch {
+      setExchangeError("No se encontró ninguna factura con el código ingresado.");
+    } finally {
+      setExchangeLoading(false);
+    }
+  }
+
+  function handleSelectReturnProduct(line: import("./inventory.types.js").InventoryDocumentLine) {
+    if (!exchangeDoc) return;
+    const originalPrice = Number(line.unitSalePrice) || 0;
+    const returnCartLine: CartLine = {
+      productId: line.productId,
+      name: line.productName,
+      referenceCode: line.referenceCode,
+      barcode: line.barcode,
+      imageUrl: line.imageUrl,
+      suggestedSalePrice: 0,
+      unitSalePrice: originalPrice,
+      quantityOnHand: 9999,
+      quantity: 1,
+      isReturn: true,
+    };
+    setCart((prev) => {
+      const nonReturns = prev.filter((l) => !l.isReturn);
+      return [returnCartLine, ...nonReturns];
+    });
+    setOriginInvoiceNumber(exchangeDoc.invoiceNumber || exchangeInvoiceCode.trim().toUpperCase());
+    setLastAdded(`Devolución: ${line.productName}`);
+    setCartOpen(true);
+  }
+
+  function handleRemoveReturnProduct() {
+    setCart((prev) => prev.filter((l) => !l.isReturn));
+  }
+
+  function handleApplyExcess(newExcessVal: number) {
+    if (!returnLine) return;
+    const excess = Math.max(0, Math.round(newExcessVal));
+    const newReturnUnitPrice = Math.max(0, Math.round((outboundTotal - excess) / returnLine.quantity));
+    setCart((prev) =>
+      prev.map((l) => (l.isReturn ? { ...l, unitSalePrice: newReturnUnitPrice } : l))
+    );
+  }
+
+  function handleResetOriginalInvoicePrice() {
+    if (!returnLine || !exchangeDoc) return;
+    const originalLine = exchangeDoc.lines.find((l) => l.productId === returnLine.productId);
+    const origPrice = Number(originalLine?.unitSalePrice) || 0;
+    setCart((prev) =>
+      prev.map((l) => (l.isReturn ? { ...l, unitSalePrice: origPrice } : l))
+    );
+  }
 
   const applyLocalStockDelta = useCallback(
     (lines: { productId: string; quantity: number; isReturn?: boolean }[], direction: "entry" | "exit") => {
@@ -456,7 +552,7 @@ export function MovementPosPage({ mode }: Props) {
         notes,
         entryType: isEntry ? entryType : undefined,
         exitKind: !isEntry ? exitKind : undefined,
-        originInvoiceNumber: isEntry ? originInvoiceNumber : undefined,
+        originInvoiceNumber: originInvoiceNumber || undefined,
         scannedByProduct: verifyMode ? scannedByProduct : undefined,
         checkoutDraft: currentDraft?.checkoutDraft,
       });
@@ -782,6 +878,10 @@ export function MovementPosPage({ mode }: Props) {
     setCart((prev) =>
       prev.map((l) => {
         if (l.productId !== productId) return l;
+        if (!isEntry && !l.isReturn && Boolean(l.barcode?.trim()) && quantity > l.quantity) {
+          setError(`«${l.name}» tiene código de barras y solo se puede agregar escaneando con la pistola.`);
+          return l;
+        }
         const max = isEntry ? quantity : Math.min(quantity, l.quantityOnHand);
         return { ...l, quantity: Math.max(1, max) };
       })
@@ -1153,8 +1253,12 @@ export function MovementPosPage({ mode }: Props) {
             <select
               value={exitKind}
               onChange={(e) => {
-                setExitKind(e.target.value as ExitKind);
+                const next = e.target.value as ExitKind;
+                setExitKind(next);
                 setError(null);
+                if (next !== "exchange") {
+                  setCart((prev) => prev.filter((l) => !l.isReturn));
+                }
               }}
               aria-label="Tipo de salida"
             >
@@ -1201,6 +1305,231 @@ export function MovementPosPage({ mode }: Props) {
           <span className="inv-pos-sellbar__sede" title={sessionLabel}>
             {sessionLabel}
           </span>
+        </div>
+      ) : null}
+
+      {!isEntry && exitKind === "exchange" ? (
+        <div className="inv-pos-exchange-panel">
+          <div className="inv-pos-exchange-panel__head">
+            <div className="inv-pos-exchange-panel__title">
+              <ArrowLeftRight size={18} />
+              <span>Venta de Cambio de Producto</span>
+            </div>
+            <span style={{ fontSize: "12px", color: "#0f766e", fontWeight: 600 }}>
+              1. Factura original &rarr; 2. Prenda a devolver (entra) &rarr; 3. Prenda nueva (sale)
+            </span>
+          </div>
+
+          {!exchangeDoc ? (
+            <div>
+              <label className="inv-pos-config__label" style={{ marginBottom: "6px" }}>
+                <span>Código de Factura Original *</span>
+              </label>
+              <div className="inv-pos-exchange-panel__search">
+                <input
+                  type="text"
+                  className="inv-pos-exchange-panel__input"
+                  placeholder="Ej: LC40-15 o BOSA-2026..."
+                  value={exchangeInvoiceCode}
+                  onChange={(e) => setExchangeInvoiceCode(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void handleSearchExchangeInvoice();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="inv-btn inv-btn--primary"
+                  style={{ padding: "0 18px", height: "46px" }}
+                  onClick={() => void handleSearchExchangeInvoice()}
+                  disabled={exchangeLoading || !exchangeInvoiceCode.trim()}
+                >
+                  {exchangeLoading ? "Buscando…" : "Buscar Factura"}
+                </button>
+              </div>
+              {exchangeError ? (
+                <span className="inv-pos-config__error" style={{ display: "block", marginTop: "6px" }}>
+                  {exchangeError}
+                </span>
+              ) : (
+                <span className="inv-pos-config__note" style={{ display: "block", marginTop: "6px" }}>
+                  Ingresa el código que aparece en el comprobante del cliente para cargar las prendas vendidas.
+                </span>
+              )}
+            </div>
+          ) : (
+            <div>
+              <div className="inv-pos-exchange-panel__meta">
+                <div>
+                  <strong>Factura: #{exchangeDoc.invoiceNumber}</strong>
+                  <span style={{ margin: "0 8px", color: "#94a3b8" }}>&middot;</span>
+                  <span>Sede: {exchangeDoc.warehouseName || exchangeDoc.warehouseCode}</span>
+                  <span style={{ margin: "0 8px", color: "#94a3b8" }}>&middot;</span>
+                  <span>Cliente: {exchangeDoc.customerName || "Cliente Mostrador"}</span>
+                </div>
+                <button
+                  type="button"
+                  className="inv-btn inv-btn--ghost"
+                  style={{ fontSize: "12px", padding: "4px 8px" }}
+                  onClick={() => {
+                    setExchangeDoc(null);
+                    setExchangeInvoiceCode("");
+                    setExchangeError(null);
+                  }}
+                >
+                  Buscar otra factura
+                </button>
+              </div>
+
+              <div className="inv-pos-exchange-panel__products" style={{ marginTop: "10px" }}>
+                <span style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
+                  Selecciona la prenda de esta factura que se va a devolver (ingresará al inventario del almacén):
+                </span>
+                <div className="inv-pos-exchange-items">
+                  {exchangeDoc.lines
+                    .filter((l) => l.quantity > 0)
+                    .map((line) => {
+                      const isSelected = returnLine?.productId === line.productId;
+                      return (
+                        <div
+                          key={line.id}
+                          className={`inv-pos-exchange-item${isSelected ? " is-selected" : ""}`}
+                        >
+                          {line.imageUrl ? (
+                            <img
+                              src={resolveLightMediaUrl(line.imageUrl, "xs") || ""}
+                              alt=""
+                              className="inv-pos-exchange-item__img"
+                            />
+                          ) : (
+                            <div className="inv-pos-exchange-item__img" style={{ display: "grid", placeItems: "center" }}>
+                              <Package size={18} color="#94a3b8" />
+                            </div>
+                          )}
+                          <div className="inv-pos-exchange-item__info">
+                            <span className="inv-pos-exchange-item__name" title={line.productName}>
+                              {line.productName}
+                            </span>
+                            <span className="inv-pos-exchange-item__ref">
+                              Ref: {line.referenceCode} &middot; Comprados: {line.quantity} ud
+                            </span>
+                            <span className="inv-pos-exchange-item__price">
+                              Valor factura: {formatMoney(Number(line.unitSalePrice) || 0)}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className={`inv-btn ${isSelected ? "inv-btn--success" : "inv-btn--primary"}`}
+                            style={{ fontSize: "12px", padding: "6px 10px", flexShrink: 0 }}
+                            onClick={() => {
+                              if (isSelected) {
+                                handleRemoveReturnProduct();
+                              } else {
+                                handleSelectReturnProduct(line);
+                              }
+                            }}
+                          >
+                            {isSelected ? "✓ Seleccionada" : "Devolver"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {returnLine ? (
+            <div className="inv-pos-exchange-excess-box">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+                <div>
+                  <strong style={{ color: "#15803d", fontSize: "13px" }}>
+                    ↩ Prenda que ingresa en retorno: {returnLine.name}
+                  </strong>
+                  <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
+                    Valor reconocido por la prenda: <strong>{formatMoney(returnLine.unitSalePrice)}</strong> (ingresará al almacén)
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="inv-btn inv-btn--ghost"
+                  style={{ fontSize: "11px", padding: "2px 6px", color: "#dc2626" }}
+                  onClick={handleRemoveReturnProduct}
+                >
+                  Quitar devolución
+                </button>
+              </div>
+
+              {outboundLines.length > 0 ? (
+                <div style={{ marginTop: "6px", paddingTop: "8px", borderTop: "1px dashed #bbf7d0" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+                    <div>
+                      <span style={{ fontSize: "12px", color: "#475569" }}>
+                        Prendas nuevas (salen): <strong>{formatMoney(outboundTotal)}</strong> &middot; Devolución (entra): <strong>- {formatMoney(returnTotal)}</strong>
+                      </span>
+                      <div style={{ fontSize: "14px", fontWeight: 700, color: "#0f766e", marginTop: "2px" }}>
+                        Excedente calculado: {formatMoney(calculatedExcess ?? 0)}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 700, color: "#1e293b" }}>
+                        <span>Valor de excedente:</span>
+                        <div style={{ position: "relative", display: "inline-block" }}>
+                          <span style={{ position: "absolute", left: "8px", top: "50%", transform: "translateY(-50%)", color: "#64748b", fontWeight: 700 }}>$</span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={calculatedExcess !== null ? Math.max(0, calculatedExcess) : ""}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              if (!isNaN(val)) {
+                                handleApplyExcess(val);
+                              }
+                            }}
+                            style={{
+                              padding: "6px 8px 6px 20px",
+                              borderRadius: "6px",
+                              border: "1px solid #0f766e",
+                              fontWeight: 700,
+                              fontSize: "14px",
+                              width: "110px",
+                              color: "#0f766e",
+                            }}
+                          />
+                        </div>
+                      </label>
+                      <button
+                        type="button"
+                        className="inv-btn inv-btn--ghost"
+                        style={{ fontSize: "11px", padding: "4px 8px" }}
+                        onClick={() => handleApplyExcess(0)}
+                        title="Ajustar prenda devuelta para que el excedente a pagar sea $0"
+                      >
+                        Mano a mano ($0)
+                      </button>
+                      <button
+                        type="button"
+                        className="inv-btn inv-btn--ghost"
+                        style={{ fontSize: "11px", padding: "4px 8px" }}
+                        onClick={handleResetOriginalInvoicePrice}
+                        title="Restablecer el valor de la prenda devuelta a su precio original de factura"
+                      >
+                        <RotateCcw size={12} style={{ marginRight: "3px" }} />
+                        Precio original
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#0f766e", fontWeight: 600 }}>
+                  👉 Ahora selecciona o escanea con la pistola la prenda nueva del catálogo que el cliente se va a llevar (saldrá del almacén).
+                </p>
+              )}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -1567,6 +1896,7 @@ export function MovementPosPage({ mode }: Props) {
               onUnitSalePriceChange={isEntry || isInternalExit ? undefined : setUnitSalePrice}
               locked={isInvoiceLinkedEntry}
               showValues={!isInternalExit}
+              lockBarcodeQty={!isEntry}
             />
             {isEntry ? (
               <label className="field inv-pos__notes">
@@ -1671,6 +2001,7 @@ export function MovementPosPage({ mode }: Props) {
           totalUnits={cart.reduce((s, l) => s + l.quantity, 0)}
           totalValue={cartTotalValue}
           confirming={confirming}
+          initialRelatedInvoiceNumber={originInvoiceNumber}
           onClose={() => {
             if (!confirming) {
               if (warehouseId) clearCheckoutDraft(warehouseId);

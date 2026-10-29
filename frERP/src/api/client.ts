@@ -19,7 +19,10 @@ async function parseError(res: Response): Promise<string> {
  */
 function sessionScopeHeaders(): Record<string, string> {
   try {
-    return localStorage.getItem("evolution_erp_warehouse") === "__all__" ? { "X-Session-Scope": "admin" } : {};
+    const raw = localStorage.getItem("evolution_erp_warehouse");
+    if (raw === "__all__") return { "X-Session-Scope": "admin" };
+    if (raw) return { "X-Warehouse-Id": raw };
+    return {};
   } catch {
     return {};
   }
@@ -52,6 +55,16 @@ export async function apiGet<T>(path: string, token: string, query?: Record<stri
 
 export async function apiGetPublic<T>(path: string): Promise<T> {
   const res = await fetch(`${base}${path}`);
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json() as Promise<T>;
+}
+
+export async function apiPut<T>(path: string, body: unknown, token: string): Promise<T> {
+  const res = await fetch(`${base}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...sessionScopeHeaders() },
+    body: JSON.stringify(body),
+  });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json() as Promise<T>;
 }

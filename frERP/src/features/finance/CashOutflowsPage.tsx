@@ -14,6 +14,7 @@ import { formatBogotaDateTime } from "../../lib/dateUtils.js";
 import { CreateEgressVoucherModal } from "../../components/finance/CreateEgressVoucherModal.js";
 import { CreateCashTransferModal } from "../../components/finance/CreateCashTransferModal.js";
 import { PrintEgressVoucherModal } from "../../components/finance/PrintEgressVoucherModal.js";
+import { PrintCashTransferVoucherModal } from "../../components/finance/PrintCashTransferVoucherModal.js";
 import { ViewReceiptPhotosModal } from "../../components/common/ViewReceiptPhotosModal.js";
 import { UploadReceiptModal } from "../../components/finance/UploadReceiptModal.js";
 import {
@@ -88,6 +89,10 @@ export function CashOutflowsPage() {
   const [openCreateOutflow, setOpenCreateOutflow] = useState(false);
   const [openCreateTransfer, setOpenCreateTransfer] = useState(false);
   const [voucherToPrint, setVoucherToPrint] = useState<CashOutflowItem | null>(null);
+  const [transferToPrint, setTransferToPrint] = useState<{
+    transfer: CashTransferItem;
+    mandatory: boolean;
+  } | null>(null);
   const [viewingPhotos, setViewingPhotos] = useState<{ title: string; urls: string[] } | null>(null);
   const [uploadingAuditItem, setUploadingAuditItem] = useState<ReceiptAuditItem | null>(null);
 
@@ -250,7 +255,15 @@ export function CashOutflowsPage() {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-            {incomingTransfers.map((t) => (
+            {incomingTransfers.map((t) => {
+              const senderUrls = (t.senderReceiptUrls && t.senderReceiptUrls.length > 0)
+                ? t.senderReceiptUrls
+                : (t.senderReceiptUrl ? [t.senderReceiptUrl] : []);
+              const receiverUrls = (t.receiverReceiptUrls && t.receiverReceiptUrls.length > 0)
+                ? t.receiverReceiptUrls
+                : (t.receiverReceiptUrl ? [t.receiverReceiptUrl] : []);
+
+              return (
               <div
                 key={t.id}
                 style={{
@@ -276,11 +289,68 @@ export function CashOutflowsPage() {
                   </div>
                 </div>
 
-                <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
                   <div style={{ fontSize: "1.35rem", fontWeight: 800, color: "#059669", fontFamily: "var(--font-display, inherit)" }}>
                     {formatMoney(t.amount)}
                   </div>
-                  <div style={{ display: "flex", gap: "0.4rem" }}>
+                  <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                    {senderUrls.length > 0 && (
+                      <button
+                        type="button"
+                        className="fin-btn fin-btn--ghost fin-btn--sm"
+                        style={{ color: "#6366f1" }}
+                        onClick={() => setViewingPhotos({ title: `Soporte de Envío ${t.code}`, urls: senderUrls })}
+                      >
+                        <ImageIcon size={14} />
+                        <span>Ver Sop. Envío</span>
+                      </button>
+                    )}
+                    {receiverUrls.length > 0 ? (
+                      <button
+                        type="button"
+                        className="fin-btn fin-btn--ghost fin-btn--sm"
+                        style={{ color: "#10b981" }}
+                        onClick={() => setViewingPhotos({ title: `Soporte de Recepción ${t.code}`, urls: receiverUrls })}
+                      >
+                        <ImageIcon size={14} />
+                        <span>Sop. Recepción ({receiverUrls.length})</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="fin-btn fin-btn--ghost fin-btn--sm"
+                        style={{ color: "#059669" }}
+                        onClick={() =>
+                          setUploadingAuditItem({
+                            id: t.id,
+                            type: "transfer_received",
+                            typeLabel: "Traslado Recibido",
+                            reference: t.code,
+                            concept: `Recepción ${t.originWarehouseName} → ${t.destinationWarehouseName}`,
+                            paymentMethod: t.paymentMethod,
+                            amount: t.amount,
+                            warehouseId: warehouseId || t.destinationWarehouseId,
+                            warehouseName: t.destinationWarehouseName,
+                            createdAt: t.approvedAt || t.createdAt,
+                            createdByName: null,
+                            receiptUrl: null,
+                            receiptFilename: null,
+                          })
+                        }
+                      >
+                        <Camera size={14} />
+                        <span>+ Sop. Recepción</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="fin-btn fin-btn--ghost fin-btn--sm"
+                      onClick={() => setTransferToPrint({ transfer: t, mandatory: false })}
+                      title="Imprimir Voucher de Traslado"
+                    >
+                      <Printer size={14} />
+                      <span>Voucher</span>
+                    </button>
                     <button
                       type="button"
                       className="fin-btn fin-btn--primary fin-btn--sm"
@@ -299,7 +369,8 @@ export function CashOutflowsPage() {
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -783,103 +854,135 @@ export function CashOutflowsPage() {
                           {t.approvedAt ? formatDate(t.approvedAt) : "—"}
                         </td>
                         <td>
-                          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                            {senderUrls.length > 0 ? (
-                              <button
-                                type="button"
-                                onClick={() => setViewingPhotos({ title: `Soporte de Envío ${t.code}`, urls: senderUrls })}
-                                className="fin-btn fin-btn--ghost fin-btn--sm"
-                                style={{ color: "#6366f1", padding: "2px 6px", fontSize: "0.74rem", gap: "3px" }}
-                                title="Ver comprobante de envío"
-                              >
-                                <ImageIcon size={12} />
-                                <span>Envío ({senderUrls.length})</span>
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setUploadingAuditItem({
-                                  id: t.id,
-                                  type: "transfer_sent",
-                                  typeLabel: "Traslado Enviado",
-                                  reference: t.code,
-                                  concept: `Envío ${t.originWarehouseName} → ${t.destinationWarehouseName}`,
-                                  paymentMethod: t.paymentMethod,
-                                  amount: t.amount,
-                                  warehouseId: t.originWarehouseId,
-                                  warehouseName: t.originWarehouseName,
-                                  createdAt: t.createdAt,
-                                  createdByName: null,
-                                  receiptUrl: null,
-                                  receiptFilename: null,
-                                })}
-                                className="fin-btn fin-btn--ghost fin-btn--sm"
-                                style={{ color: "#94a3b8", padding: "2px 6px", fontSize: "0.74rem", gap: "3px" }}
-                                title="Adjuntar foto de soporte del envío"
-                              >
-                                <Camera size={12} />
-                                <span>+ Sop. Envío</span>
-                              </button>
-                            )}
+                          {(() => {
+                            const isOriginSede = Boolean(warehouseId && warehouseId === t.originWarehouseId);
+                            const isDestinationSede = Boolean(warehouseId && warehouseId === t.destinationWarehouseId);
 
-                            {receiverUrls.length > 0 ? (
-                              <button
-                                type="button"
-                                onClick={() => setViewingPhotos({ title: `Soporte de Recepción ${t.code}`, urls: receiverUrls })}
-                                className="fin-btn fin-btn--ghost fin-btn--sm"
-                                style={{ color: "#10b981", padding: "2px 6px", fontSize: "0.74rem", gap: "3px" }}
-                                title="Ver comprobante de recepción"
-                              >
-                                <ImageIcon size={12} />
-                                <span>Recepción ({receiverUrls.length})</span>
-                              </button>
-                            ) : t.status === "approved" ? (
-                              <button
-                                type="button"
-                                onClick={() => setUploadingAuditItem({
-                                  id: t.id,
-                                  type: "transfer_received",
-                                  typeLabel: "Traslado Recibido",
-                                  reference: t.code,
-                                  concept: `Recepción ${t.originWarehouseName} → ${t.destinationWarehouseName}`,
-                                  paymentMethod: t.paymentMethod,
-                                  amount: t.amount,
-                                  warehouseId: t.destinationWarehouseId,
-                                  warehouseName: t.destinationWarehouseName,
-                                  createdAt: t.approvedAt || t.createdAt,
-                                  createdByName: null,
-                                  receiptUrl: null,
-                                  receiptFilename: null,
-                                })}
-                                className="fin-btn fin-btn--ghost fin-btn--sm"
-                                style={{ color: "#94a3b8", padding: "2px 6px", fontSize: "0.74rem", gap: "3px" }}
-                                title="Adjuntar foto de soporte de la recepción"
-                              >
-                                <Camera size={12} />
-                                <span>+ Sop. Recep.</span>
-                              </button>
-                            ) : null}
-                          </div>
+                            return (
+                              <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "flex-start" }}>
+                                {/* Soporte de Envío: solo la sede de origen puede cargarlo */}
+                                {senderUrls.length > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setViewingPhotos({ title: `Soporte de Envío ${t.code}`, urls: senderUrls })}
+                                    className="fin-btn fin-btn--ghost fin-btn--sm"
+                                    style={{ color: "#6366f1", padding: "2px 6px", fontSize: "0.74rem", gap: "3px" }}
+                                    title="Ver comprobante de envío"
+                                  >
+                                    <ImageIcon size={12} />
+                                    <span>Envío ({senderUrls.length})</span>
+                                  </button>
+                                ) : isOriginSede ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setUploadingAuditItem({
+                                        id: t.id,
+                                        type: "transfer_sent",
+                                        typeLabel: "Traslado Enviado (Soporte de Salida)",
+                                        reference: t.code,
+                                        concept: `Envío ${t.originWarehouseName} → ${t.destinationWarehouseName}`,
+                                        paymentMethod: t.paymentMethod,
+                                        amount: t.amount,
+                                        warehouseId: warehouseId || t.originWarehouseId,
+                                        warehouseName: t.originWarehouseName,
+                                        createdAt: t.createdAt,
+                                        createdByName: null,
+                                        receiptUrl: null,
+                                        receiptFilename: null,
+                                      })
+                                    }
+                                    className="fin-btn fin-btn--ghost fin-btn--sm"
+                                    style={{ color: "#6366f1", padding: "2px 6px", fontSize: "0.74rem", gap: "3px" }}
+                                    title="Adjuntar foto de soporte del envío (exclusivo sede de origen)"
+                                  >
+                                    <Camera size={12} />
+                                    <span>+ Sop. Envío</span>
+                                  </button>
+                                ) : (
+                                  <span style={{ fontSize: "0.72rem", color: "#94a3b8", padding: "1px 4px" }}>
+                                    Envío: Sin soporte
+                                  </span>
+                                )}
+
+                                {/* Soporte de Recepción: solo la sede destinataria puede cargarlo */}
+                                {receiverUrls.length > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setViewingPhotos({ title: `Soporte de Recepción ${t.code}`, urls: receiverUrls })}
+                                    className="fin-btn fin-btn--ghost fin-btn--sm"
+                                    style={{ color: "#10b981", padding: "2px 6px", fontSize: "0.74rem", gap: "3px" }}
+                                    title="Ver comprobante de recepción"
+                                  >
+                                    <ImageIcon size={12} />
+                                    <span>Recepción ({receiverUrls.length})</span>
+                                  </button>
+                                ) : isDestinationSede && t.status !== "rejected" ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setUploadingAuditItem({
+                                        id: t.id,
+                                        type: "transfer_received",
+                                        typeLabel: "Traslado Recibido (Soporte de Recepción)",
+                                        reference: t.code,
+                                        concept: `Recepción ${t.originWarehouseName} → ${t.destinationWarehouseName}`,
+                                        paymentMethod: t.paymentMethod,
+                                        amount: t.amount,
+                                        warehouseId: warehouseId || t.destinationWarehouseId,
+                                        warehouseName: t.destinationWarehouseName,
+                                        createdAt: t.approvedAt || t.createdAt,
+                                        createdByName: null,
+                                        receiptUrl: null,
+                                        receiptFilename: null,
+                                      })
+                                    }
+                                    className="fin-btn fin-btn--ghost fin-btn--sm"
+                                    style={{ color: "#059669", padding: "2px 6px", fontSize: "0.74rem", gap: "3px" }}
+                                    title="Adjuntar foto de soporte de la recepción (exclusivo sede destinataria)"
+                                  >
+                                    <Camera size={12} />
+                                    <span>+ Sop. Recep.</span>
+                                  </button>
+                                ) : t.status !== "rejected" ? (
+                                  <span style={{ fontSize: "0.72rem", color: "#94a3b8", padding: "1px 4px" }}>
+                                    Recep.: Sin soporte
+                                  </span>
+                                ) : null}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td style={{ textAlign: "right" }}>
-                          {t.status === "pending" && t.destinationWarehouseId === warehouseId && (
-                            <div style={{ display: "inline-flex", gap: "0.35rem" }}>
-                              <button
-                                type="button"
-                                className="fin-btn fin-btn--primary fin-btn--sm"
-                                onClick={() => void handleApproveTransfer(t)}
-                              >
-                                Recibir
-                              </button>
-                              <button
-                                type="button"
-                                className="fin-btn fin-btn--danger fin-btn--sm"
-                                onClick={() => void handleRejectTransfer(t)}
-                              >
-                                Rechazar
-                              </button>
-                            </div>
-                          )}
+                          <div style={{ display: "inline-flex", gap: "0.35rem", alignItems: "center", justifyContent: "flex-end" }}>
+                            {t.status === "pending" && t.destinationWarehouseId === warehouseId && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="fin-btn fin-btn--primary fin-btn--sm"
+                                  onClick={() => void handleApproveTransfer(t)}
+                                >
+                                  Recibir
+                                </button>
+                                <button
+                                  type="button"
+                                  className="fin-btn fin-btn--danger fin-btn--sm"
+                                  onClick={() => void handleRejectTransfer(t)}
+                                >
+                                  Rechazar
+                                </button>
+                              </>
+                            )}
+                            <button
+                              type="button"
+                              className="fin-btn fin-btn--ghost fin-btn--sm"
+                              onClick={() => setTransferToPrint({ transfer: t, mandatory: false })}
+                              title="Imprimir Voucher de Traslado"
+                            >
+                              <Printer size={14} />
+                              <span>Voucher</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -906,8 +1009,9 @@ export function CashOutflowsPage() {
       <CreateCashTransferModal
         open={openCreateTransfer}
         onClose={() => setOpenCreateTransfer(false)}
-        onSuccess={() => {
+        onSuccess={(transfer) => {
           void loadTransfers();
+          setTransferToPrint({ transfer, mandatory: true });
           setActionSuccess("Traslado de dinero registrado. Se ha enviado notificación a la sede destino.");
           window.setTimeout(() => setActionSuccess(null), 4000);
         }}
@@ -919,6 +1023,16 @@ export function CashOutflowsPage() {
           open={Boolean(voucherToPrint)}
           outflow={voucherToPrint}
           onClose={() => setVoucherToPrint(null)}
+        />
+      )}
+
+      {/* Modal Imprimir Voucher de Traslado de Dinero */}
+      {transferToPrint && (
+        <PrintCashTransferVoucherModal
+          open={Boolean(transferToPrint)}
+          transfer={transferToPrint.transfer}
+          mandatory={transferToPrint.mandatory}
+          onClose={() => setTransferToPrint(null)}
         />
       )}
 
@@ -937,11 +1051,13 @@ export function CashOutflowsPage() {
           item={uploadingAuditItem}
           onClose={() => setUploadingAuditItem(null)}
           onSuccess={() => {
+            const uploadedType = uploadingAuditItem.type;
             setUploadingAuditItem(null);
+            if (uploadedType === "transfer_sent" || uploadedType === "transfer_received" || activeTab === "transfers") {
+              void loadTransfers();
+            }
             if (activeTab === "outflows") {
               void loadOutflows();
-            } else {
-              void loadTransfers();
             }
           }}
         />

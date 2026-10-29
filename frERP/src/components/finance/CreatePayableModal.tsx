@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { getTodayBogotaYmd } from "../../lib/dateUtils.js";
-import { createPayable, fetchSuppliers, type SupplierItem } from "../../api/finance.js";
+import { createPayable, fetchSuppliers, fetchSupplierProfile, type SupplierItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { FileText, X, PlusCircle, Building2 } from "lucide-react";
@@ -10,6 +10,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  preselectedSupplierId?: string | null;
 };
 
 const PAYMENT_METHODS = [
@@ -34,7 +35,7 @@ function formatMoney(n: number): string {
   }).format(val);
 }
 
-export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
+export function CreatePayableModal({ open, onClose, onSuccess, preselectedSupplierId }: Props) {
   const { token } = useAuth();
   const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
 
@@ -83,8 +84,15 @@ export function CreatePayableModal({ open, onClose, onSuccess }: Props) {
       setSupplierList([]);
       setSelectedSupplier(null);
       setError(null);
+      if (preselectedSupplierId && token) {
+        fetchSupplierProfile(token, preselectedSupplierId)
+          .then((p) => {
+            if (p?.supplier) setSelectedSupplier(p.supplier);
+          })
+          .catch(() => {});
+      }
     }
-  }, [open, warehouseId, warehouses]);
+  }, [open, warehouseId, warehouses, preselectedSupplierId, token]);
 
   // Búsqueda de proveedores
   useEffect(() => {

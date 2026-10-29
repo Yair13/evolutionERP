@@ -7691,6 +7691,140 @@ button.inv-pos__pick-media--expand:focus-visible {
   }
 }
 
+/* --- POS: Panel de Venta de Cambio --- */
+.inv-pos-exchange-panel {
+  background: #f0fdfa;
+  border: 1px solid #99f6e4;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.inv-pos-exchange-panel__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inv-pos-exchange-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #0f766e;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.inv-pos-exchange-panel__search {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.inv-pos-exchange-panel__input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.inv-pos-exchange-panel__meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  background: #fff;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #ccfbf1;
+  font-size: 13px;
+}
+
+.inv-pos-exchange-panel__products {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inv-pos-exchange-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.inv-pos-exchange-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.inv-pos-exchange-item.is-selected {
+  border-color: #10b981;
+  background: #f0fdf4;
+}
+
+.inv-pos-exchange-item__img {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #f1f5f9;
+  flex-shrink: 0;
+}
+
+.inv-pos-exchange-item__info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  font-size: 12px;
+}
+
+.inv-pos-exchange-item__name {
+  font-weight: 700;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inv-pos-exchange-item__ref {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.inv-pos-exchange-item__price {
+  color: #0f766e;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.inv-pos-exchange-excess-box {
+  background: #fff;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /* --- POS: verificación de recepción --- */
 
 .inv-pos-verify__empty {

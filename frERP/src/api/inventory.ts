@@ -537,6 +537,7 @@ export type Customer = {
   phone: string | null;
   address: string | null;
   creditBalance?: number;
+  totalDebt?: number;
 };
 
 export async function fetchDocumentByInvoice(
@@ -574,6 +575,33 @@ export async function createCustomer(
   const base = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
   const res = await fetch(`${base}/inventory/customers`, {
     method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      const d = await res.json();
+      if (d?.error) msg = String(d.error);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg);
+  }
+  return res.json() as Promise<{ item: Customer }>;
+}
+
+export async function updateCustomer(
+  token: string,
+  customerId: string,
+  data: { displayName: string; taxId?: string | null; phone?: string | null; address?: string | null }
+) {
+  const base = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  const res = await fetch(`${base}/inventory/customers/${encodeURIComponent(customerId)}`, {
+    method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",

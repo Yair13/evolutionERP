@@ -213,6 +213,14 @@ export function Sidebar({ open, pinned = false, onTogglePin, onNavigate }: Sideb
           hint={isAllWarehouses ? "Resumen consolidado de la empresa" : "Resumen y KPIs de la sede"}
           onNavigate={onNavigate}
         />
+        <NavItem
+          to="/app/clientes"
+          end
+          icon={Users}
+          label="Clientes"
+          hint="Ficha comercial, facturación, deuda y saldo a favor de clientes"
+          onNavigate={onNavigate}
+        />
 
         {isAllWarehouses ? (
           <NavGroup
@@ -368,6 +376,20 @@ export function Sidebar({ open, pinned = false, onTogglePin, onNavigate }: Sideb
           onNavigate={onNavigate}
           items={[
             {
+              to: "/app/clientes",
+              end: true,
+              icon: Users,
+              label: "Clientes y Saldos",
+              hint: "Ficha comercial, facturación y saldo a favor de clientes",
+            },
+            {
+              to: "/app/finanzas/proveedores",
+              end: true,
+              icon: Truck,
+              label: "Proveedores y Deudas",
+              hint: "Directorio de proveedores, cuentas por pagar y saldos a favor",
+            },
+            {
               to: "/app/finanzas/cartera",
               end: true,
               icon: CreditCard,
@@ -381,13 +403,6 @@ export function Sidebar({ open, pinned = false, onTogglePin, onNavigate }: Sideb
               label: "Apartados (Separe)",
               hint: "Plan separe de clientes y control de abonos",
             },
-            ...(isAllWarehouses ? [{
-              to: "/app/finanzas/proveedores",
-              end: true,
-              icon: Truck,
-              label: "Proveedores y Pagos",
-              hint: "Cuentas por pagar a proveedores y saldos a favor",
-            }] : []),
             {
               to: "/app/finanzas/ingresos",
               end: true,

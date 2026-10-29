@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   fetchPayables,
   fetchSuppliers,
@@ -10,6 +10,8 @@ import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { formatBogotaDate } from "../../lib/dateUtils.js";
 import { CreateSupplierModal } from "../../components/finance/CreateSupplierModal.js";
+import { EditSupplierModal } from "../../components/finance/EditSupplierModal.js";
+import { SupplierDetailModal } from "../../components/finance/SupplierDetailModal.js";
 import { CreatePayableModal } from "../../components/finance/CreatePayableModal.js";
 import { AddPayablePaymentModal } from "../../components/finance/AddPayablePaymentModal.js";
 import { PayableDetailModal } from "../../components/finance/PayableDetailModal.js";
@@ -26,9 +28,15 @@ import {
   CreditCard,
   Filter,
   RefreshCw,
+  Edit2,
+  Phone,
+  Mail,
+  MapPin,
+  X,
+  Users,
 } from "lucide-react";
 
-function formatMoney(n: number): string {
+function formatMoney(n: number | null | undefined): string {
   const val = Math.round((Number(n) || 0) * 100) / 100;
   const hasDecimals = Math.abs(val % 1) > 0;
   return new Intl.NumberFormat("es-CO", {
@@ -59,6 +67,7 @@ export function PayablesPage() {
       setSelectedWarehouse(warehouseId);
     }
   }, [isAllWarehouses, warehouseId]);
+
   const [selectedStatus, setSelectedStatus] = useState<string>("open");
   const [searchPayables, setSearchPayables] = useState("");
   const [dueDateFrom, setDueDateFrom] = useState("");
@@ -82,6 +91,7 @@ export function PayablesPage() {
   const [suppliers, setSuppliers] = useState<SupplierItem[]>([]);
   const [totalSuppliers, setTotalSuppliers] = useState(0);
   const [searchSuppliers, setSearchSuppliers] = useState("");
+  const [supplierDebtFilter, setSupplierDebtFilter] = useState<"all" | "debt" | "favour">("all");
   const [suppliersPage, setSuppliersPage] = useState(1);
 
   const [loading, setLoading] = useState(false);
@@ -89,9 +99,13 @@ export function PayablesPage() {
 
   // Modales
   const [openCreateSupplier, setOpenCreateSupplier] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState<SupplierItem | null>(null);
+  const [selectedDetailSupplierId, setSelectedDetailSupplierId] = useState<string | null>(null);
+  const [preselectedSupplierId, setPreselectedSupplierId] = useState<string | null>(null);
   const [openCreatePayable, setOpenCreatePayable] = useState(false);
   const [selectedForPayment, setSelectedForPayment] = useState<PayableSummaryItem | null>(null);
   const [selectedDetailId, setSelectedDetailId] = useState<string | null>(null);
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
 
   // Cargar Cuentas por Pagar
   const loadPayables = useCallback(async () => {
@@ -119,7 +133,7 @@ export function PayablesPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, isAllWarehouses, warehouseId, selectedWarehouse, selectedStatus, dueDateFrom, dueDateTo, searchPayables, payablesPage]);
+  }, [token, isAllWarehouses, warehouseId, selectedWarehouse, selectedStatus, dueDateFrom, dueDateTo, searchPayables, payablesPage, whLoading]);
 
   // Cargar Proveedores
   const loadSuppliers = useCallback(async () => {
@@ -129,8 +143,8 @@ export function PayablesPage() {
     try {
       const res = await fetchSuppliers(token, {
         q: searchSuppliers.trim() || null,
-        limit: 50,
-        offset: (suppliersPage - 1) * 50,
+        limit: 100,
+        offset: (suppliersPage - 1) * 100,
       });
       setSuppliers(res.items);
       setTotalSuppliers(res.total);
@@ -149,7 +163,31 @@ export function PayablesPage() {
     }
   }, [activeTab, loadPayables, loadSuppliers]);
 
-  const totalCompanyCreditWithSuppliers = suppliers.reduce((s, sup) => s + (sup.creditBalance || 0), 0);
+  // Cálculos consolidados de proveedores
+  const filteredSuppliers = useMemo(() => {
+    return suppliers.filter((s) => {
+      if (supplierDebtFilter === "debt") return s.totalDebt > 0;
+      if (supplierDebtFilter === "favour") return s.creditBalance > 0;
+      return true;
+    });
+  }, [suppliers, supplierDebtFilter]);
+
+  const suppliersWithDebtCount = useMemo(() => {
+    return suppliers.filter((s) => s.totalDebt > 0).length;
+  }, [suppliers]);
+
+  const suppliersWithFavourCount = useMemo(() => {
+    return suppliers.filter((s) => s.creditBalance > 0).length;
+  }, [suppliers]);
+
+  const totalSuppliersDebt = useMemo(() => {
+    return suppliers.reduce((sum, s) => sum + (s.totalDebt || 0), 0);
+  }, [suppliers]);
+
+  const totalCompanyCreditWithSuppliers = useMemo(() => {
+    return suppliers.reduce((sum, s) => sum + (s.creditBalance || 0), 0);
+  }, [suppliers]);
+
   const totalPayablesPages = Math.ceil(totalPayables / limit) || 1;
 
   return (
@@ -164,7 +202,7 @@ export function PayablesPage() {
             <div>
               <h1 className="fin-header__title">Proveedores y Cuentas por Pagar</h1>
               <p className="fin-header__subtitle">
-                Gestión de proveedores, facturas de compra a crédito, programación de pagos y saldos a favor.
+                Gestión integral de proveedores, deudas, programación de egresos, historial de abonos y saldos a favor.
               </p>
             </div>
           </div>
@@ -182,7 +220,10 @@ export function PayablesPage() {
           <button
             type="button"
             className="fin-btn fin-btn--primary"
-            onClick={() => setOpenCreatePayable(true)}
+            onClick={() => {
+              setPreselectedSupplierId(null);
+              setOpenCreatePayable(true);
+            }}
           >
             <PlusCircle size={17} />
             <span>Registrar Factura / Deuda</span>
@@ -200,6 +241,11 @@ export function PayablesPage() {
           >
             <Truck size={16} />
             <span>Cuentas por Pagar (Facturas y Deudas)</span>
+            {payablesSummary.openCount > 0 && (
+              <span className="fin-tab__badge" style={{ background: "#fef3c7", color: "#d97706" }}>
+                {payablesSummary.openCount} pend.
+              </span>
+            )}
           </button>
           <button
             type="button"
@@ -207,12 +253,13 @@ export function PayablesPage() {
             onClick={() => setActiveTab("suppliers")}
           >
             <Building2 size={16} />
-            <span>Directorio de Proveedores</span>
+            <span>Directorio de Proveedores y Deuda General</span>
             {totalSuppliers > 0 && <span className="fin-tab__badge">{totalSuppliers}</span>}
           </button>
         </div>
       </div>
 
+      {/* TAB 1: Cuentas por Pagar */}
       {activeTab === "payables" && (
         <>
           {/* KPI Summary Cards */}
@@ -442,7 +489,13 @@ export function PayablesPage() {
                         </td>
                         <td>
                           <div>
-                            <strong style={{ color: "#0f172a" }}>{item.supplierName}</strong>
+                            <strong
+                              style={{ color: "#0f172a", cursor: "pointer", textDecoration: "underline" }}
+                              onClick={() => setSelectedDetailSupplierId(item.supplierId)}
+                              title="Ver ficha del proveedor"
+                            >
+                              {item.supplierName}
+                            </strong>
                             <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
                               NIT: {item.supplierTaxId || "—"}
                             </div>
@@ -499,7 +552,7 @@ export function PayablesPage() {
                               type="button"
                               className="fin-btn fin-btn--ghost fin-btn--sm"
                               onClick={() => setSelectedDetailId(item.id)}
-                              title="Ver detalle"
+                              title="Ver detalle de factura"
                             >
                               <Eye size={14} />
                               <span>Detalle</span>
@@ -552,12 +605,76 @@ export function PayablesPage() {
         </>
       )}
 
+      {/* TAB 2: Directorio de Proveedores */}
       {activeTab === "suppliers" && (
         <>
-          {/* Directorio de Proveedores */}
-          <div className="fin-filter-card" style={{ justifyContent: "space-between" }}>
-            <div className="fin-filter-field" style={{ flex: 1, minWidth: 280 }}>
-              <div className="fin-search-wrap">
+          {/* KPI Summary Cards para Proveedores */}
+          <div className="fin-kpi-grid fin-kpi-grid--4" style={{ marginBottom: "1.25rem" }}>
+            <div className="fin-kpi-card fin-kpi-card--amber">
+              <div className="fin-kpi-top">
+                <span className="fin-kpi-label" style={{ color: "#d97706" }}>Deuda Total a Proveedores</span>
+                <div className="fin-kpi-icon fin-kpi-icon--amber">
+                  <Clock size={18} />
+                </div>
+              </div>
+              <div className="fin-kpi-val fin-kpi-val--amber">
+                {formatMoney(totalSuppliersDebt)}
+              </div>
+              <div className="fin-kpi-sub">
+                {suppliersWithDebtCount} proveedor(es) con saldo pendiente
+              </div>
+            </div>
+
+            <div className="fin-kpi-card fin-kpi-card--indigo">
+              <div className="fin-kpi-top">
+                <span className="fin-kpi-label">Proveedores Registrados</span>
+                <div className="fin-kpi-icon fin-kpi-icon--indigo">
+                  <Users size={18} />
+                </div>
+              </div>
+              <div className="fin-kpi-val fin-kpi-val--indigo">
+                {totalSuppliers}
+              </div>
+              <div className="fin-kpi-sub">
+                Terceros y aliados comerciales
+              </div>
+            </div>
+
+            <div className="fin-kpi-card fin-kpi-card--teal">
+              <div className="fin-kpi-top">
+                <span className="fin-kpi-label" style={{ color: "var(--accent)" }}>Saldo a Favor Empresa</span>
+                <div className="fin-kpi-icon fin-kpi-icon--teal">
+                  <Wallet size={18} />
+                </div>
+              </div>
+              <div className="fin-kpi-val fin-kpi-val--teal">
+                {formatMoney(totalCompanyCreditWithSuppliers)}
+              </div>
+              <div className="fin-kpi-sub">
+                {suppliersWithFavourCount} proveedor(es) con saldo a nuestro favor
+              </div>
+            </div>
+
+            <div className="fin-kpi-card fin-kpi-card--emerald">
+              <div className="fin-kpi-top">
+                <span className="fin-kpi-label" style={{ color: "#059669" }}>Proveedores al Día</span>
+                <div className="fin-kpi-icon fin-kpi-icon--emerald">
+                  <CheckCircle2 size={18} />
+                </div>
+              </div>
+              <div className="fin-kpi-val fin-kpi-val--emerald">
+                {Math.max(0, suppliers.length - suppliersWithDebtCount)}
+              </div>
+              <div className="fin-kpi-sub">
+                Sin deudas activas pendientes
+              </div>
+            </div>
+          </div>
+
+          {/* Barra de Filtros y Búsqueda */}
+          <div className="fin-filter-card" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: 280 }}>
+              <div className="fin-search-wrap" style={{ flex: 1 }}>
                 <Search size={16} className="fin-search-wrap__icon" />
                 <input
                   className="fin-input"
@@ -566,94 +683,291 @@ export function PayablesPage() {
                     setSearchSuppliers(e.target.value);
                     setSuppliersPage(1);
                   }}
-                  placeholder="Buscar proveedor por nombre, NIT, teléfono..."
+                  placeholder="Buscar por razón social, NIT, teléfono o contacto..."
                 />
+              </div>
+
+              {/* Filtro rápido por estado de deuda */}
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button
+                  type="button"
+                  className={`fin-btn fin-btn--sm ${supplierDebtFilter === "all" ? "fin-btn--primary" : "fin-btn--ghost"}`}
+                  onClick={() => setSupplierDebtFilter("all")}
+                >
+                  Todos ({suppliers.length})
+                </button>
+                <button
+                  type="button"
+                  className={`fin-btn fin-btn--sm ${supplierDebtFilter === "debt" ? "fin-btn--primary" : "fin-btn--ghost"}`}
+                  onClick={() => setSupplierDebtFilter("debt")}
+                  style={supplierDebtFilter === "debt" ? { background: "#d97706", borderColor: "#d97706" } : {}}
+                >
+                  Con Deuda ({suppliersWithDebtCount})
+                </button>
+                <button
+                  type="button"
+                  className={`fin-btn fin-btn--sm ${supplierDebtFilter === "favour" ? "fin-btn--primary" : "fin-btn--ghost"}`}
+                  onClick={() => setSupplierDebtFilter("favour")}
+                  style={supplierDebtFilter === "favour" ? { background: "#059669", borderColor: "#059669" } : {}}
+                >
+                  Con Saldo a Favor ({suppliersWithFavourCount})
+                </button>
               </div>
             </div>
 
-            <button
-              type="button"
-              className="fin-btn fin-btn--primary"
-              onClick={() => setOpenCreateSupplier(true)}
-            >
-              <PlusCircle size={16} />
-              <span>Crear Proveedor</span>
-            </button>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                type="button"
+                className="fin-btn fin-btn--ghost"
+                onClick={() => void loadSuppliers()}
+                disabled={loading}
+                title="Refrescar listado"
+              >
+                <RefreshCw size={16} className={loading ? "spin" : ""} />
+                <span>Refrescar</span>
+              </button>
+              <button
+                type="button"
+                className="fin-btn fin-btn--primary"
+                onClick={() => setOpenCreateSupplier(true)}
+              >
+                <PlusCircle size={16} />
+                <span>Nuevo Proveedor</span>
+              </button>
+            </div>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-              gap: "1.15rem",
-            }}
-          >
-            {suppliers.map((s) => (
-              <div
-                key={s.id}
-                className="fin-kpi-card"
-                style={{ padding: "1.25rem", gap: "0.75rem" }}
-              >
-                <div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                      <Building2 size={20} color="var(--accent)" />
-                      <strong style={{ fontSize: "1.05rem", color: "#0f172a" }}>{s.name}</strong>
-                    </div>
-                    {s.creditBalance > 0 && (
-                      <span className="fin-badge fin-badge--success">
-                        💰 Saldo a favor
-                      </span>
-                    )}
-                  </div>
-
-                  <div style={{ fontSize: "0.82rem", color: "#64748b", marginTop: "0.45rem" }}>
-                    NIT: <strong style={{ color: "#334155" }}>{s.taxId || "—"}</strong> · Tel: <strong style={{ color: "#334155" }}>{s.phone || "—"}</strong>
-                  </div>
-
-                  {s.email && (
-                    <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "0.2rem" }}>
-                      Email: {s.email}
-                    </div>
-                  )}
-
-                  {s.bankName && (
-                    <div style={{ marginTop: "0.6rem", padding: "0.5rem 0.75rem", background: "#f8fafc", borderRadius: 8, fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "0.45rem", border: "1px solid var(--border-color)" }}>
-                      <CreditCard size={14} color="var(--accent)" />
-                      <span>
-                        {s.bankName} ({s.bankAccountType || "Cta"}): <strong>{s.bankAccountNumber}</strong>
-                      </span>
-                    </div>
-                  )}
-                </div>
-
+          {/* Listado / Grid de Proveedores */}
+          {loading ? (
+            <div style={{ padding: "3rem 1rem", textAlign: "center", color: "#64748b" }}>
+              <RefreshCw size={28} className="spin" style={{ margin: "0 auto 0.5rem" }} />
+              <div>Cargando directorio de proveedores…</div>
+            </div>
+          ) : filteredSuppliers.length === 0 ? (
+            <div className="fin-table-card" style={{ padding: "3rem 1rem", textAlign: "center" }}>
+              <Building2 size={36} style={{ margin: "0 auto 0.75rem", opacity: 0.35, color: "#64748b" }} />
+              <h3 style={{ margin: 0, fontWeight: 600, color: "#1e293b" }}>No se encontraron proveedores</h3>
+              <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "#64748b" }}>
+                Ajusta los filtros de búsqueda o registra un nuevo proveedor comercial.
+              </p>
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
+                gap: "1.15rem",
+              }}
+            >
+              {filteredSuppliers.map((s) => (
                 <div
+                  key={s.id}
+                  className="fin-kpi-card"
                   style={{
-                    paddingTop: "0.75rem",
-                    borderTop: "1px solid var(--border-color)",
+                    padding: "1.25rem",
+                    gap: "0.85rem",
                     display: "flex",
+                    flexDirection: "column",
                     justifyContent: "space-between",
-                    alignItems: "center",
-                    fontSize: "0.88rem",
+                    border: s.totalDebt > 0 ? "1px solid rgba(245, 158, 11, 0.4)" : "1px solid var(--border-color)",
+                    background: s.totalDebt > 0 ? "#fffdfa" : "#ffffff",
                   }}
                 >
                   <div>
-                    <span style={{ fontSize: "0.74rem", color: "#64748b", display: "block" }}>Deuda Actual:</span>
-                    <strong style={{ color: s.totalDebt > 0 ? "#d97706" : "#64748b", fontSize: "1rem" }}>
-                      {formatMoney(s.totalDebt)}
-                    </strong>
+                    {/* Top row */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                        <div
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 10,
+                            background: "rgba(99, 102, 241, 0.1)",
+                            color: "#4f46e5",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <Building2 size={18} />
+                        </div>
+                        <div>
+                          <strong
+                            style={{
+                              fontSize: "1.05rem",
+                              color: "#0f172a",
+                              cursor: "pointer",
+                              textDecoration: "underline",
+                            }}
+                            onClick={() => setSelectedDetailSupplierId(s.id)}
+                            title="Ver estado de cuenta completo"
+                          >
+                            {s.name}
+                          </strong>
+                          <div style={{ fontSize: "0.76rem", color: "#64748b" }}>
+                            NIT: <strong style={{ color: "#334155" }}>{s.taxId || "—"}</strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
+                        {s.creditBalance > 0 && (
+                          <span
+                            style={{
+                              fontSize: "0.72rem",
+                              fontWeight: 700,
+                              padding: "2px 7px",
+                              borderRadius: 999,
+                              background: "rgba(16, 185, 129, 0.15)",
+                              color: "#059669",
+                              border: "1px solid rgba(16, 185, 129, 0.35)",
+                            }}
+                          >
+                            💰 {formatMoney(s.creditBalance)}
+                          </span>
+                        )}
+                        {!s.isActive && (
+                          <span className="fin-badge fin-badge--neutral" style={{ fontSize: "0.7rem" }}>
+                            Inactivo
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Contact details */}
+                    <div style={{ fontSize: "0.82rem", color: "#64748b", marginTop: "0.6rem", display: "flex", flexDirection: "column", gap: "3px" }}>
+                      {s.contactName && (
+                        <div>Contacto: <strong style={{ color: "#334155" }}>{s.contactName}</strong></div>
+                      )}
+                      {s.phone && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                          <Phone size={12} /> {s.phone}
+                        </div>
+                      )}
+                      {s.email && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                          <Mail size={12} /> {s.email}
+                        </div>
+                      )}
+                      {s.address && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                          <MapPin size={12} /> {s.address} {s.city ? `(${s.city})` : ""}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Bank info box */}
+                    {s.bankName && (
+                      <div
+                        style={{
+                          marginTop: "0.65rem",
+                          padding: "0.45rem 0.65rem",
+                          background: "#f8fafc",
+                          borderRadius: 8,
+                          fontSize: "0.78rem",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.45rem",
+                          border: "1px solid var(--border-color)",
+                          color: "#334155",
+                        }}
+                      >
+                        <CreditCard size={14} color="var(--accent)" />
+                        <span>
+                          {s.bankName} ({s.bankAccountType || "Cta"}): <strong>{s.bankAccountNumber}</strong>
+                        </span>
+                      </div>
+                    )}
                   </div>
 
-                  <div style={{ textAlign: "right" }}>
-                    <span style={{ fontSize: "0.74rem", color: "#64748b", display: "block" }}>Saldo a favor empresa:</span>
-                    <strong style={{ color: s.creditBalance > 0 ? "#059669" : "#64748b", fontSize: "1rem" }}>
-                      {formatMoney(s.creditBalance)}
-                    </strong>
+                  {/* Financial status summary */}
+                  <div
+                    style={{
+                      paddingTop: "0.75rem",
+                      borderTop: "1px solid var(--border-color)",
+                      marginTop: "0.4rem",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: "0.75rem",
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: "0.72rem", color: "#64748b", display: "block" }}>Deuda Actual:</span>
+                        <strong
+                          style={{
+                            color: s.totalDebt > 0 ? "#d97706" : "#059669",
+                            fontSize: s.totalDebt > 0 ? "1.08rem" : "0.95rem",
+                          }}
+                        >
+                          {formatMoney(s.totalDebt)}
+                        </strong>
+                        {s.openPayablesCount > 0 && (
+                          <span style={{ fontSize: "0.7rem", color: "#d97706", display: "block" }}>
+                            {s.openPayablesCount} factura(s) pendiente(s)
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ textAlign: "right" }}>
+                        <span style={{ fontSize: "0.72rem", color: "#64748b", display: "block" }}>Saldo a favor:</span>
+                        <strong
+                          style={{
+                            color: s.creditBalance > 0 ? "#059669" : "#64748b",
+                            fontSize: s.creditBalance > 0 ? "1.05rem" : "0.95rem",
+                          }}
+                        >
+                          {formatMoney(s.creditBalance)}
+                        </strong>
+                      </div>
+                    </div>
+
+                    {/* Action buttons on card */}
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button
+                        type="button"
+                        className="fin-btn fin-btn--primary fin-btn--sm"
+                        style={{ flex: 1, justifyContent: "center" }}
+                        onClick={() => setSelectedDetailSupplierId(s.id)}
+                        title="Ver historial de facturas, abonos y estado de cuenta"
+                      >
+                        <Eye size={13} />
+                        <span>Ver Ficha</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="fin-btn fin-btn--ghost fin-btn--sm"
+                        onClick={() => setEditingSupplier(s)}
+                        title="Editar datos personales, contacto y bancarios"
+                      >
+                        <Edit2 size={13} />
+                        <span>Editar</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="fin-btn fin-btn--ghost fin-btn--sm"
+                        onClick={() => {
+                          setPreselectedSupplierId(s.id);
+                          setOpenCreatePayable(true);
+                        }}
+                        title="Registrar nueva factura con este proveedor"
+                      >
+                        <PlusCircle size={13} />
+                        <span>Factura</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </>
       )}
 
@@ -666,10 +980,43 @@ export function PayablesPage() {
         }}
       />
 
+      {/* Modal Editar Proveedor */}
+      <EditSupplierModal
+        open={Boolean(editingSupplier)}
+        supplier={editingSupplier}
+        onClose={() => setEditingSupplier(null)}
+        onSuccess={() => {
+          void loadSuppliers();
+          void loadPayables();
+        }}
+      />
+
+      {/* Modal Detalle / Estado de Cuenta del Proveedor */}
+      <SupplierDetailModal
+        open={Boolean(selectedDetailSupplierId)}
+        supplierId={selectedDetailSupplierId}
+        onClose={() => setSelectedDetailSupplierId(null)}
+        onEditSupplier={(sup) => {
+          setEditingSupplier(sup);
+        }}
+        onPagarFactura={(payable) => {
+          setSelectedForPayment(payable);
+        }}
+        onNuevaFactura={(supId) => {
+          setPreselectedSupplierId(supId);
+          setOpenCreatePayable(true);
+        }}
+        onViewReceiptPhoto={(url) => setPreviewPhotoUrl(url)}
+      />
+
       {/* Modal Crear Factura / Deuda */}
       <CreatePayableModal
         open={openCreatePayable}
-        onClose={() => setOpenCreatePayable(false)}
+        preselectedSupplierId={preselectedSupplierId}
+        onClose={() => {
+          setOpenCreatePayable(false);
+          setPreselectedSupplierId(null);
+        }}
         onSuccess={() => {
           void loadPayables();
           void loadSuppliers();
@@ -689,7 +1036,7 @@ export function PayablesPage() {
         />
       )}
 
-      {/* Modal Detalle */}
+      {/* Modal Detalle de Factura */}
       {selectedDetailId && (
         <PayableDetailModal
           open={Boolean(selectedDetailId)}
@@ -700,6 +1047,50 @@ export function PayablesPage() {
             setSelectedForPayment(payable);
           }}
         />
+      )}
+
+      {/* Modal Previsualizar Foto de Recibo */}
+      {previewPhotoUrl && (
+        <div
+          className="inv-modal-backdrop"
+          role="presentation"
+          onClick={() => setPreviewPhotoUrl(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(15, 23, 42, 0.8)",
+            zIndex: 1100,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            className="inv-modal"
+            role="dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 640, width: "100%", background: "#fff", borderRadius: 16, overflow: "hidden" }}
+          >
+            <div style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0" }}>
+              <strong style={{ fontSize: "1rem" }}>Comprobante de Pago</strong>
+              <button
+                type="button"
+                className="inv-modal__close"
+                onClick={() => setPreviewPhotoUrl(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{ padding: 16, textAlign: "center" }}>
+              <img
+                src={previewPhotoUrl}
+                alt="Comprobante"
+                style={{ maxWidth: "100%", maxHeight: "70vh", objectFit: "contain", borderRadius: 8 }}
+              />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

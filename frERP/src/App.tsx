@@ -23,6 +23,7 @@ import { ProductNewPage } from "./features/products/ProductNewPage.js";
 import { ProductBulkUploadPage } from "./features/products/ProductBulkUploadPage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { ReceivablesPage } from "./features/finance/ReceivablesPage.js";
+import { CustomersPage } from "./features/finance/CustomersPage.js";
 import { PaymentsCashPage } from "./features/finance/PaymentsCashPage.js";
 import { LayawaysPage } from "./features/finance/LayawaysPage.js";
 import { PayablesPage } from "./features/finance/PayablesPage.js";
@@ -70,8 +71,12 @@ export default function App() {
           <Route path="/seleccionar-sede" element={<SelectSedePage />} />
           <Route path="/app" element={<AppLayout />}>
             <Route index element={<DashboardPage />} />
+            <Route path="clientes" element={<CustomersPage />} />
+            <Route path="proveedores" element={<PayablesPage />} />
             <Route path="inventario/historial" element={<HistoryRoute />} />
             <Route path="finanzas/cartera" element={<ReceivablesPage />} />
+            <Route path="finanzas/clientes" element={<CustomersPage />} />
+            <Route path="finanzas/proveedores" element={<PayablesPage />} />
             <Route path="finanzas/caja" element={<PaymentsCashPage />} />
             <Route path="finanzas/apartados" element={<LayawaysPage />} />
             <Route path="finanzas/ingresos" element={<CashIncomesPage />} />

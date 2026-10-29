@@ -206,24 +206,67 @@ export async function updateSupplier(
     throw Object.assign(new Error("supplier_not_found"), { code: "supplier_not_found" });
   }
 
+  const setClauses: string[] = ["updated_at = now()"];
+  const params: any[] = [];
+  let pIdx = 1;
+
+  if (data.name !== undefined) {
+    setClauses.push(`name = $${pIdx++}`);
+    params.push(data.name.trim());
+  }
+  if (data.taxId !== undefined) {
+    setClauses.push(`tax_id = $${pIdx++}`);
+    params.push(data.taxId?.trim() || null);
+  }
+  if (data.phone !== undefined) {
+    setClauses.push(`phone = $${pIdx++}`);
+    params.push(data.phone?.trim() || null);
+  }
+  if (data.email !== undefined) {
+    setClauses.push(`email = $${pIdx++}`);
+    params.push(data.email?.trim() || null);
+  }
+  if (data.address !== undefined) {
+    setClauses.push(`address = $${pIdx++}`);
+    params.push(data.address?.trim() || null);
+  }
+  if (data.city !== undefined) {
+    setClauses.push(`city = $${pIdx++}`);
+    params.push(data.city?.trim() || null);
+  }
+  if (data.contactName !== undefined) {
+    setClauses.push(`contact_name = $${pIdx++}`);
+    params.push(data.contactName?.trim() || null);
+  }
+  if (data.bankName !== undefined) {
+    setClauses.push(`bank_name = $${pIdx++}`);
+    params.push(data.bankName?.trim() || null);
+  }
+  if (data.bankAccountType !== undefined) {
+    setClauses.push(`bank_account_type = $${pIdx++}`);
+    params.push(data.bankAccountType?.trim() || null);
+  }
+  if (data.bankAccountNumber !== undefined) {
+    setClauses.push(`bank_account_number = $${pIdx++}`);
+    params.push(data.bankAccountNumber?.trim() || null);
+  }
+  if (data.notes !== undefined) {
+    setClauses.push(`notes = $${pIdx++}`);
+    params.push(data.notes?.trim() || null);
+  }
+  if (data.isActive !== undefined) {
+    setClauses.push(`is_active = $${pIdx++}`);
+    params.push(Boolean(data.isActive));
+  }
+
+  params.push(id);
+  const idIdx = pIdx;
+
   const { rows } = await pool.query<any>(
     `
     UPDATE suppliers
-    SET
-      name = COALESCE($1, name),
-      tax_id = COALESCE($2, tax_id),
-      phone = COALESCE($3, phone),
-      email = COALESCE($4, email),
-      address = COALESCE($5, address),
-      city = COALESCE($6, city),
-      contact_name = COALESCE($7, contact_name),
-      bank_name = COALESCE($8, bank_name),
-      bank_account_type = COALESCE($9, bank_account_type),
-      bank_account_number = COALESCE($10, bank_account_number),
-      notes = COALESCE($11, notes),
-      is_active = COALESCE($12, is_active),
-      updated_at = now()
-    WHERE id = $13::uuid
+    SET ${setClauses.join(", ")}
+    WHERE id = $${idIdx}::uuid
     RETURNING
       id::text,
       name,
@@ -241,24 +284,25 @@ export async function updateSupplier(
       is_active AS "isActive",
       created_at AS "createdAt"
     `,
-    [
-      data.name?.trim(),
-      data.taxId !== undefined ? data.taxId?.trim() || null : null,
-      data.phone !== undefined ? data.phone?.trim() || null : null,
-      data.email !== undefined ? data.email?.trim() || null : null,
-      data.address !== undefined ? data.address?.trim() || null : null,
-      data.city !== undefined ? data.city?.trim() || null : null,
-      data.contactName !== undefined ? data.contactName?.trim() || null : null,
-      data.bankName !== undefined ? data.bankName?.trim() || null : null,
-      data.bankAccountType !== undefined ? data.bankAccountType?.trim() || null : null,
-      data.bankAccountNumber !== undefined ? data.bankAccountNumber?.trim() || null : null,
-      data.notes !== undefined ? data.notes?.trim() || null : null,
-      data.isActive !== undefined ? data.isActive : null,
-      id,
-    ]
+    params
   );
 
-  return rows[0];
+  const { rows: debtRows } = await pool.query<{ totalDebt: string; count: string }>(
+    `
+    SELECT
+      COALESCE(SUM(balance_amount), 0)::text AS "totalDebt",
+      COUNT(*)::text AS count
+    FROM accounts_payable
+    WHERE supplier_id = $1::uuid AND status IN ('open', 'partial')
+    `,
+    [id]
+  );
+
+  return {
+    ...rows[0],
+    totalDebt: Number(debtRows[0]?.totalDebt ?? 0),
+    openPayablesCount: Number(debtRows[0]?.count ?? 0),
+  };
 }
 
 export async function listSuppliers(
@@ -336,6 +380,16 @@ export async function listSuppliers(
   return { items, total };
 }
 
+export interface SupplierWarehouseBreakdown {
+  warehouseId: string;
+  warehouseName: string;
+  warehouseCode: string;
+  totalBilled: number;
+  totalPaid: number;
+  currentDebt: number;
+  openPayablesCount: number;
+}
+
 export async function getSupplierProfile(
   pool: pg.Pool,
   supplierId: string
@@ -349,6 +403,7 @@ export async function getSupplierProfile(
   };
   payables: PayableSummaryItem[];
   recentPayments: PayablePaymentItem[];
+  warehouseBreakdown: SupplierWarehouseBreakdown[];
 } | null> {
   const { rows: sRows } = await pool.query<SupplierItem>(
     `
@@ -455,6 +510,25 @@ export async function getSupplierProfile(
     .filter((p) => p.status === "open" || p.status === "partial")
     .reduce((s, p) => s + p.balanceAmount, 0);
 
+  // Desglose por sede/bodega
+  const { rows: warehouseBreakdown } = await pool.query<SupplierWarehouseBreakdown>(
+    `
+    SELECT
+      w.id::text AS "warehouseId",
+      w.name AS "warehouseName",
+      w.code AS "warehouseCode",
+      COALESCE(SUM(ap.total_amount), 0)::float AS "totalBilled",
+      COALESCE(SUM(ap.paid_amount), 0)::float AS "totalPaid",
+      COALESCE(SUM(ap.balance_amount) FILTER (WHERE ap.status IN ('open', 'partial')), 0)::float AS "currentDebt",
+      COUNT(ap.id) FILTER (WHERE ap.status IN ('open', 'partial'))::int AS "openPayablesCount"
+    FROM warehouses w
+    JOIN accounts_payable ap ON ap.warehouse_id = w.id AND ap.supplier_id = $1::uuid
+    GROUP BY w.id, w.name, w.code
+    ORDER BY w.name ASC
+    `,
+    [supplierId]
+  );
+
   return {
     supplier: {
       ...supplier,
@@ -469,6 +543,7 @@ export async function getSupplierProfile(
     },
     payables,
     recentPayments,
+    warehouseBreakdown,
   };
 }
 

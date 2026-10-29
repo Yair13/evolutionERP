@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiDelete } from "./client.js";
+import { apiGet, apiPost, apiPut, apiDelete } from "./client.js";
 
 export type ReceivableStatus = "open" | "partial" | "paid" | "cancelled";
 
@@ -13,6 +13,8 @@ export interface ReceivableSummaryItem {
   customerName: string;
   customerTaxId: string | null;
   customerPhone: string | null;
+  customerCreditBalance?: number;
+  excessPaidTotal?: number;
   totalAmount: number;
   initialPayment: number;
   paidAmount: number;
@@ -58,6 +60,58 @@ export interface ReceivableDetail extends ReceivableSummaryItem {
   }[];
 }
 
+export interface CustomerInvoiceItem {
+  documentId: string | null;
+  receivableId: string | null;
+  invoiceNumber: string;
+  docType: string;
+  exitKind: string;
+  status: string;
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  subtotalAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  paidAmount: number;
+  balanceAmount: number;
+  creditBalanceUsed: number;
+  excessToFavour: number;
+  paymentBreakdown: { method: string; amount: number }[];
+  itemsSummary: string | null;
+  linesCount: number;
+  notes: string | null;
+  createdAt: string;
+  createdByName: string | null;
+}
+
+export interface CustomerWarehouseSummary {
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  invoicesCount: number;
+  totalBilled: number;
+  creditsCount: number;
+  activeCreditsCount: number;
+  currentDebt: number;
+  paymentsCount: number;
+  totalAbonos: number;
+  excessGenerated: number;
+}
+
+export interface CustomerCreditBalanceMovement {
+  id: string;
+  type: "generated_overpayment" | "used_in_invoice" | "used_in_payment";
+  amount: number;
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  referenceNumber: string;
+  invoiceNumber: string | null;
+  description: string;
+  createdAt: string;
+}
+
 export interface CustomerCreditProfile {
   customer: {
     id: string;
@@ -68,14 +122,46 @@ export interface CustomerCreditProfile {
     creditBalance: number;
   };
   stats: {
+    totalInvoicesCount?: number;
+    totalBilledAmount?: number;
     totalCreditsCount: number;
     activeCreditsCount: number;
     totalAmountBorrowed: number;
     totalAmountPaid: number;
     totalCurrentDebt: number;
+    totalAbonosCount?: number;
+    totalAbonosAmount?: number;
   };
+  warehouseBreakdown?: CustomerWarehouseSummary[];
+  invoices?: CustomerInvoiceItem[];
   receivables: ReceivableSummaryItem[];
   recentPayments: ReceivablePaymentItem[];
+  creditBalanceMovements?: CustomerCreditBalanceMovement[];
+}
+
+export interface CustomerDirectoryItem {
+  id: string;
+  displayName: string;
+  taxId: string | null;
+  phone: string | null;
+  address: string | null;
+  creditBalance: number;
+  invoicesCount: number;
+  totalBilled: number;
+  activeCreditsCount: number;
+  totalDebt: number;
+  paymentsCount: number;
+  totalAbonos: number;
+  lastActivityAt: string | null;
+  warehouses: {
+    warehouseId: string;
+    warehouseCode: string;
+    warehouseName: string;
+    invoicesCount: number;
+    totalBilled: number;
+    totalDebt: number;
+    totalAbonos: number;
+  }[];
 }
 
 export interface WarehouseReceivablesReport {
@@ -203,8 +289,43 @@ export async function fetchReceivables(
       totalBalance: number;
       countPending: number;
       countPaid: number;
+      totalCustomerCreditBalance?: number;
+      countWithCreditBalance?: number;
     };
   }>(`/finance/receivables${qs ? `?${qs}` : ""}`, token);
+}
+
+export async function fetchCustomersSummary(
+  token: string,
+  params?: {
+    warehouseId?: string | null;
+    filter?: "all" | "with_debt" | "with_favour" | "with_activity";
+    q?: string | null;
+    limit?: number;
+    offset?: number;
+  }
+) {
+  const qry = new URLSearchParams();
+  if (params?.warehouseId) qry.set("warehouseId", params.warehouseId);
+  if (params?.filter) qry.set("filter", params.filter);
+  if (params?.q) qry.set("q", params.q);
+  if (params?.limit) qry.set("limit", String(params.limit));
+  if (params?.offset) qry.set("offset", String(params.offset));
+  const qs = qry.toString();
+  return apiGet<{
+    items: CustomerDirectoryItem[];
+    total: number;
+    summary: {
+      totalCustomers: number;
+      customersWithDebt: number;
+      totalDebtAmount: number;
+      customersWithFavour: number;
+      totalFavourAmount: number;
+      totalInvoicesCount: number;
+      totalBilledAmount: number;
+      totalAbonosAmount: number;
+    };
+  }>(`/finance/customers-summary${qs ? `?${qs}` : ""}`, token);
 }
 
 export async function fetchReceivableDetail(token: string, id: string) {
@@ -531,6 +652,16 @@ export interface PayableDetail extends PayableSummaryItem {
   };
 }
 
+export interface SupplierWarehouseBreakdown {
+  warehouseId: string;
+  warehouseName: string;
+  warehouseCode: string;
+  totalBilled: number;
+  totalPaid: number;
+  currentDebt: number;
+  openPayablesCount: number;
+}
+
 export interface SupplierProfile {
   supplier: SupplierItem;
   stats: {
@@ -541,6 +672,7 @@ export interface SupplierProfile {
   };
   payables: PayableSummaryItem[];
   recentPayments: PayablePaymentItem[];
+  warehouseBreakdown?: SupplierWarehouseBreakdown[];
 }
 
 export interface EgressCashSummary {
@@ -587,6 +719,27 @@ export async function createSupplier(
   }
 ) {
   return apiPost<{ item: SupplierItem }>("/finance/suppliers", data, token);
+}
+
+export async function updateSupplier(
+  token: string,
+  id: string,
+  data: {
+    name?: string;
+    taxId?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    address?: string | null;
+    city?: string | null;
+    contactName?: string | null;
+    bankName?: string | null;
+    bankAccountType?: string | null;
+    bankAccountNumber?: string | null;
+    notes?: string | null;
+    isActive?: boolean;
+  }
+) {
+  return apiPut<{ item: SupplierItem }>(`/finance/suppliers/${id}`, data, token);
 }
 
 export async function fetchSupplierProfile(token: string, id: string) {
@@ -1498,6 +1651,7 @@ export async function attachReceiptToOperation(
     receiptUrl: string;
     receiptUrls?: string[];
     receiptFilename?: string;
+    warehouseId?: string | null;
   }
 ) {
   return apiPost<{ ok: boolean }>("/finance/closures/attach-receipt", data, token);

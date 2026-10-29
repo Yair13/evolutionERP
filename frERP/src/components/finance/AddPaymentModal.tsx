@@ -39,13 +39,14 @@ function formatMoney(n: number): string {
 export function AddPaymentModal({
   open,
   receivable,
-  customerCreditBalance = 0,
+  customerCreditBalance,
   onClose,
   onSuccess,
 }: Props) {
   const { token } = useAuth();
   const { warehouseId } = useWarehouse();
   const targetWh = warehouseId || receivable?.warehouseId;
+  const effectiveCreditBalance = Math.round(Number(customerCreditBalance ?? receivable?.customerCreditBalance ?? 0) * 100) / 100;
 
   const [amountStr, setAmountStr] = useState<string>("");
   const [method, setMethod] = useState<string>("efectivo");
@@ -71,8 +72,8 @@ export function AddPaymentModal({
       return;
     }
 
-    if (method === "saldo_a_favor" && amount > customerCreditBalance) {
-      setError(`El cliente solo cuenta con ${formatMoney(customerCreditBalance)} de saldo a favor.`);
+    if (method === "saldo_a_favor" && amount > effectiveCreditBalance) {
+      setError(`El cliente solo cuenta con ${formatMoney(effectiveCreditBalance)} de saldo a favor.`);
       return;
     }
 
@@ -161,10 +162,10 @@ export function AddPaymentModal({
         </div>
 
         {/* Saldo a favor si tiene */}
-        {customerCreditBalance > 0 && (
+        {effectiveCreditBalance > 0 && (
           <div style={{ padding: "0.5rem 0.75rem", background: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.3)", borderRadius: 6, marginBottom: "1rem", fontSize: "0.85rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ color: "#10b981" }}>
-              💰 Saldo a favor disponible: <strong>{formatMoney(customerCreditBalance)}</strong>
+              💰 Saldo a favor disponible: <strong>{formatMoney(effectiveCreditBalance)}</strong>
             </span>
             <button
               type="button"
@@ -179,7 +180,7 @@ export function AddPaymentModal({
               }}
               onClick={() => {
                 setMethod("saldo_a_favor");
-                setAmountStr(String(Math.min(customerCreditBalance, currentBalance)));
+                setAmountStr(String(Math.min(effectiveCreditBalance, currentBalance)));
               }}
             >
               Usar saldo a favor
@@ -220,7 +221,7 @@ export function AddPaymentModal({
                   <option
                     key={m.value}
                     value={m.value}
-                    disabled={m.value === "saldo_a_favor" && customerCreditBalance <= 0}
+                    disabled={m.value === "saldo_a_favor" && effectiveCreditBalance <= 0}
                   >
                     {m.label}
                   </option>

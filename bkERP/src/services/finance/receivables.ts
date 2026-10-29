@@ -26,6 +26,8 @@ export interface ReceivableSummaryItem {
   customerName: string;
   customerTaxId: string | null;
   customerPhone: string | null;
+  customerCreditBalance?: number;
+  excessPaidTotal?: number;
   totalAmount: number;
   initialPayment: number;
   paidAmount: number;
@@ -71,6 +73,58 @@ export interface ReceivableDetail extends ReceivableSummaryItem {
   }[];
 }
 
+export interface CustomerInvoiceItem {
+  documentId: string | null;
+  receivableId: string | null;
+  invoiceNumber: string;
+  docType: string;
+  exitKind: string;
+  status: string;
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  subtotalAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  paidAmount: number;
+  balanceAmount: number;
+  creditBalanceUsed: number;
+  excessToFavour: number;
+  paymentBreakdown: { method: string; amount: number }[];
+  itemsSummary: string | null;
+  linesCount: number;
+  notes: string | null;
+  createdAt: string;
+  createdByName: string | null;
+}
+
+export interface CustomerWarehouseSummary {
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  invoicesCount: number;
+  totalBilled: number;
+  creditsCount: number;
+  activeCreditsCount: number;
+  currentDebt: number;
+  paymentsCount: number;
+  totalAbonos: number;
+  excessGenerated: number;
+}
+
+export interface CustomerCreditBalanceMovement {
+  id: string;
+  type: "generated_overpayment" | "used_in_invoice" | "used_in_payment";
+  amount: number;
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  referenceNumber: string;
+  invoiceNumber: string | null;
+  description: string;
+  createdAt: string;
+}
+
 export interface CustomerCreditProfile {
   customer: {
     id: string;
@@ -81,14 +135,46 @@ export interface CustomerCreditProfile {
     creditBalance: number;
   };
   stats: {
+    totalInvoicesCount: number;
+    totalBilledAmount: number;
     totalCreditsCount: number;
     activeCreditsCount: number;
     totalAmountBorrowed: number;
     totalAmountPaid: number;
     totalCurrentDebt: number;
+    totalAbonosCount: number;
+    totalAbonosAmount: number;
   };
+  warehouseBreakdown: CustomerWarehouseSummary[];
+  invoices: CustomerInvoiceItem[];
   receivables: ReceivableSummaryItem[];
   recentPayments: ReceivablePaymentItem[];
+  creditBalanceMovements: CustomerCreditBalanceMovement[];
+}
+
+export interface CustomerDirectoryItem {
+  id: string;
+  displayName: string;
+  taxId: string | null;
+  phone: string | null;
+  address: string | null;
+  creditBalance: number;
+  invoicesCount: number;
+  totalBilled: number;
+  activeCreditsCount: number;
+  totalDebt: number;
+  paymentsCount: number;
+  totalAbonos: number;
+  lastActivityAt: string | null;
+  warehouses: {
+    warehouseId: string;
+    warehouseCode: string;
+    warehouseName: string;
+    invoicesCount: number;
+    totalBilled: number;
+    totalDebt: number;
+    totalAbonos: number;
+  }[];
 }
 
 export interface PaymentBreakdownInput {
@@ -174,10 +260,19 @@ export async function recordCreditFromExitDocument(
     }
   }
 
-  const balanceAmount = Math.max(0, Math.round((totalAmount - initialPaidTotal) * 100) / 100);
+  const appliedToDebtTotal = Math.round(Math.min(totalAmount, initialPaidTotal) * 100) / 100;
+  const excessTotal = Math.max(0, Math.round((initialPaidTotal - appliedToDebtTotal) * 100) / 100);
+  const balanceAmount = Math.max(0, Math.round((totalAmount - appliedToDebtTotal) * 100) / 100);
   const status: ReceivableStatus =
-    balanceAmount === 0 ? "paid" : initialPaidTotal > 0 ? "partial" : "open";
+    balanceAmount === 0 ? "paid" : appliedToDebtTotal > 0 ? "partial" : "open";
   const paidAt = balanceAmount === 0 ? new Date() : null;
+
+  if (excessTotal > 0) {
+    await client.query(
+      `UPDATE customers SET credit_balance = ROUND((credit_balance + $1)::numeric, 2) WHERE id = $2::uuid`,
+      [excessTotal, customerId]
+    );
+  }
 
   const { rows: arRows } = await client.query<{ id: string }>(
     `
@@ -195,8 +290,8 @@ export async function recordCreditFromExitDocument(
       warehouseId,
       customerId,
       totalAmount,
-      initialPaidTotal,
-      initialPaidTotal,
+      appliedToDebtTotal,
+      appliedToDebtTotal,
       balanceAmount,
       status,
       notes?.trim() || null,
@@ -209,7 +304,12 @@ export async function recordCreditFromExitDocument(
 
   // Registrar cada pago inicial en receivable_payments
   if (initialPayments && initialPayments.length > 0) {
+    let remainingDebtToCover = Math.round(totalAmount * 100) / 100;
     for (const p of initialPayments) {
+      const pAmount = Math.round((Number(p.amount) || 0) * 100) / 100;
+      const pApplied = Math.round(Math.min(pAmount, remainingDebtToCover) * 100) / 100;
+      const pExcess = Math.max(0, Math.round((pAmount - pApplied) * 100) / 100);
+      remainingDebtToCover = Math.max(0, Math.round((remainingDebtToCover - pApplied) * 100) / 100);
       const receiptNo = await nextReceiptNumber(client, warehouseId);
       await client.query(
         `
@@ -218,7 +318,7 @@ export async function recordCreditFromExitDocument(
           payment_method, amount, applied_to_debt, excess_to_favour,
           notes, created_by
         )
-        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, 0, $8, $9::uuid)
+        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10::uuid)
         `,
         [
           receivableId,
@@ -226,9 +326,10 @@ export async function recordCreditFromExitDocument(
           warehouseId,
           receiptNo,
           p.method.trim().toLowerCase(),
-          p.amount,
-          p.amount,
-          "Abono inicial en venta a crédito",
+          pAmount,
+          pApplied,
+          pExcess,
+          pExcess > 0 ? "Abono inicial en venta a crédito (con saldo a favor)" : "Abono inicial en venta a crédito",
           userId || null,
         ]
       );
@@ -465,7 +566,7 @@ export async function listAccountsReceivable(
   opts: {
     warehouseId?: string | null;
     allowedWarehouseIds?: string[] | null;
-    status?: "all" | "pending" | "open" | "partial" | "paid" | "cancelled";
+    status?: "all" | "pending" | "open" | "partial" | "paid" | "cancelled" | "with_favour";
     customerId?: string | null;
     dateFrom?: string | null;
     dateTo?: string | null;
@@ -482,6 +583,8 @@ export async function listAccountsReceivable(
     totalBalance: number;
     countPending: number;
     countPaid: number;
+    totalCustomerCreditBalance: number;
+    countWithCreditBalance: number;
   };
 }> {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
@@ -506,6 +609,8 @@ export async function listAccountsReceivable(
   if (opts.status && opts.status !== "all") {
     if (opts.status === "pending") {
       conditions.push(`ar.status IN ('open', 'partial')`);
+    } else if (opts.status === "with_favour") {
+      conditions.push(`COALESCE(c.credit_balance, 0) > 0`);
     } else {
       params.push(opts.status);
       conditions.push(`ar.status = $${params.length}`);
@@ -543,7 +648,9 @@ export async function listAccountsReceivable(
       COALESCE(SUM(ar.paid_amount), 0)::text AS total_paid,
       COALESCE(SUM(ar.balance_amount), 0)::text AS total_balance,
       COUNT(*) FILTER (WHERE ar.status IN ('open', 'partial'))::text AS count_pending,
-      COUNT(*) FILTER (WHERE ar.status = 'paid')::text AS count_paid
+      COUNT(*) FILTER (WHERE ar.status = 'paid')::text AS count_paid,
+      (SELECT COALESCE(SUM(c2.credit_balance), 0)::text FROM customers c2 WHERE c2.credit_balance > 0) AS total_customer_credit_balance,
+      (SELECT COUNT(*)::text FROM customers c2 WHERE c2.credit_balance > 0) AS count_with_credit_balance
     FROM accounts_receivable ar
     JOIN customers c ON c.id = ar.customer_id
     WHERE ${whereSql}
@@ -556,6 +663,8 @@ export async function listAccountsReceivable(
     total_balance: string;
     count_pending: string;
     count_paid: string;
+    total_customer_credit_balance: string;
+    count_with_credit_balance: string;
   }>(summarySql, params);
 
   const total = Number(sumRows[0]?.total_count ?? 0);
@@ -565,6 +674,8 @@ export async function listAccountsReceivable(
     totalBalance: Number(sumRows[0]?.total_balance ?? 0),
     countPending: Number(sumRows[0]?.count_pending ?? 0),
     countPaid: Number(sumRows[0]?.count_paid ?? 0),
+    totalCustomerCreditBalance: Number(sumRows[0]?.total_customer_credit_balance ?? 0),
+    countWithCreditBalance: Number(sumRows[0]?.count_with_credit_balance ?? 0),
   };
 
   // Lista paginada
@@ -584,6 +695,12 @@ export async function listAccountsReceivable(
       c.display_name AS "customerName",
       c.tax_id AS "customerTaxId",
       c.phone AS "customerPhone",
+      COALESCE(c.credit_balance, 0)::float AS "customerCreditBalance",
+      COALESCE((
+        SELECT SUM(rp.excess_to_favour)
+        FROM receivable_payments rp
+        WHERE rp.receivable_id = ar.id
+      ), 0)::float AS "excessPaidTotal",
       ar.total_amount::float AS "totalAmount",
       ar.initial_payment::float AS "initialPayment",
       ar.paid_amount::float AS "paidAmount",
@@ -920,7 +1037,7 @@ export async function addReceivablePayment(
 }
 
 /**
- * Consulta el estado de cuenta / ficha de crédito de un cliente.
+ * Consulta el estado de cuenta / ficha de crédito e historial completo de un cliente.
  */
 export async function getCustomerCreditProfile(
   pool: pg.Pool,
@@ -972,6 +1089,10 @@ export async function getCustomerCreditProfile(
       $2 AS "customerName",
       $3 AS "customerTaxId",
       $4 AS "customerPhone",
+      COALESCE(
+        (SELECT SUM(rp.excess_to_favour) FROM receivable_payments rp WHERE rp.receivable_id = ar.id),
+        0
+      )::float AS "excessPaidTotal",
       ar.total_amount::float AS "totalAmount",
       ar.initial_payment::float AS "initialPayment",
       ar.paid_amount::float AS "paidAmount",
@@ -1014,6 +1135,9 @@ export async function getCustomerCreditProfile(
       rp.amount::float,
       rp.applied_to_debt::float AS "appliedToDebt",
       rp.excess_to_favour::float AS "excessToFavour",
+      rp.receipt_url AS "receiptUrl",
+      rp.receipt_filename AS "receiptFilename",
+      COALESCE(rp.receipt_urls, '[]'::jsonb) AS "receiptUrls",
       rp.notes,
       rp.created_at AS "createdAt",
       u.full_name AS "createdByName"
@@ -1023,16 +1147,315 @@ export async function getCustomerCreditProfile(
     LEFT JOIN users u ON u.id = rp.created_by
     WHERE rp.customer_id = $1::uuid ${whPayFilter}
     ORDER BY rp.created_at DESC
-    LIMIT 50
+    LIMIT 200
     `,
     payParams
   );
 
-  const totalCreditsCount = recRows.length;
+  // Consultar todas las facturas generadas en inventory_documents para este cliente
+  const docParams: unknown[] = [customerId];
+  let whDocFilter = "";
+  if (opts?.warehouseId) {
+    whDocFilter = ` AND d.warehouse_id = $${docParams.push(opts.warehouseId)}::uuid`;
+  } else if (opts?.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0) {
+    whDocFilter = ` AND d.warehouse_id = ANY($${docParams.push(opts.allowedWarehouseIds)}::uuid[])`;
+  }
+
+  const { rows: docRows } = await pool.query<{
+    document_id: string;
+    receivable_id: string | null;
+    invoice_number: string | null;
+    doc_type: string;
+    exit_kind: string | null;
+    status: string;
+    warehouse_id: string;
+    warehouse_code: string;
+    warehouse_name: string;
+    discount_amount: string;
+    metadata: Record<string, unknown> | null;
+    notes: string | null;
+    created_at: string;
+    created_by_name: string | null;
+    subtotal_lines: string;
+    lines_count: string;
+    items_summary: string | null;
+    ar_total_amount: string | null;
+    ar_paid_amount: string | null;
+    ar_balance_amount: string | null;
+    ar_excess_paid: string | null;
+  }>(
+    `
+    SELECT
+      d.id::text AS document_id,
+      ar.id::text AS receivable_id,
+      COALESCE(d.invoice_number, ar.invoice_number, 'DOC-' || SUBSTRING(d.id::text, 1, 6)) AS invoice_number,
+      d.doc_type,
+      d.exit_kind,
+      d.status,
+      w.id::text AS warehouse_id,
+      w.code AS warehouse_code,
+      w.name AS warehouse_name,
+      COALESCE(d.discount_amount, 0)::text AS discount_amount,
+      d.metadata,
+      d.notes,
+      COALESCE(d.completed_at, d.created_at)::text AS created_at,
+      u.full_name AS created_by_name,
+      COALESCE((
+        SELECT SUM(idl.quantity * COALESCE(idl.unit_sale_price, p.base_sale_price, 0))
+        FROM inventory_document_lines idl
+        JOIN products p ON p.id = idl.product_id
+        WHERE idl.document_id = d.id
+      ), 0)::text AS subtotal_lines,
+      COALESCE((
+        SELECT COUNT(*)
+        FROM inventory_document_lines idl
+        WHERE idl.document_id = d.id
+      ), 0)::text AS lines_count,
+      (
+        SELECT STRING_AGG(p.name || ' x' || ROUND(idl.quantity)::text, ', ')
+        FROM inventory_document_lines idl
+        JOIN products p ON p.id = idl.product_id
+        WHERE idl.document_id = d.id
+      ) AS items_summary,
+      ar.total_amount::text AS ar_total_amount,
+      ar.paid_amount::text AS ar_paid_amount,
+      ar.balance_amount::text AS ar_balance_amount,
+      (SELECT COALESCE(SUM(rp.excess_to_favour), 0)::text FROM receivable_payments rp WHERE rp.receivable_id = ar.id) AS ar_excess_paid
+    FROM inventory_documents d
+    JOIN warehouses w ON w.id = d.warehouse_id
+    LEFT JOIN accounts_receivable ar ON ar.document_id = d.id
+    LEFT JOIN users u ON u.id = d.created_by
+    WHERE d.customer_id = $1::uuid
+      AND d.status IN ('completed', 'cancelled')
+      AND d.doc_type IN ('exit', 'warranty', 'return')
+      ${whDocFilter}
+    ORDER BY COALESCE(d.completed_at, d.created_at) DESC
+    `,
+    docParams
+  );
+
+  const invoices: CustomerInvoiceItem[] = [];
+  const creditBalanceMovements: CustomerCreditBalanceMovement[] = [];
+
+  for (const row of docRows) {
+    const meta = (row.metadata && typeof row.metadata === "object") ? row.metadata : {};
+    const exitKind = row.exit_kind
+      || (typeof meta.exitKind === "string" ? meta.exitKind : null)
+      || (row.receivable_id ? "credit" : row.doc_type === "exit" ? "sale" : row.doc_type);
+    const subtotal = Number(row.subtotal_lines ?? 0);
+    const discount = Number(row.discount_amount ?? 0);
+    const computedTotal = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+    const totalAmount = row.ar_total_amount != null ? Number(row.ar_total_amount) : computedTotal;
+
+    const rawBreakdown = Array.isArray(meta.paymentBreakdown) ? meta.paymentBreakdown : [];
+    const paymentBreakdown: { method: string; amount: number }[] = rawBreakdown
+      .filter((b: any) => b && typeof b.method === "string" && Number(b.amount) > 0)
+      .map((b: any) => ({ method: String(b.method), amount: Number(b.amount) }));
+
+    const creditBalanceUsed = paymentBreakdown
+      .filter((b) => b.method === "saldo_a_favor")
+      .reduce((s, b) => s + b.amount, 0);
+
+    const metaExcess = Number(meta.excessToFavour ?? 0);
+    const arExcess = Number(row.ar_excess_paid ?? 0);
+    const excessToFavour = Math.max(metaExcess, arExcess);
+
+    const paidAmount = row.ar_paid_amount != null
+      ? Number(row.ar_paid_amount)
+      : (row.status === "cancelled" ? 0 : totalAmount);
+    const balanceAmount = row.ar_balance_amount != null
+      ? Number(row.ar_balance_amount)
+      : 0;
+
+    const invNum = row.invoice_number || "S/N";
+    invoices.push({
+      documentId: row.document_id,
+      receivableId: row.receivable_id,
+      invoiceNumber: invNum,
+      docType: row.doc_type,
+      exitKind,
+      status: row.status,
+      warehouseId: row.warehouse_id,
+      warehouseCode: row.warehouse_code,
+      warehouseName: row.warehouse_name,
+      subtotalAmount: subtotal,
+      discountAmount: discount,
+      totalAmount,
+      paidAmount,
+      balanceAmount,
+      creditBalanceUsed,
+      excessToFavour,
+      paymentBreakdown,
+      itemsSummary: row.items_summary,
+      linesCount: Number(row.lines_count ?? 0),
+      notes: row.notes,
+      createdAt: row.created_at,
+      createdByName: row.created_by_name,
+    });
+
+    if (row.status !== "cancelled" && creditBalanceUsed > 0) {
+      creditBalanceMovements.push({
+        id: `doc-used-${row.document_id}`,
+        type: "used_in_invoice",
+        amount: -creditBalanceUsed,
+        warehouseId: row.warehouse_id,
+        warehouseCode: row.warehouse_code,
+        warehouseName: row.warehouse_name,
+        referenceNumber: invNum,
+        invoiceNumber: invNum,
+        description: `Saldo a favor aplicado en factura ${invNum}`,
+        createdAt: row.created_at,
+      });
+    }
+    if (row.status !== "cancelled" && metaExcess > 0 && !row.receivable_id) {
+      creditBalanceMovements.push({
+        id: `doc-excess-${row.document_id}`,
+        type: "generated_overpayment",
+        amount: metaExcess,
+        warehouseId: row.warehouse_id,
+        warehouseCode: row.warehouse_code,
+        warehouseName: row.warehouse_name,
+        referenceNumber: invNum,
+        invoiceNumber: invNum,
+        description: `Excedente a favor en pago de factura ${invNum}`,
+        createdAt: row.created_at,
+      });
+    }
+  }
+
+  // Añadir también cuentas por cobrar manuales (sin documentId) a la lista de facturas para que se vean completas
+  for (const r of recRows) {
+    if (!r.documentId) {
+      invoices.push({
+        documentId: null,
+        receivableId: r.id,
+        invoiceNumber: r.invoiceNumber,
+        docType: "manual_credit",
+        exitKind: "credit",
+        status: r.status === "cancelled" ? "cancelled" : "completed",
+        warehouseId: r.warehouseId,
+        warehouseCode: r.warehouseCode,
+        warehouseName: r.warehouseName,
+        subtotalAmount: r.totalAmount,
+        discountAmount: 0,
+        totalAmount: r.totalAmount,
+        paidAmount: r.paidAmount,
+        balanceAmount: r.balanceAmount,
+        creditBalanceUsed: 0,
+        excessToFavour: Number(r.excessPaidTotal ?? 0),
+        paymentBreakdown: [],
+        itemsSummary: r.notes || "Saldo inicial / Crédito manual",
+        linesCount: 0,
+        notes: r.notes,
+        createdAt: r.createdAt,
+        createdByName: r.createdByName,
+      });
+    }
+  }
+
+  invoices.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  // Movimientos de saldo a favor desde abonos (receivable_payments)
+  for (const p of payRows) {
+    if (p.excessToFavour > 0) {
+      creditBalanceMovements.push({
+        id: `pay-excess-${p.id}`,
+        type: "generated_overpayment",
+        amount: p.excessToFavour,
+        warehouseId: p.warehouseId,
+        warehouseCode: p.warehouseCode || "",
+        warehouseName: p.warehouseName || "",
+        referenceNumber: p.receiptNumber,
+        invoiceNumber: p.invoiceNumber || null,
+        description: `Abono mayor a la deuda en factura ${p.invoiceNumber || ""} (Recibo ${p.receiptNumber})`,
+        createdAt: p.createdAt,
+      });
+    }
+    if (p.paymentMethod === "saldo_a_favor" && !p.notes?.startsWith("Abono inicial")) {
+      creditBalanceMovements.push({
+        id: `pay-used-${p.id}`,
+        type: "used_in_payment",
+        amount: -p.amount,
+        warehouseId: p.warehouseId,
+        warehouseCode: p.warehouseCode || "",
+        warehouseName: p.warehouseName || "",
+        referenceNumber: p.receiptNumber,
+        invoiceNumber: p.invoiceNumber || null,
+        description: `Saldo a favor usado en abono a factura ${p.invoiceNumber || ""} (Recibo ${p.receiptNumber})`,
+        createdAt: p.createdAt,
+      });
+    }
+  }
+
+  creditBalanceMovements.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  // Resumen por cada sede
+  const whMap = new Map<string, CustomerWarehouseSummary>();
+  const ensureWh = (id: string, code: string, name: string): CustomerWarehouseSummary => {
+    let entry = whMap.get(id);
+    if (!entry) {
+      entry = {
+        warehouseId: id,
+        warehouseCode: code,
+        warehouseName: name,
+        invoicesCount: 0,
+        totalBilled: 0,
+        creditsCount: 0,
+        activeCreditsCount: 0,
+        currentDebt: 0,
+        paymentsCount: 0,
+        totalAbonos: 0,
+        excessGenerated: 0,
+      };
+      whMap.set(id, entry);
+    }
+    return entry;
+  };
+
+  for (const inv of invoices) {
+    if (inv.status === "cancelled") continue;
+    const w = ensureWh(inv.warehouseId, inv.warehouseCode, inv.warehouseName);
+    w.invoicesCount += 1;
+    w.totalBilled = Math.round((w.totalBilled + inv.totalAmount) * 100) / 100;
+  }
+
+  for (const r of recRows) {
+    if (r.status === "cancelled") continue;
+    const w = ensureWh(r.warehouseId, r.warehouseCode, r.warehouseName);
+    w.creditsCount += 1;
+    if (r.status === "open" || r.status === "partial") {
+      w.activeCreditsCount += 1;
+      w.currentDebt = Math.round((w.currentDebt + r.balanceAmount) * 100) / 100;
+    }
+  }
+
+  for (const p of payRows) {
+    const w = ensureWh(p.warehouseId, p.warehouseCode || "", p.warehouseName || "");
+    w.paymentsCount += 1;
+    w.totalAbonos = Math.round((w.totalAbonos + p.amount) * 100) / 100;
+    w.excessGenerated = Math.round((w.excessGenerated + p.excessToFavour) * 100) / 100;
+  }
+
+  const warehouseBreakdown = Array.from(whMap.values()).sort((a, b) =>
+    a.warehouseName.localeCompare(b.warehouseName)
+  );
+
+  const activeInvoices = invoices.filter((i) => i.status !== "cancelled");
+  const totalInvoicesCount = activeInvoices.length;
+  const totalBilledAmount = activeInvoices.reduce((s, i) => s + i.totalAmount, 0);
+  const totalCreditsCount = recRows.filter((r) => r.status !== "cancelled").length;
   const activeCreditsCount = recRows.filter((r) => r.status === "open" || r.status === "partial").length;
-  const totalAmountBorrowed = recRows.reduce((sum, r) => sum + r.totalAmount, 0);
-  const totalAmountPaid = recRows.reduce((sum, r) => sum + r.paidAmount, 0);
-  const totalCurrentDebt = recRows.reduce((sum, r) => sum + r.balanceAmount, 0);
+  const totalAmountBorrowed = recRows
+    .filter((r) => r.status !== "cancelled")
+    .reduce((sum, r) => sum + r.totalAmount, 0);
+  const totalAmountPaid = recRows
+    .filter((r) => r.status !== "cancelled")
+    .reduce((sum, r) => sum + r.paidAmount, 0);
+  const totalCurrentDebt = recRows
+    .filter((r) => r.status === "open" || r.status === "partial")
+    .reduce((sum, r) => sum + r.balanceAmount, 0);
+  const totalAbonosCount = payRows.length;
+  const totalAbonosAmount = payRows.reduce((sum, p) => sum + p.amount, 0);
 
   return {
     customer: {
@@ -1044,14 +1467,285 @@ export async function getCustomerCreditProfile(
       creditBalance: Number(c.credit_balance),
     },
     stats: {
+      totalInvoicesCount,
+      totalBilledAmount,
       totalCreditsCount,
       activeCreditsCount,
       totalAmountBorrowed,
       totalAmountPaid,
       totalCurrentDebt,
+      totalAbonosCount,
+      totalAbonosAmount,
     },
+    warehouseBreakdown,
+    invoices,
     receivables: recRows,
     recentPayments: payRows,
+    creditBalanceMovements,
+  };
+}
+
+/**
+ * Directorio de clientes con resumen de deuda, saldo a favor, facturas generadas y abonos
+ * (filtrado por sede en operación o consolidado en todas las sedes para administración).
+ */
+export async function listCustomersWithSummary(
+  pool: pg.Pool,
+  opts: {
+    warehouseId?: string | null;
+    allowedWarehouseIds?: string[] | null;
+    filter?: "all" | "with_debt" | "with_favour" | "with_activity";
+    query?: string | null;
+    limit?: number;
+    offset?: number;
+  }
+): Promise<{
+  items: CustomerDirectoryItem[];
+  total: number;
+  summary: {
+    totalCustomers: number;
+    customersWithDebt: number;
+    totalDebtAmount: number;
+    customersWithFavour: number;
+    totalFavourAmount: number;
+    totalInvoicesCount: number;
+    totalBilledAmount: number;
+    totalAbonosAmount: number;
+  };
+}> {
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 300);
+  const offset = Math.max(opts.offset ?? 0, 0);
+
+  const params: unknown[] = [];
+  let whDocCond = "";
+  let whArCond = "";
+  let whPayCond = "";
+
+  if (opts.warehouseId) {
+    params.push(opts.warehouseId);
+    const idx = params.length;
+    whDocCond = `AND d.warehouse_id = $${idx}::uuid`;
+    whArCond = `AND ar.warehouse_id = $${idx}::uuid`;
+    whPayCond = `AND rp.warehouse_id = $${idx}::uuid`;
+  } else if (opts.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0) {
+    params.push(opts.allowedWarehouseIds);
+    const idx = params.length;
+    whDocCond = `AND d.warehouse_id = ANY($${idx}::uuid[])`;
+    whArCond = `AND ar.warehouse_id = ANY($${idx}::uuid[])`;
+    whPayCond = `AND rp.warehouse_id = ANY($${idx}::uuid[])`;
+  }
+
+  let searchCond = "";
+  if (opts.query?.trim()) {
+    params.push(`%${opts.query.trim()}%`);
+    const idx = params.length;
+    searchCond = `AND (
+      c.display_name ILIKE $${idx}
+      OR COALESCE(c.tax_id, '') ILIKE $${idx}
+      OR COALESCE(c.phone, '') ILIKE $${idx}
+    )`;
+  }
+
+  let filterCond = "";
+  if (opts.filter === "with_debt") {
+    filterCond = `AND COALESCE(ar_agg.total_debt, 0) > 0`;
+  } else if (opts.filter === "with_favour") {
+    filterCond = `AND COALESCE(c.credit_balance, 0) > 0`;
+  } else if (opts.filter === "with_activity") {
+    filterCond = `AND (COALESCE(doc_agg.invoices_count, 0) > 0 OR COALESCE(ar_agg.credits_count, 0) > 0 OR COALESCE(pay_agg.payments_count, 0) > 0 OR COALESCE(c.credit_balance, 0) > 0)`;
+  }
+
+  const baseCte = `
+    WITH doc_totals AS (
+      SELECT
+        d.id AS document_id,
+        d.customer_id,
+        d.warehouse_id,
+        GREATEST(0, COALESCE((
+          SELECT SUM(idl.quantity * COALESCE(idl.unit_sale_price, p.base_sale_price, 0))
+          FROM inventory_document_lines idl
+          JOIN products p ON p.id = idl.product_id
+          WHERE idl.document_id = d.id
+        ), 0) - COALESCE(d.discount_amount, 0)) AS net_total,
+        COALESCE(d.completed_at, d.created_at) AS doc_date
+      FROM inventory_documents d
+      WHERE d.customer_id IS NOT NULL
+        AND d.status = 'completed'
+        AND d.doc_type IN ('exit', 'warranty', 'return')
+        ${whDocCond}
+    ),
+    doc_agg AS (
+      SELECT
+        customer_id,
+        COUNT(*)::int AS invoices_count,
+        COALESCE(SUM(net_total), 0)::float AS total_billed,
+        MAX(doc_date) AS last_doc_at
+      FROM doc_totals
+      GROUP BY customer_id
+    ),
+    ar_agg AS (
+      SELECT
+        ar.customer_id,
+        COUNT(*)::int AS credits_count,
+        COUNT(*) FILTER (WHERE ar.status IN ('open', 'partial'))::int AS active_credits_count,
+        COALESCE(SUM(ar.balance_amount) FILTER (WHERE ar.status IN ('open', 'partial')), 0)::float AS total_debt,
+        COALESCE(SUM(ar.total_amount) FILTER (WHERE ar.document_id IS NULL), 0)::float AS manual_billed,
+        COUNT(*) FILTER (WHERE ar.document_id IS NULL)::int AS manual_count,
+        MAX(ar.created_at) AS last_ar_at
+      FROM accounts_receivable ar
+      WHERE ar.status != 'cancelled'
+        ${whArCond}
+      GROUP BY ar.customer_id
+    ),
+    pay_agg AS (
+      SELECT
+        rp.customer_id,
+        COUNT(*)::int AS payments_count,
+        COALESCE(SUM(rp.amount), 0)::float AS total_abonos,
+        MAX(rp.created_at) AS last_pay_at
+      FROM receivable_payments rp
+      WHERE 1=1
+        ${whPayCond}
+      GROUP BY rp.customer_id
+    ),
+    wh_breakdown AS (
+      SELECT
+        sub.customer_id,
+        sub.warehouse_id,
+        w.code AS warehouse_code,
+        w.name AS warehouse_name,
+        SUM(sub.invoices_count)::int AS invoices_count,
+        SUM(sub.total_billed)::float AS total_billed,
+        SUM(sub.total_debt)::float AS total_debt,
+        SUM(sub.total_abonos)::float AS total_abonos
+      FROM (
+        SELECT customer_id, warehouse_id, COUNT(*)::int AS invoices_count, COALESCE(SUM(net_total), 0)::float AS total_billed, 0::float AS total_debt, 0::float AS total_abonos
+        FROM doc_totals
+        WHERE warehouse_id IS NOT NULL
+        GROUP BY customer_id, warehouse_id
+        UNION ALL
+        SELECT ar.customer_id, ar.warehouse_id, COUNT(*) FILTER (WHERE ar.document_id IS NULL)::int AS invoices_count, COALESCE(SUM(ar.total_amount) FILTER (WHERE ar.document_id IS NULL), 0)::float AS total_billed, COALESCE(SUM(ar.balance_amount) FILTER (WHERE ar.status IN ('open', 'partial')), 0)::float AS total_debt, 0::float AS total_abonos
+        FROM accounts_receivable ar
+        WHERE ar.status != 'cancelled' ${whArCond}
+        GROUP BY ar.customer_id, ar.warehouse_id
+        UNION ALL
+        SELECT rp.customer_id, rp.warehouse_id, 0::int AS invoices_count, 0::float AS total_billed, 0::float AS total_debt, COALESCE(SUM(rp.amount), 0)::float AS total_abonos
+        FROM receivable_payments rp
+        WHERE 1=1 ${whPayCond}
+        GROUP BY rp.customer_id, rp.warehouse_id
+      ) sub
+      JOIN warehouses w ON w.id = sub.warehouse_id
+      GROUP BY sub.customer_id, sub.warehouse_id, w.code, w.name
+    ),
+    wh_json AS (
+      SELECT
+        customer_id,
+        jsonb_agg(
+          jsonb_build_object(
+            'warehouseId', warehouse_id::text,
+            'warehouseCode', warehouse_code,
+            'warehouseName', warehouse_name,
+            'invoicesCount', invoices_count,
+            'totalBilled', total_billed,
+            'totalDebt', total_debt,
+            'totalAbonos', total_abonos
+          ) ORDER BY warehouse_name
+        ) AS warehouses
+      FROM wh_breakdown
+      GROUP BY customer_id
+    ),
+    filtered_customers AS (
+      SELECT
+        c.id::text,
+        c.display_name AS "displayName",
+        c.tax_id AS "taxId",
+        c.phone,
+        c.address,
+        COALESCE(c.credit_balance, 0)::float AS "creditBalance",
+        (COALESCE(doc_agg.invoices_count, 0) + COALESCE(ar_agg.manual_count, 0))::int AS "invoicesCount",
+        (COALESCE(doc_agg.total_billed, 0) + COALESCE(ar_agg.manual_billed, 0))::float AS "totalBilled",
+        COALESCE(ar_agg.active_credits_count, 0)::int AS "activeCreditsCount",
+        COALESCE(ar_agg.total_debt, 0)::float AS "totalDebt",
+        COALESCE(pay_agg.payments_count, 0)::int AS "paymentsCount",
+        COALESCE(pay_agg.total_abonos, 0)::float AS "totalAbonos",
+        GREATEST(doc_agg.last_doc_at, ar_agg.last_ar_at, pay_agg.last_pay_at, c.created_at)::text AS "lastActivityAt",
+        COALESCE(wh_json.warehouses, '[]'::jsonb) AS warehouses
+      FROM customers c
+      LEFT JOIN doc_agg ON doc_agg.customer_id = c.id
+      LEFT JOIN ar_agg ON ar_agg.customer_id = c.id
+      LEFT JOIN pay_agg ON pay_agg.customer_id = c.id
+      LEFT JOIN wh_json ON wh_json.customer_id = c.id
+      WHERE 1=1
+        ${ (opts.warehouseId || (opts.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0))
+          ? `AND (doc_agg.customer_id IS NOT NULL OR ar_agg.customer_id IS NOT NULL OR pay_agg.customer_id IS NOT NULL OR COALESCE(c.credit_balance, 0) > 0 ${searchCond ? "OR TRUE" : ""})`
+          : ""
+        }
+        ${searchCond}
+        ${filterCond}
+    )
+  `;
+
+  const summarySql = `
+    ${baseCte}
+    SELECT
+      COUNT(*)::int AS total_customers,
+      COUNT(*) FILTER (WHERE "totalDebt" > 0)::int AS customers_with_debt,
+      COALESCE(SUM("totalDebt"), 0)::float AS total_debt_amount,
+      COUNT(*) FILTER (WHERE "creditBalance" > 0)::int AS customers_with_favour,
+      COALESCE(SUM("creditBalance"), 0)::float AS total_favour_amount,
+      COALESCE(SUM("invoicesCount"), 0)::int AS total_invoices_count,
+      COALESCE(SUM("totalBilled"), 0)::float AS total_billed_amount,
+      COALESCE(SUM("totalAbonos"), 0)::float AS total_abonos_amount
+    FROM filtered_customers
+  `;
+
+  const { rows: sumRows } = await pool.query<{
+    total_customers: number;
+    customers_with_debt: number;
+    total_debt_amount: number;
+    customers_with_favour: number;
+    total_favour_amount: number;
+    total_invoices_count: number;
+    total_billed_amount: number;
+    total_abonos_amount: number;
+  }>(summarySql, params);
+
+  const sRow = sumRows[0];
+  const total = Number(sRow?.total_customers ?? 0);
+
+  const listParams = [...params, limit, offset];
+  const limitIdx = listParams.length - 1;
+  const offsetIdx = listParams.length;
+
+  const listSql = `
+    ${baseCte}
+    SELECT *
+    FROM filtered_customers
+    ORDER BY
+      ("creditBalance" > 0) DESC,
+      ("totalDebt" > 0) DESC,
+      "totalDebt" DESC,
+      "creditBalance" DESC,
+      "totalBilled" DESC,
+      "displayName" ASC
+    LIMIT $${limitIdx} OFFSET $${offsetIdx}
+  `;
+
+  const { rows: items } = await pool.query<CustomerDirectoryItem>(listSql, listParams);
+
+  return {
+    items,
+    total,
+    summary: {
+      totalCustomers: total,
+      customersWithDebt: Number(sRow?.customers_with_debt ?? 0),
+      totalDebtAmount: Number(sRow?.total_debt_amount ?? 0),
+      customersWithFavour: Number(sRow?.customers_with_favour ?? 0),
+      totalFavourAmount: Number(sRow?.total_favour_amount ?? 0),
+      totalInvoicesCount: Number(sRow?.total_invoices_count ?? 0),
+      totalBilledAmount: Number(sRow?.total_billed_amount ?? 0),
+      totalAbonosAmount: Number(sRow?.total_abonos_amount ?? 0),
+    },
   };
 }
 

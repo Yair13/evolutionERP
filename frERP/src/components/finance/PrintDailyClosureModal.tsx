@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Printer, X, FileText } from "lucide-react";
 import type { DailyClosureRecord } from "../../api/finance.js";
 
@@ -18,8 +20,371 @@ type Props = {
 };
 
 export function PrintDailyClosureModal({ closure, onClose }: Props) {
+  const [portalReady, setPortalReady] = useState(false);
   const isBalanced = closure.cashDifference === 0;
   const isShort = closure.cashDifference < 0;
+
+  useEffect(() => {
+    setPortalReady(true);
+
+    const handleBeforePrint = () => {
+      document.body.classList.add("inv-printing-daily-closure-ticket");
+    };
+    const handleAfterPrint = () => {
+      document.body.classList.remove("inv-printing-daily-closure-ticket");
+    };
+
+    window.addEventListener("beforeprint", handleBeforePrint);
+    window.addEventListener("afterprint", handleAfterPrint);
+
+    return () => {
+      document.body.classList.remove("inv-printing-daily-closure-ticket");
+      window.removeEventListener("beforeprint", handleBeforePrint);
+      window.removeEventListener("afterprint", handleAfterPrint);
+    };
+  }, []);
+
+  function handlePrint() {
+    document.body.classList.add("inv-printing-daily-closure-ticket");
+
+    const cleanup = () => {
+      document.body.classList.remove("inv-printing-daily-closure-ticket");
+      window.removeEventListener("afterprint", cleanup);
+    };
+
+    window.addEventListener("afterprint", cleanup);
+
+    window.setTimeout(() => {
+      window.print();
+      window.setTimeout(cleanup, 1500);
+    }, 100);
+  }
+
+  // Tirilla optimizada para impresoras térmicas POS / etiquetas de 80 mm (ancho útil 70 mm)
+  const renderTicketContent = () => (
+    <div
+      className="daily-closure-ticket-body"
+      style={{
+        width: "70mm",
+        maxWidth: "70mm",
+        margin: "0 auto",
+        padding: "2mm 2.5mm 3mm 2.5mm",
+        background: "#ffffff",
+        color: "#000000",
+        fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+        fontSize: "9.5px",
+        lineHeight: 1.25,
+        boxSizing: "border-box",
+      }}
+    >
+      {/* Encabezado */}
+      <div
+        style={{
+          textAlign: "center",
+          borderBottom: "1.5px dashed #000000",
+          paddingBottom: "4px",
+          marginBottom: "4px",
+        }}
+      >
+        <div
+          style={{
+            fontSize: "13px",
+            fontWeight: 900,
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+            color: "#000000",
+          }}
+        >
+          EVOLUTION ERP
+        </div>
+        <div style={{ fontSize: "8.5px", fontWeight: 700, color: "#000000", marginTop: "1px" }}>
+          ACTA DE CIERRE DIARIO Y ARQUEO DE CAJA
+        </div>
+        <div style={{ fontSize: "9px", fontWeight: 800, color: "#000000", marginTop: "1px" }}>
+          SEDE: {(closure.warehouseName ?? "SEDE").toUpperCase()} ({closure.warehouseCode ?? "MAIN"})
+        </div>
+        <div
+          style={{
+            fontSize: "12px",
+            fontWeight: 900,
+            letterSpacing: "0.03em",
+            marginTop: "2px",
+            color: "#000000",
+          }}
+        >
+          {closure.closingVoucherNumber}
+        </div>
+        <div style={{ fontSize: "8.5px", color: "#000000", marginTop: "1px" }}>
+          Fecha Cierre: <strong>{closure.closureDate}</strong>
+          {closure.shiftNumber ? ` · Turno ${closure.shiftNumber}` : ""}
+        </div>
+        {closure.startedAt && (
+          <div style={{ fontSize: "8px", color: "#000000" }}>
+            Horario:{" "}
+            {new Date(closure.startedAt).toLocaleTimeString("es-CO", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}{" "}
+            →{" "}
+            {closure.closedAt
+              ? new Date(closure.closedAt).toLocaleTimeString("es-CO", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
+              : "Cierre"}
+          </div>
+        )}
+        <div style={{ fontSize: "8.5px", color: "#000000" }}>
+          Cajero: <strong>{closure.cashierName ?? closure.createdByName ?? "—"}</strong>
+        </div>
+      </div>
+
+      {/* Estado de Cuadre */}
+      <div
+        style={{
+          border: "1.5px solid #000000",
+          borderRadius: "4px",
+          padding: "3px 5px",
+          marginBottom: "4px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            fontWeight: 900,
+            fontSize: "9.5px",
+          }}
+        >
+          <span>
+            {isBalanced
+              ? "✓ CUADRE EXACTO"
+              : isShort
+                ? "⚠ FALTANTE EN CAJA"
+                : "ℹ SOBRANTE EN CAJA"}
+          </span>
+          <span style={{ fontSize: "11px" }}>
+            {closure.cashDifference > 0
+              ? `+${formatMoney(closure.cashDifference)}`
+              : formatMoney(closure.cashDifference)}
+          </span>
+        </div>
+        <div style={{ fontSize: "8px", marginTop: "1px" }}>
+          Esperado: <strong>{formatMoney(closure.expectedCash)}</strong> · Contado:{" "}
+          <strong>{formatMoney(closure.countedCash)}</strong>
+        </div>
+      </div>
+
+      {/* Cuadro de Liquidación de Efectivo */}
+      <div
+        style={{
+          borderBottom: "1px dashed #000000",
+          paddingBottom: "3px",
+          marginBottom: "4px",
+          fontSize: "9px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            fontWeight: 800,
+            borderBottom: "1px solid #000000",
+            paddingBottom: "2px",
+            marginBottom: "2px",
+            fontSize: "8.5px",
+            textTransform: "uppercase",
+          }}
+        >
+          <span>Concepto Efectivo</span>
+          <span>Valor</span>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 0" }}>
+          <span style={{ fontWeight: 700 }}>Base / Saldo Arranque</span>
+          <span style={{ fontWeight: 700 }}>{formatMoney(closure.openingCash)}</span>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 0" }}>
+          <span>Ventas Mostrador (Efectivo)</span>
+          <span style={{ fontWeight: 700 }}>+ {formatMoney(closure.cashSales)}</span>
+        </div>
+
+        {closure.cashCreditPayments > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 0" }}>
+            <span>Abonos Créditos (Efectivo)</span>
+            <span style={{ fontWeight: 700 }}>+ {formatMoney(closure.cashCreditPayments)}</span>
+          </div>
+        )}
+
+        {closure.cashLayawayPayments > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 0" }}>
+            <span>Abonos Separe (Efectivo)</span>
+            <span style={{ fontWeight: 700 }}>+ {formatMoney(closure.cashLayawayPayments)}</span>
+          </div>
+        )}
+
+        {closure.cashTransfersReceived > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 0" }}>
+            <span>Remesas Recibidas (Efectivo)</span>
+            <span style={{ fontWeight: 700 }}>+ {formatMoney(closure.cashTransfersReceived)}</span>
+          </div>
+        )}
+
+        {(closure.cashTransfersReturned ?? 0) > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 0" }}>
+            <span>Retorno Traslados (Efectivo)</span>
+            <span style={{ fontWeight: 700 }}>
+              + {formatMoney(closure.cashTransfersReturned ?? 0)}
+            </span>
+          </div>
+        )}
+
+        {(closure.cashOtherIncomes ?? 0) > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 0" }}>
+            <span>Otros Ingresos (Efectivo)</span>
+            <span style={{ fontWeight: 700 }}>+ {formatMoney(closure.cashOtherIncomes ?? 0)}</span>
+          </div>
+        )}
+
+        {closure.cashOutflows > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 0" }}>
+            <span>Egresos Caja Menor (Efectivo)</span>
+            <span style={{ fontWeight: 700 }}>- {formatMoney(closure.cashOutflows)}</span>
+          </div>
+        )}
+
+        {closure.cashPayroll > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 0" }}>
+            <span>Pagos de Nómina (Efectivo)</span>
+            <span style={{ fontWeight: 700 }}>- {formatMoney(closure.cashPayroll)}</span>
+          </div>
+        )}
+
+        {closure.cashTransfersSent > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 0" }}>
+            <span>Remesas Enviadas (Efectivo)</span>
+            <span style={{ fontWeight: 700 }}>- {formatMoney(closure.cashTransfersSent)}</span>
+          </div>
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            borderTop: "1px solid #000000",
+            marginTop: "2px",
+            paddingTop: "2px",
+            fontWeight: 800,
+          }}
+        >
+          <span>EFECTIVO ESPERADO</span>
+          <span>{formatMoney(closure.expectedCash)}</span>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            fontWeight: 900,
+            fontSize: "10px",
+            paddingTop: "1px",
+          }}
+        >
+          <span>EFECTIVO CONTADO</span>
+          <span>{formatMoney(closure.countedCash)}</span>
+        </div>
+      </div>
+
+      {/* Resumen de Medios Digitales y Bancos */}
+      <div
+        style={{
+          borderBottom: "1px dashed #000000",
+          paddingBottom: "3px",
+          marginBottom: "4px",
+          fontSize: "8.5px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            fontWeight: 800,
+            fontSize: "9px",
+          }}
+        >
+          <span>RECAUDO BANCOS / DIGITAL</span>
+          <span>{formatMoney(closure.bankPaymentsTotal)}</span>
+        </div>
+        <div style={{ fontSize: "7.5px" }}>
+          Soportes:{" "}
+          {closure.pendingReceiptsCount === 0
+            ? "100% Adjuntos"
+            : `${closure.pendingReceiptsCount} pendientes`}
+        </div>
+
+        {closure.paymentBreakdown && closure.paymentBreakdown.length > 0 && (
+          <div style={{ marginTop: "2px", paddingTop: "2px", borderTop: "1px dotted #000000" }}>
+            {closure.paymentBreakdown.map((pb) => (
+              <div
+                key={pb.method}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: "8px",
+                }}
+              >
+                <span>{pb.label}:</span>
+                <strong>{formatMoney(pb.amount)}</strong>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {closure.notes && (
+        <div
+          style={{
+            fontSize: "8px",
+            borderBottom: "1px dashed #000000",
+            paddingBottom: "3px",
+            marginBottom: "4px",
+          }}
+        >
+          <strong>Obs:</strong> {closure.notes}
+        </div>
+      )}
+
+      {/* Firmas compactas */}
+      <div
+        style={{
+          marginTop: "6px",
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: "8px",
+        }}
+      >
+        <div style={{ textAlign: "center" }}>
+          <div style={{ borderBottom: "1.5px solid #000000", height: "18px" }} />
+          <div style={{ fontSize: "7.5px", fontWeight: 800, marginTop: "2px" }}>
+            CAJERO / RESPONSABLE
+          </div>
+          <div style={{ fontSize: "7px", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {closure.cashierName ?? closure.createdByName ?? "Cajero"}
+          </div>
+        </div>
+
+        <div style={{ textAlign: "center" }}>
+          <div style={{ borderBottom: "1.5px solid #000000", height: "18px" }} />
+          <div style={{ fontSize: "7.5px", fontWeight: 800, marginTop: "2px" }}>
+            VERIFICADOR / ADMIN
+          </div>
+          <div style={{ fontSize: "7px" }}>Firma y Sello</div>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div
@@ -41,7 +406,7 @@ export function PrintDailyClosureModal({ closure, onClose }: Props) {
           background: "#ffffff",
           color: "#111827",
           borderRadius: 12,
-          maxWidth: 720,
+          maxWidth: 400,
           width: "100%",
           boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
           overflow: "hidden",
@@ -65,15 +430,15 @@ export function PrintDailyClosureModal({ closure, onClose }: Props) {
         >
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <FileText size={20} className="text-primary" />
-            <span style={{ fontWeight: 700, fontSize: "1rem" }}>
-              Acta de Cierre Diario · {closure.closingVoucherNumber}
+            <span style={{ fontWeight: 700, fontSize: "0.95rem" }}>
+              Cierre Diario · {closure.closingVoucherNumber}
             </span>
           </div>
           <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
             <button
               type="button"
               className="inv-btn inv-btn--primary"
-              onClick={() => window.print()}
+              onClick={handlePrint}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -87,7 +452,7 @@ export function PrintDailyClosureModal({ closure, onClose }: Props) {
                 cursor: "pointer",
               }}
             >
-              <Printer size={16} /> Imprimir Acta
+              <Printer size={16} /> Imprimir Tirilla
             </button>
             <button
               type="button"
@@ -105,322 +470,116 @@ export function PrintDailyClosureModal({ closure, onClose }: Props) {
           </div>
         </div>
 
-        {/* Contenido imprimible */}
+        {/* Vista previa en pantalla */}
         <div
-          className="printable-daily-closure"
+          className="no-print"
           style={{
-            padding: "2rem",
+            padding: "1rem",
             overflowY: "auto",
-            fontSize: "0.85rem",
-            lineHeight: 1.45,
-            fontFamily: "Arial, sans-serif",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            background: "#f8fafc",
           }}
         >
-          <style>{`
-            @media print {
-              body * { visibility: hidden; }
-              .no-print { display: none !important; }
-              .printable-daily-closure, .printable-daily-closure * { visibility: visible; }
-              .printable-daily-closure {
-                position: absolute;
-                left: 0;
-                top: 0;
-                width: 100% !important;
-                padding: 0.5cm !important;
-                margin: 0 !important;
-                color: #000 !important;
-                background: #fff !important;
-              }
-            }
-          `}</style>
-
-          {/* Encabezado */}
           <div
-            style={{
-              borderBottom: "2px solid #0f172a",
-              paddingBottom: "1rem",
-              marginBottom: "1.25rem",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-            }}
-          >
-            <div>
-              <h2 style={{ margin: "0 0 2px 0", fontSize: "1.3rem", fontWeight: 900, letterSpacing: -0.5 }}>
-                EVOLUTION ERP
-              </h2>
-              <div style={{ fontSize: "0.8rem", color: "#64748b" }}>
-                ACTA OFICIAL DE CIERRE DIARIO Y ARQUEO DE CAJA
-              </div>
-              <div style={{ fontSize: "0.85rem", color: "#334155", marginTop: 4 }}>
-                <strong>Sede:</strong> {closure.warehouseName ?? "Sede"} ({closure.warehouseCode ?? "MAIN"})
-              </div>
-            </div>
-
-            <div style={{ textAlign: "right" }}>
-              <div
-                style={{
-                  display: "inline-block",
-                  padding: "4px 10px",
-                  background: "#f1f5f9",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: 6,
-                  fontWeight: 800,
-                  fontSize: "1rem",
-                  color: "#0f172a",
-                }}
-              >
-                {closure.closingVoucherNumber}
-              </div>
-              <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: 4 }}>
-                Fecha Cierre: <strong>{closure.closureDate}</strong> {closure.shiftNumber ? `· Turno ${closure.shiftNumber}` : ""}
-              </div>
-              {closure.startedAt && (
-                <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                  Horario: {new Date(closure.startedAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })} → {closure.closedAt ? new Date(closure.closedAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) : "Cierre"}
-                </div>
-              )}
-              <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
-                Cajero: {closure.cashierName ?? closure.createdByName ?? "—"}
-              </div>
-            </div>
-          </div>
-
-          {/* Estado de Cuadre */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "0.75rem 1rem",
-              borderRadius: 8,
-              marginBottom: "1.25rem",
-              background: isBalanced ? "#ecfdf5" : isShort ? "#fef2f2" : "#eff6ff",
-              border: `1px solid ${isBalanced ? "#a7f3d0" : isShort ? "#fecaca" : "#bfdbfe"}`,
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 800, fontSize: "0.95rem", color: isBalanced ? "#166534" : isShort ? "#991b1b" : "#1e40af" }}>
-                {isBalanced ? "✓ CUADRE DE CAJA EXACTO" : isShort ? "⚠️ FALTANTE EN CAJA" : "ℹ️ SOBRANTE EN CAJA"}
-              </div>
-              <div style={{ fontSize: "0.78rem", color: "#475569" }}>
-                Efectivo Esperado: {formatMoney(closure.expectedCash)} vs Efectivo Físico Contado: {formatMoney(closure.countedCash)}
-              </div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <span style={{ fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700, color: "#64748b" }}>
-                Diferencia
-              </span>
-              <div style={{ fontSize: "1.25rem", fontWeight: 900, color: isBalanced ? "#16a34a" : isShort ? "#dc2626" : "#2563eb" }}>
-                {closure.cashDifference > 0 ? `+ ${formatMoney(closure.cashDifference)}` : formatMoney(closure.cashDifference)}
-              </div>
-            </div>
-          </div>
-
-          {/* Cuadro de Liquidación de Efectivo */}
-          <table
             style={{
               width: "100%",
-              borderCollapse: "collapse",
-              marginBottom: "1.5rem",
-              fontSize: "0.85rem",
+              maxWidth: "285px",
+              border: "1px solid #cbd5e1",
+              borderRadius: "8px",
+              padding: "10px",
+              background: "#ffffff",
+              boxShadow: "0 4px 12px rgba(15, 23, 42, 0.08)",
             }}
           >
-            <thead>
-              <tr style={{ background: "#f1f5f9", borderBottom: "2px solid #cbd5e1", textAlign: "left" }}>
-                <th style={{ padding: "8px 10px" }}>Concepto de Efectivo</th>
-                <th style={{ padding: "8px 10px", textAlign: "right" }}>Entradas (+)</th>
-                <th style={{ padding: "8px 10px", textAlign: "right" }}>Salidas (-)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
-                <td style={{ padding: "8px 10px" }}>
-                  <strong>Saldo de Arranque en Efectivo (Base)</strong>
-                </td>
-                <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600 }}>
-                  {formatMoney(closure.openingCash)}
-                </td>
-                <td style={{ padding: "8px 10px", textAlign: "right", color: "#94a3b8" }}>—</td>
-              </tr>
-              <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
-                <td style={{ padding: "8px 10px" }}>Ventas de Mostrador en Efectivo</td>
-                <td style={{ padding: "8px 10px", textAlign: "right", color: "#16a34a", fontWeight: 600 }}>
-                  + {formatMoney(closure.cashSales)}
-                </td>
-                <td style={{ padding: "8px 10px", textAlign: "right", color: "#94a3b8" }}>—</td>
-              </tr>
-              {closure.cashCreditPayments > 0 && (
-                <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
-                  <td style={{ padding: "8px 10px" }}>Abonos de Créditos de Clientes en Efectivo</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#16a34a", fontWeight: 600 }}>
-                    + {formatMoney(closure.cashCreditPayments)}
-                  </td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#94a3b8" }}>—</td>
-                </tr>
-              )}
-              {closure.cashLayawayPayments > 0 && (
-                <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
-                  <td style={{ padding: "8px 10px" }}>Abonos a Planes Separe (Apartados) en Efectivo</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#16a34a", fontWeight: 600 }}>
-                    + {formatMoney(closure.cashLayawayPayments)}
-                  </td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#94a3b8" }}>—</td>
-                </tr>
-              )}
-              {closure.cashTransfersReceived > 0 && (
-                <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
-                  <td style={{ padding: "8px 10px" }}>Remesas / Traslados de Dinero Recibidos en Efectivo</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#16a34a", fontWeight: 600 }}>
-                    + {formatMoney(closure.cashTransfersReceived)}
-                  </td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#94a3b8" }}>—</td>
-                </tr>
-              )}
-              {(closure.cashTransfersReturned ?? 0) > 0 && (
-                <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
-                  <td style={{ padding: "8px 10px" }}>Retorno de Traslados de Dinero Rechazados (Efectivo)</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#16a34a", fontWeight: 600 }}>
-                    + {formatMoney(closure.cashTransfersReturned ?? 0)}
-                  </td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#94a3b8" }}>—</td>
-                </tr>
-              )}
-              {(closure.cashOtherIncomes ?? 0) > 0 && (
-                <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
-                  <td style={{ padding: "8px 10px" }}>Otros Ingresos / Recibos de Caja (Efectivo)</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#16a34a", fontWeight: 600 }}>
-                    + {formatMoney(closure.cashOtherIncomes ?? 0)}
-                  </td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#94a3b8" }}>—</td>
-                </tr>
-              )}
-              {closure.cashOutflows > 0 && (
-                <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
-                  <td style={{ padding: "8px 10px" }}>Comprobantes de Egreso (Caja Menor) en Efectivo</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#94a3b8" }}>—</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#dc2626", fontWeight: 600 }}>
-                    - {formatMoney(closure.cashOutflows)}
-                  </td>
-                </tr>
-              )}
-              {closure.cashPayroll > 0 && (
-                <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
-                  <td style={{ padding: "8px 10px" }}>Pagos de Nómina Realizados en Efectivo</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#94a3b8" }}>—</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#dc2626", fontWeight: 600 }}>
-                    - {formatMoney(closure.cashPayroll)}
-                  </td>
-                </tr>
-              )}
-              {closure.cashTransfersSent > 0 && (
-                <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
-                  <td style={{ padding: "8px 10px" }}>Remesas / Traslados Enviados a Otras Sedes</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#94a3b8" }}>—</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#dc2626", fontWeight: 600 }}>
-                    - {formatMoney(closure.cashTransfersSent)}
-                  </td>
-                </tr>
-              )}
-              <tr style={{ background: "#f8fafc", borderTop: "2px solid #0f172a" }}>
-                <td style={{ padding: "10px", fontWeight: 800 }}>EFECTIVO NETO ESPERADO EN CAJA</td>
-                <td colSpan={2} style={{ padding: "10px", textAlign: "right", fontWeight: 800, fontSize: "1rem" }}>
-                  {formatMoney(closure.expectedCash)}
-                </td>
-              </tr>
-              <tr style={{ background: "#f1f5f9", borderTop: "1px solid #cbd5e1" }}>
-                <td style={{ padding: "10px", fontWeight: 800 }}>EFECTIVO FÍSICO CONTADO POR EL CAJERO</td>
-                <td colSpan={2} style={{ padding: "10px", textAlign: "right", fontWeight: 900, fontSize: "1.1rem", color: "#0284c7" }}>
-                  {formatMoney(closure.countedCash)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-
-          {/* Resumen de Medios Digitales y Bancos */}
-          <div
-            style={{
-              padding: "0.85rem 1rem",
-              background: "#f8fafc",
-              border: "1px solid #e2e8f0",
-              borderRadius: 8,
-              marginBottom: "1.5rem",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: "0.5rem",
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 700, fontSize: "0.85rem" }}>
-                Recaudo por Cuentas Bancarias / Pasarelas (Bancolombia, Davivienda, Bold, Addi, Nequi...)
-              </div>
-              <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                Soportes digitales auditados: {closure.pendingReceiptsCount === 0 ? "100% Adjuntos" : `${closure.pendingReceiptsCount} pendientes`}
-              </div>
-            </div>
-            <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "#0f172a" }}>
-              {formatMoney(closure.bankPaymentsTotal)}
-            </div>
-
-            {closure.paymentBreakdown && closure.paymentBreakdown.length > 0 && (
-              <div style={{ marginTop: "0.75rem", width: "100%", borderTop: "1px dashed #cbd5e1", paddingTop: "0.5rem" }}>
-                <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#475569", marginBottom: 4, textTransform: "uppercase" }}>
-                  Desglose por Entidad Bancaria / Pasarela:
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "0.5rem" }}>
-                  {closure.paymentBreakdown.map((pb) => (
-                    <div key={pb.method} style={{ background: "#ffffff", padding: "4px 8px", borderRadius: 6, border: "1px solid #e2e8f0", fontSize: "0.8rem", display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ fontWeight: 600, color: "#334155" }}>{pb.label}:</span>
-                      <strong style={{ color: "#0f172a" }}>{formatMoney(pb.amount)}</strong>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {closure.notes && (
-            <div style={{ fontSize: "0.8rem", color: "#475569", marginBottom: "1.5rem" }}>
-              <strong>Observaciones del Cierre:</strong> {closure.notes}
-            </div>
-          )}
-
-          {/* Firmas Formales */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "2.5rem",
-              marginTop: "3rem",
-              paddingTop: "1rem",
-            }}
-          >
-            <div style={{ textAlign: "center" }}>
-              <div style={{ borderBottom: "1px solid #0f172a", height: 50, marginBottom: 8 }} />
-              <div style={{ fontWeight: 700 }}>RESPONSABLE DE CAJA / CAJERO</div>
-              <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                {closure.cashierName ?? closure.createdByName ?? "Cajero de Turno"}
-              </div>
-              <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                Sede: {closure.warehouseName}
-              </div>
-            </div>
-
-            <div style={{ textAlign: "center" }}>
-              <div style={{ borderBottom: "1px solid #0f172a", height: 50, marginBottom: 8 }} />
-              <div style={{ fontWeight: 700 }}>VERIFICADOR / ADMINISTRACIÓN</div>
-              <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                Firma y Cédula
-              </div>
-              <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                Aprobación de Cierre y Arqueo
-              </div>
-            </div>
+            {renderTicketContent()}
           </div>
         </div>
       </div>
+
+      {/* PORTAL DE IMPRESIÓN DIRECTO EN BODY */}
+      {portalReady
+        ? createPortal(
+            <div id="inv-daily-closure-ticket-print" aria-hidden="true">
+              {renderTicketContent()}
+            </div>,
+            document.body
+          )
+        : null}
+
+      {/* ESTILOS DE IMPRESIÓN DIRECTA */}
+      <style>{`
+        #inv-daily-closure-ticket-print {
+          display: none;
+        }
+
+        @media print {
+          @page {
+            size: auto;
+            margin: 0mm;
+          }
+
+          html, body {
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            overflow: hidden !important;
+          }
+
+          #root {
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+          }
+
+          body.inv-printing-daily-closure-ticket {
+            height: auto !important;
+            min-height: 0 !important;
+          }
+
+          body.inv-printing-daily-closure-ticket > *:not(#inv-daily-closure-ticket-print) {
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+          }
+
+          body.inv-printing-daily-closure-ticket #inv-daily-closure-ticket-print {
+            display: block !important;
+            position: static !important;
+            width: 70mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
+          body.inv-printing-daily-closure-ticket #inv-daily-closure-ticket-print .daily-closure-ticket-body {
+            display: block !important;
+            width: 70mm !important;
+            max-width: 70mm !important;
+            margin: 0 !important;
+            padding: 2mm 2.5mm 3mm 2.5mm !important;
+            box-sizing: border-box !important;
+            color: #000000 !important;
+            background: #ffffff !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }

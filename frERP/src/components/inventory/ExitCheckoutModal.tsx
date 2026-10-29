@@ -87,6 +87,8 @@ type Props = {
   lockedKind?: ExitKind;
   /** Para validar cambios en el checkout */
   exchangeReady?: { hasOutbound: boolean; hasReturn: boolean; netValue: number };
+  /** Factura original sugerida/precargada (ej. en cambios) */
+  initialRelatedInvoiceNumber?: string;
   /** Error devuelto por el servidor al confirmar (se muestra dentro del modal) */
   serverError?: string | null;
 };
@@ -112,6 +114,7 @@ export function ExitCheckoutModal({
   isFactory,
   lockedKind,
   exchangeReady,
+  initialRelatedInvoiceNumber,
   serverError,
 }: Props) {
   const { token } = useAuth();
@@ -176,7 +179,7 @@ export function ExitCheckoutModal({
       const initKind = lockedKind ?? "sale";
       setExitKind(initKind);
       setCustomerName(existingDraft?.customerName ?? "");
-      setRelatedInvoiceNumber(existingDraft?.relatedInvoiceNumber ?? "");
+      setRelatedInvoiceNumber(existingDraft?.relatedInvoiceNumber || initialRelatedInvoiceNumber || "");
       setNotes(existingDraft?.notes ?? "");
       setError(null);
       setSearchQuery("");
@@ -381,10 +384,6 @@ export function ExitCheckoutModal({
         setError("En un cambio debes marcar al menos un producto de salida y uno de retorno (cambio).");
         return;
       }
-      if (exchangeReady.netValue === 0) {
-        setError("El valor neto del cambio no puede ser $0; el producto de cambio no iguala la salida.");
-        return;
-      }
     }
 
     if (discountAmount > maxDiscount) {
@@ -395,7 +394,7 @@ export function ExitCheckoutModal({
     }
 
     const paymentBreakdown: PaymentPart[] =
-      exitKind === "sale" || exitKind === "credit"
+      exitKind === "sale" || exitKind === "credit" || exitKind === "exchange"
         ? payments
             .filter((payment) => Number(String(payment.amount).replace(",", ".")) > 0)
             .map((payment) => ({
@@ -404,7 +403,7 @@ export function ExitCheckoutModal({
             }))
         : [];
 
-    if (exitKind === "sale") {
+    if (exitKind === "sale" || exitKind === "exchange") {
       if (netTotal > 0) {
         if (
           paymentBreakdown.length === 0 ||
@@ -412,27 +411,34 @@ export function ExitCheckoutModal({
             (payment) => !payment.method || !Number.isFinite(payment.amount) || payment.amount <= 0
           )
         ) {
-          setError("Cada método de pago debe tener un valor mayor que $0.");
+          setError(
+            exitKind === "exchange"
+              ? "Cada método de pago debe tener un valor mayor que $0 para cubrir el excedente."
+              : "Cada método de pago debe tener un valor mayor que $0."
+          );
           return;
         }
         const paidTotal = paymentBreakdown.reduce((sum, payment) => sum + payment.amount, 0);
-        if (Math.abs(paidTotal - netTotal) >= 0.01) {
+        if (paidTotal + 0.01 < netTotal) {
           const difference = netTotal - paidTotal;
           setError(
-            difference > 0
-              ? `Faltan ${formatMoney(difference)} por asignar en los métodos de pago.`
-              : `Los pagos superan el total neto por ${formatMoney(Math.abs(difference))}.`
+            exitKind === "exchange"
+              ? `Faltan ${formatMoney(difference)} por asignar en los métodos de pago para cubrir el excedente.`
+              : `Faltan ${formatMoney(difference)} por asignar en los métodos de pago.`
           );
           return;
         }
       }
     }
 
-    if (exitKind === "credit") {
-      const paidTotal = paymentBreakdown.reduce((sum, payment) => sum + payment.amount, 0);
-      if (paidTotal > netTotal + 0.01) {
+    const favourUsed = paymentBreakdown
+      .filter((p) => p.method === "saldo_a_favor")
+      .reduce((sum, p) => sum + p.amount, 0);
+    if (favourUsed > 0) {
+      const availableFavour = Number(selectedCustomer?.creditBalance ?? 0);
+      if (favourUsed > availableFavour + 0.01) {
         setError(
-          `El abono inicial (${formatMoney(paidTotal)}) no puede superar el total neto de la venta (${formatMoney(netTotal)}).`
+          `El monto en Saldo a favor (${formatMoney(favourUsed)}) supera el saldo disponible del cliente (${formatMoney(availableFavour)}).`
         );
         return;
       }
@@ -510,7 +516,7 @@ export function ExitCheckoutModal({
     if (parsed > maxDiscount) {
       setDiscountAmount(maxDiscount);
       const newNet = Math.max(0, subtotal - maxDiscount);
-      if (payments.length === 1 && exitKind === "sale") {
+      if (payments.length === 1 && (exitKind === "sale" || exitKind === "exchange")) {
         setPayments([{ ...payments[0], amount: String(newNet) }]);
       }
       setDiscountLimitWarning(
@@ -521,7 +527,7 @@ export function ExitCheckoutModal({
     setDiscountLimitWarning(null);
     setDiscountAmount(parsed);
     const newNet = Math.max(0, subtotal - parsed);
-    if (payments.length === 1 && exitKind === "sale") {
+    if (payments.length === 1 && (exitKind === "sale" || exitKind === "exchange")) {
       setPayments([{ ...payments[0], amount: String(newNet) }]);
     }
     setError(null);
@@ -534,7 +540,7 @@ export function ExitCheckoutModal({
       setDiscountReason("Descuento comercial (10%)");
     }
     const newNet = Math.max(0, subtotal - maxDiscount);
-    if (payments.length === 1 && exitKind === "sale") {
+    if (payments.length === 1 && (exitKind === "sale" || exitKind === "exchange")) {
       setPayments([{ ...payments[0], amount: String(newNet) }]);
     }
     setError(null);
@@ -546,8 +552,51 @@ export function ExitCheckoutModal({
     if (discountReason === "Obsequio 100%" || discountReason === "Descuento comercial (10%)") {
       setDiscountReason("");
     }
-    if (payments.length === 1 && exitKind === "sale") {
+    if (payments.length === 1 && (exitKind === "sale" || exitKind === "exchange")) {
       setPayments([{ ...payments[0], amount: String(subtotal) }]);
+    }
+    setError(null);
+  }
+
+  const appliedFavourAmount = Math.round(
+    payments
+      .filter((p) => p.method === "saldo_a_favor")
+      .reduce((sum, p) => {
+        const val = Number(String(p.amount).replace(",", "."));
+        return sum + (Number.isFinite(val) ? val : 0);
+      }, 0) * 100
+  ) / 100;
+
+  function applyCustomerCreditBalance(cust: Customer, currentNetTotal: number, currentExitKind: ExitKind) {
+    const availableFavour = Math.max(0, Math.round(Number(cust.creditBalance || 0) * 100) / 100);
+    if (availableFavour <= 0 || currentNetTotal <= 0) return;
+    const maxToUse = Math.min(availableFavour, currentNetTotal);
+    if (currentExitKind === "sale") {
+      if (maxToUse >= currentNetTotal) {
+        setPayments([{ id: 1, method: "saldo_a_favor", amount: String(maxToUse) }]);
+        setNextPaymentId(2);
+      } else {
+        const rest = Math.max(0, Math.round((currentNetTotal - maxToUse) * 100) / 100);
+        setPayments([
+          { id: 1, method: "saldo_a_favor", amount: String(maxToUse) },
+          { id: 2, method: "efectivo", amount: String(rest) },
+        ]);
+        setNextPaymentId(3);
+      }
+    } else if (currentExitKind === "credit") {
+      setPayments([{ id: 1, method: "saldo_a_favor", amount: String(maxToUse) }]);
+      setNextPaymentId(2);
+    }
+    setError(null);
+  }
+
+  function removeCustomerCreditBalance() {
+    if (exitKind === "sale") {
+      setPayments([{ id: 1, method: "efectivo", amount: String(netTotal) }]);
+      setNextPaymentId(2);
+    } else {
+      setPayments([{ id: 1, method: "efectivo", amount: "" }]);
+      setNextPaymentId(2);
     }
     setError(null);
   }
@@ -560,7 +609,24 @@ export function ExitCheckoutModal({
 
   function updatePayment(id: number, patch: Partial<Pick<PaymentDraft, "method" | "amount">>) {
     setPayments((current) =>
-      current.map((payment) => (payment.id === id ? { ...payment, ...patch } : payment))
+      current.map((payment) => {
+        if (payment.id !== id) return payment;
+        const next = { ...payment, ...patch };
+        if (patch.method === "saldo_a_favor" && selectedCustomer?.creditBalance) {
+          const otherSum = current
+            .filter((p) => p.id !== id)
+            .reduce((s, p) => s + (Number(String(p.amount).replace(",", ".")) || 0), 0);
+          const remaining = Math.max(0, Math.round((netTotal - otherSum) * 100) / 100);
+          const maxToUse = Math.min(
+            Math.round(Number(selectedCustomer.creditBalance) * 100) / 100,
+            remaining > 0 ? remaining : netTotal
+          );
+          if (maxToUse > 0) {
+            next.amount = String(maxToUse);
+          }
+        }
+        return next;
+      })
     );
     setError(null);
   }
@@ -697,41 +763,94 @@ export function ExitCheckoutModal({
 
             {selectedCustomer ? (
               <div className="inv-checkout-customer__selected">
-                <div className="inv-checkout-customer__selected-info">
-                  <strong>{selectedCustomer.displayName}</strong>
-                  <span>Cédula: {selectedCustomer.taxId || "—"} · Tel: {selectedCustomer.phone || "—"}</span>
-                  {selectedCustomer.creditBalance != null && selectedCustomer.creditBalance > 0 ? (
-                    <div style={{ marginTop: "0.35rem", color: "#10b981", fontSize: "0.85rem", fontWeight: 600, display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                      <span>💰 Saldo a favor: {formatMoney(selectedCustomer.creditBalance)}</span>
-                      <button
-                        type="button"
+                <div className="inv-checkout-customer__selected-info" style={{ width: "100%" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                    <strong>{selectedCustomer.displayName}</strong>
+                    {selectedCustomer.totalDebt != null && selectedCustomer.totalDebt > 0 && (
+                      <span
                         style={{
-                          background: "rgba(16, 185, 129, 0.15)",
-                          border: "1px solid #10b981",
-                          color: "#10b981",
-                          borderRadius: 4,
-                          padding: "2px 8px",
-                          fontSize: "0.75rem",
-                          cursor: "pointer",
-                        }}
-                        onClick={() => {
-                          const maxToUse = Math.min(selectedCustomer.creditBalance || 0, totalValue);
-                          if (exitKind === "sale") {
-                            if (maxToUse === totalValue) {
-                              setPayments([{ id: 1, method: "saldo_a_favor", amount: String(maxToUse) }]);
-                            } else {
-                              setPayments([
-                                { id: 1, method: "saldo_a_favor", amount: String(maxToUse) },
-                                { id: 2, method: "efectivo", amount: String(totalValue - maxToUse) },
-                              ]);
-                            }
-                          } else if (exitKind === "credit") {
-                            setPayments([{ id: 1, method: "saldo_a_favor", amount: String(maxToUse) }]);
-                          }
+                          fontSize: "0.72rem",
+                          fontWeight: 700,
+                          padding: "2px 7px",
+                          borderRadius: 999,
+                          background: "rgba(239, 68, 68, 0.14)",
+                          color: "#ef4444",
+                          border: "1px solid rgba(239, 68, 68, 0.35)",
                         }}
                       >
-                        Aplicar saldo a favor
-                      </button>
+                        Deuda pendiente: {formatMoney(selectedCustomer.totalDebt)}
+                      </span>
+                    )}
+                  </div>
+                  <span>Cédula: {selectedCustomer.taxId || "—"} · Tel: {selectedCustomer.phone || "—"}</span>
+
+                  {selectedCustomer.creditBalance != null && selectedCustomer.creditBalance > 0 ? (
+                    <div
+                      style={{
+                        marginTop: "0.5rem",
+                        padding: "0.65rem 0.85rem",
+                        borderRadius: 8,
+                        background: "rgba(16, 185, 129, 0.12)",
+                        border: "1.5px solid #10b981",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: "0.6rem",
+                      }}
+                    >
+                      <div>
+                        <div style={{ color: "#10b981", fontSize: "0.9rem", fontWeight: 700 }}>
+                          💰 Saldo a Favor Disponible: {formatMoney(selectedCustomer.creditBalance)}
+                        </div>
+                        <div style={{ fontSize: "0.78rem", color: "var(--inv-text-muted, #64748b)", marginTop: "2px" }}>
+                          {appliedFavourAmount > 0 ? (
+                            <>
+                              Aplicando <strong style={{ color: "#10b981" }}>{formatMoney(appliedFavourAmount)}</strong> en esta factura · Restante a favor:{" "}
+                              <strong>{formatMoney(Math.max(0, selectedCustomer.creditBalance - appliedFavourAmount))}</strong>
+                            </>
+                          ) : (
+                            <>El cliente tiene saldo a favor de abonos anteriores listo para descontar en esta factura.</>
+                          )}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                        {appliedFavourAmount > 0 ? (
+                          <button
+                            type="button"
+                            style={{
+                              background: "transparent",
+                              border: "1px solid #10b981",
+                              color: "#10b981",
+                              borderRadius: 6,
+                              padding: "4px 10px",
+                              fontSize: "0.76rem",
+                              fontWeight: 700,
+                              cursor: "pointer",
+                            }}
+                            onClick={removeCustomerCreditBalance}
+                          >
+                            ✓ Aplicado ({formatMoney(appliedFavourAmount)}) · Quitar
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            style={{
+                              background: "#10b981",
+                              border: "none",
+                              color: "#fff",
+                              borderRadius: 6,
+                              padding: "5px 12px",
+                              fontSize: "0.78rem",
+                              fontWeight: 700,
+                              cursor: "pointer",
+                            }}
+                            onClick={() => applyCustomerCreditBalance(selectedCustomer, netTotal, exitKind)}
+                          >
+                            Aplicar saldo a favor ({formatMoney(Math.min(selectedCustomer.creditBalance, netTotal))})
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ) : null}
 
@@ -756,13 +875,13 @@ export function ExitCheckoutModal({
                         </div>
                         <div style={{ fontSize: "0.8rem", color: "var(--inv-text-muted, #94a3b8)" }}>
                           Abono acumulado: <strong style={{ color: "var(--inv-text, #fff)" }}>{formatMoney(activeLayaway.paidAmount)}</strong>
-                          {activeLayaway.paidAmount >= totalValue ? (
+                          {activeLayaway.paidAmount >= netTotal ? (
                             <span style={{ color: "#10b981", marginLeft: "0.35rem" }}>
-                              (Cubre el 100% · {formatMoney(activeLayaway.paidAmount - totalValue)} pasará a Saldo a Favor)
+                              (Cubre el 100% · {formatMoney(activeLayaway.paidAmount - netTotal)} pasará a Saldo a Favor)
                             </span>
                           ) : (
                             <span style={{ color: "#f59e0b", marginLeft: "0.35rem" }}>
-                              (Faltan {formatMoney(totalValue - activeLayaway.paidAmount)} por pagar)
+                              (Faltan {formatMoney(netTotal - activeLayaway.paidAmount)} por pagar)
                             </span>
                           )}
                         </div>
@@ -781,14 +900,14 @@ export function ExitCheckoutModal({
                         }}
                         onClick={() => {
                           setSelectedLayawayId(activeLayaway.id);
-                          const maxToUse = Math.min(activeLayaway.paidAmount, totalValue);
+                          const maxToUse = Math.min(activeLayaway.paidAmount, netTotal);
                           if (exitKind === "sale") {
-                            if (maxToUse === totalValue) {
+                            if (maxToUse === netTotal) {
                               setPayments([{ id: 1, method: "apartado", amount: String(maxToUse) }]);
                             } else {
                               setPayments([
                                 { id: 1, method: "apartado", amount: String(maxToUse) },
-                                { id: 2, method: "efectivo", amount: String(totalValue - maxToUse) },
+                                { id: 2, method: "efectivo", amount: String(netTotal - maxToUse) },
                               ]);
                             }
                           } else if (exitKind === "credit") {
@@ -807,6 +926,9 @@ export function ExitCheckoutModal({
                     setSelectedCustomer(null);
                     setCustomerId(null);
                     setCustomerName("");
+                    if (appliedFavourAmount > 0) {
+                      removeCustomerCreditBalance();
+                    }
                   }}
                   className="inv-btn inv-btn--ghost inv-checkout-customer__change"
                 >
@@ -896,10 +1018,48 @@ export function ExitCheckoutModal({
                           setCustomerId(c.id);
                           setSearchQuery("");
                           setCustomerList([]);
+                          if (c.creditBalance && c.creditBalance > 0 && netTotal > 0) {
+                            applyCustomerCreditBalance(c, netTotal, exitKind);
+                          }
                         }}
                         className="inv-customer-item"
+                        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}
                       >
-                        <strong>{c.displayName}</strong> - CC: {c.taxId || "—"} - Tel: {c.phone || "—"}
+                        <span>
+                          <strong>{c.displayName}</strong> - CC: {c.taxId || "—"} - Tel: {c.phone || "—"}
+                        </span>
+                        <span style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                          {c.creditBalance != null && c.creditBalance > 0 && (
+                            <span
+                              style={{
+                                fontSize: "0.75rem",
+                                fontWeight: 700,
+                                padding: "2px 8px",
+                                borderRadius: 999,
+                                background: "rgba(16, 185, 129, 0.16)",
+                                color: "#10b981",
+                                border: "1px solid rgba(16, 185, 129, 0.4)",
+                              }}
+                            >
+                              💰 Saldo a favor: {formatMoney(c.creditBalance)}
+                            </span>
+                          )}
+                          {c.totalDebt != null && c.totalDebt > 0 && (
+                            <span
+                              style={{
+                                fontSize: "0.73rem",
+                                fontWeight: 700,
+                                padding: "2px 8px",
+                                borderRadius: 999,
+                                background: "rgba(239, 68, 68, 0.14)",
+                                color: "#ef4444",
+                                border: "1px solid rgba(239, 68, 68, 0.35)",
+                              }}
+                            >
+                              Deuda: {formatMoney(c.totalDebt)}
+                            </span>
+                          )}
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -1084,16 +1244,45 @@ export function ExitCheckoutModal({
           </section>
         )}
 
-        {/* Métodos de Pago o Abono Inicial */}
-        {(exitKind === "sale" || exitKind === "credit") && (
+        {/* Métodos de Pago o Abono Inicial o Excedente de Cambio */}
+        {exitKind === "exchange" && netTotal === 0 && (
+          <div
+            style={{
+              padding: "12px 14px",
+              background: "#f0fdf4",
+              border: "1px solid #bbf7d0",
+              borderRadius: "8px",
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              marginBottom: "1rem",
+            }}
+          >
+            <span style={{ fontSize: "1.2rem" }}>⚖️</span>
+            <div>
+              <strong style={{ color: "#166534", display: "block" }}>Cambio mano a mano (Excedente: $0)</strong>
+              <span style={{ fontSize: "0.85rem", color: "#15803d" }}>
+                El valor de la prenda devuelta cubre exactamente la prenda entregada. No se requiere pago adicional.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {(exitKind === "sale" || exitKind === "credit" || (exitKind === "exchange" && netTotal > 0)) && (
           <section className="inv-checkout-payments" aria-labelledby="payment-methods-title">
             <div className="inv-checkout-payments__head">
               <div>
                 <h3 id="payment-methods-title">
-                  {exitKind === "credit" ? "Abono inicial (opcional)" : "Métodos de pago"}
+                  {exitKind === "exchange"
+                    ? "Método de pago del excedente"
+                    : exitKind === "credit"
+                    ? "Abono inicial (opcional)"
+                    : "Métodos de pago"}
                 </h3>
                 <p>
-                  {exitKind === "credit"
+                  {exitKind === "exchange"
+                    ? `Registra cómo cancela el cliente el valor del excedente (${formatMoney(netTotal)}).`
+                    : exitKind === "credit"
                     ? "Si el cliente abona una parte hoy, regístralo aquí. El saldo restante generará la Cuenta por Cobrar."
                     : netTotal === 0
                     ? "Factura totalmente bonificada/obsequio. No requiere registro de pago."
@@ -1190,31 +1379,44 @@ export function ExitCheckoutModal({
                 style={{
                   background: "rgba(99, 102, 241, 0.08)",
                   borderColor: "rgba(99, 102, 241, 0.25)",
+                  flexWrap: "wrap",
+                  gap: "0.5rem",
                 }}
               >
                 <span>Abono inicial hoy: <strong>{formatMoney(paidTotal)}</strong></span>
-                <span>
-                  Saldo a crédito (Por cobrar):{" "}
-                  <strong style={{ color: "#ef4444" }}>
-                    {formatMoney(Math.max(0, netTotal - paidTotal))}
-                  </strong>
-                </span>
+                {paidTotal > netTotal + 0.01 ? (
+                  <span style={{ color: "#10b981", fontWeight: 700 }}>
+                    💰 Queda como Saldo a Favor del cliente: +{formatMoney(paidTotal - netTotal)}
+                  </span>
+                ) : (
+                  <span>
+                    Saldo a crédito (Por cobrar):{" "}
+                    <strong style={{ color: "#ef4444" }}>
+                      {formatMoney(Math.max(0, netTotal - paidTotal))}
+                    </strong>
+                  </span>
+                )}
               </div>
             ) : netTotal > 0 ? (
               <div
                 className={`inv-checkout-payments__balance${
-                  Math.abs(paymentDifference) < 0.01 ? " is-complete" : " is-pending"
+                  paymentDifference <= 0.01 ? " is-complete" : " is-pending"
                 }`}
+                style={{ flexWrap: "wrap", gap: "0.5rem" }}
               >
                 <span>Pagado: <strong>{formatMoney(paidTotal)}</strong></span>
                 <span>
-                  {paymentDifference > 0
-                    ? `Falta: ${formatMoney(paymentDifference)}`
-                    : paymentDifference < 0
-                      ? `Excede: ${formatMoney(Math.abs(paymentDifference))}`
-                      : "Pago completo"}
+                  {paymentDifference > 0.01 ? (
+                    `Falta: ${formatMoney(paymentDifference)}`
+                  ) : paymentDifference < -0.01 ? (
+                    <strong style={{ color: "#10b981" }}>
+                      💰 Excedente a Saldo a Favor del cliente: +{formatMoney(Math.abs(paymentDifference))}
+                    </strong>
+                  ) : (
+                    "Pago completo"
+                  )}
                 </span>
-                {payments.length > 1 && Math.abs(paymentDifference) >= 0.01 && (
+                {Math.abs(paymentDifference) >= 0.01 && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1233,7 +1435,7 @@ export function ExitCheckoutModal({
                       color: "inherit",
                     }}
                   >
-                    Ajustar diferencia
+                    Ajustar al total exacto
                   </button>
                 )}
               </div>
@@ -1265,13 +1467,22 @@ export function ExitCheckoutModal({
         ) : null}
 
         {exitKind === "exchange" ? (
-          <p className="inv-checkout-exchange-hint">
-            En el carrito marca el producto que entra como retorno. Valor neto actual:{" "}
-            <strong>{formatMoney(exchangeReady?.netValue ?? totalValue)}</strong>
-            {exchangeReady && exchangeReady.netValue === 0
-              ? " — debe ser distinto de $0."
-              : null}
-          </p>
+          <div
+            style={{
+              padding: "10px 12px",
+              background: "rgba(15, 118, 110, 0.08)",
+              border: "1px solid rgba(15, 118, 110, 0.25)",
+              borderRadius: "8px",
+              marginBottom: "12px",
+              fontSize: "0.85rem",
+              color: "#0f766e",
+            }}
+          >
+            <strong>Cambio de Producto:</strong> La prenda de retorno reingresa al inventario del almacén y la prenda nueva sale del almacén.
+            <div style={{ marginTop: "4px" }}>
+              Valor neto / Excedente: <strong>{formatMoney(exchangeReady?.netValue ?? totalValue)}</strong>
+            </div>
+          </div>
         ) : null}
 
         <label className="field">

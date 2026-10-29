@@ -106,6 +106,8 @@ export type DocumentLineView = {
 export type InventoryDocumentDetail = InventoryDocumentSummary & {
   lines: DocumentLineView[];
   events?: DocumentStatusEventView[];
+  customerId?: string | null;
+  customerCreditBalance?: number;
   customerTotalWarehouseDebt?: number;
   receivable?: {
     id: string;
@@ -773,15 +775,6 @@ export async function confirmExitDocument(
         code: "exchange_lines_required",
       });
     }
-    const netValue = cleaned.reduce(
-      (s, l) => s + (l.isReturn ? -l.quantity : l.quantity) * (Number(l.unitSalePrice) || 0),
-      0
-    );
-    if (netValue === 0) {
-      throw Object.assign(new Error("exchange_net_value_required"), {
-        code: "exchange_net_value_required",
-      });
-    }
   }
 
   const includeCost = canSeeProductionCost(auth);
@@ -836,7 +829,7 @@ export async function confirmExitDocument(
     }
 
     const subtotal = cleaned.reduce(
-      (sum, line) => sum + line.quantity * (Number(line.unitSalePrice) || 0),
+      (sum, line) => sum + (line.isReturn ? -line.quantity : line.quantity) * (Number(line.unitSalePrice) || 0),
       0
     );
     const maxDiscount = Math.round(subtotal * 0.10);
@@ -852,12 +845,24 @@ export async function confirmExitDocument(
     const discountReason = input.discountReason?.trim() || null;
     const finalNetSaleTotal = Math.max(0, subtotal - discountAmount);
 
-    const initialPaidTotalForMeta = (exitKind === "credit" || exitKind === "sale") && input.paymentBreakdown
-      ? input.paymentBreakdown.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+    let customerId = input.customerId || null;
+    if (!customerId && customerName?.trim()) {
+      customerId = await resolveCustomerId(client, customerName);
+    }
+
+    const initialPaidTotalForMeta = (exitKind === "credit" || exitKind === "sale" || exitKind === "exchange") && input.paymentBreakdown
+      ? Math.round(input.paymentBreakdown.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) * 100) / 100
       : 0;
 
-    if (exitKind === "sale") {
-      if (finalNetSaleTotal > 0 && Math.abs(initialPaidTotalForMeta - finalNetSaleTotal) >= 0.01) {
+    if (exitKind === "sale" || exitKind === "exchange") {
+      if (finalNetSaleTotal > 0 && initialPaidTotalForMeta + 0.01 < finalNetSaleTotal) {
+        throw Object.assign(new Error("payment_total_mismatch"), {
+          code: "payment_total_mismatch",
+          expected: finalNetSaleTotal,
+          received: initialPaidTotalForMeta,
+        });
+      }
+      if (initialPaidTotalForMeta > finalNetSaleTotal + 0.01 && !customerId) {
         throw Object.assign(new Error("payment_total_mismatch"), {
           code: "payment_total_mismatch",
           expected: finalNetSaleTotal,
@@ -866,13 +871,10 @@ export async function confirmExitDocument(
       }
     }
 
-    if (exitKind === "credit" && initialPaidTotalForMeta > finalNetSaleTotal + 0.01) {
-      throw Object.assign(new Error("initial_payment_exceeds_total"), {
-        code: "initial_payment_exceeds_total",
-        total: finalNetSaleTotal,
-        initial: initialPaidTotalForMeta,
-      });
-    }
+    const excessToFavourForMeta =
+      (exitKind === "sale" || exitKind === "credit" || exitKind === "exchange") && initialPaidTotalForMeta > finalNetSaleTotal
+        ? Math.max(0, Math.round((initialPaidTotalForMeta - finalNetSaleTotal) * 100) / 100)
+        : 0;
 
     const creditBalanceForMeta = Math.max(0, Math.round((finalNetSaleTotal - initialPaidTotalForMeta) * 100) / 100);
 
@@ -885,25 +887,22 @@ export async function confirmExitDocument(
       productionOrderId: null,
       paymentMethod: input.paymentMethod || null,
       paymentBreakdown:
-        exitKind === "sale" || exitKind === "credit" ? input.paymentBreakdown || null : null,
+        exitKind === "sale" || exitKind === "credit" || exitKind === "exchange" ? input.paymentBreakdown || null : null,
       isCredit: exitKind === "credit",
       subtotalAmount: subtotal,
       discountAmount,
       discountReason,
       totalAmount: finalNetSaleTotal,
+      paidAmount: initialPaidTotalForMeta,
+      excessToFavour: excessToFavourForMeta > 0 ? excessToFavourForMeta : null,
       creditTotal: exitKind === "credit" ? finalNetSaleTotal : null,
-      creditInitialPayment: exitKind === "credit" ? initialPaidTotalForMeta : null,
+      creditInitialPayment: exitKind === "credit" ? Math.min(finalNetSaleTotal, initialPaidTotalForMeta) : null,
       creditBalance: exitKind === "credit" ? creditBalanceForMeta : null,
       destinationWarehouseId: input.destinationWarehouseId || null,
       destinationWarehouseName,
       destinationWarehouseCode,
       layawayId: input.layawayId || null,
     };
-
-    let customerId = input.customerId || null;
-    if (!customerId && customerName?.trim()) {
-      customerId = await resolveCustomerId(client, customerName);
-    }
 
     const invoiceNumber = await nextInvoiceNumber(client, warehouseId);
 
@@ -1052,26 +1051,33 @@ export async function confirmExitDocument(
         notes: notes?.trim() || null,
         userId: auth.userId,
       });
-    } else if (exitKind === "sale" && input.paymentBreakdown) {
+    } else if ((exitKind === "sale" || exitKind === "exchange") && input.paymentBreakdown) {
       for (const p of input.paymentBreakdown) {
+        const pAmount = Math.round((Number(p.amount) || 0) * 100) / 100;
         if (p.method === "saldo_a_favor" && customerId) {
           const { rows: custRows } = await client.query<{ credit_balance: string }>(
             `SELECT credit_balance::text FROM customers WHERE id = $1::uuid FOR UPDATE`,
             [customerId]
           );
           const currentBalance = Number(custRows[0]?.credit_balance ?? 0);
-          if (currentBalance < p.amount) {
+          if (currentBalance + 0.001 < pAmount) {
             throw Object.assign(new Error("insufficient_credit_balance"), {
               code: "insufficient_credit_balance",
               available: currentBalance,
-              requested: p.amount,
+              requested: pAmount,
             });
           }
           await client.query(
-            `UPDATE customers SET credit_balance = credit_balance - $1 WHERE id = $2::uuid`,
-            [p.amount, customerId]
+            `UPDATE customers SET credit_balance = GREATEST(0, ROUND((credit_balance - $1)::numeric, 2)) WHERE id = $2::uuid`,
+            [pAmount, customerId]
           );
         }
+      }
+      if (excessToFavourForMeta > 0 && customerId) {
+        await client.query(
+          `UPDATE customers SET credit_balance = ROUND((credit_balance + $1)::numeric, 2) WHERE id = $2::uuid`,
+          [excessToFavourForMeta, customerId]
+        );
       }
     }
 
@@ -1640,6 +1646,7 @@ export async function getDocument(
     customer_tax_id: string | null;
     customer_phone: string | null;
     customer_address: string | null;
+    customer_credit_balance: string | null;
     editing_unlocked: boolean;
     edit_count: string;
     last_edit_observation: string | null;
@@ -1672,6 +1679,7 @@ export async function getDocument(
       c.tax_id AS customer_tax_id,
       c.phone AS customer_phone,
       c.address AS customer_address,
+      COALESCE(c.credit_balance, 0)::text AS customer_credit_balance,
       (d.editing_unlocked_at IS NOT NULL) AS editing_unlocked,
       (
         SELECT COUNT(*)::text
@@ -1698,7 +1706,7 @@ export async function getDocument(
     LEFT JOIN users u ON u.id = d.created_by
     LEFT JOIN customers c ON c.id = d.customer_id
     WHERE d.id = $1::uuid AND (${whFilter})
-    GROUP BY d.id, d.warehouse_id, d.customer_id, u.full_name, w.name, w.code, c.display_name, c.tax_id, c.phone, c.address, d.metadata, d.reason, d.discount_amount, d.discount_reason
+    GROUP BY d.id, d.warehouse_id, d.customer_id, u.full_name, w.name, w.code, c.display_name, c.tax_id, c.phone, c.address, c.credit_balance, d.metadata, d.reason, d.discount_amount, d.discount_reason
     `,
     params
   );
@@ -1762,10 +1770,12 @@ export async function getDocument(
     createdByName: head.created_by_name,
     invoiceNumber: head.invoice_number,
     exitKind: head.exit_kind,
+    customerId: head.customer_id ?? null,
     customerName: head.customer_name ?? meta.customerName ?? null,
     customerTaxId: head.customer_tax_id ?? null,
     customerPhone: head.customer_phone ?? null,
     customerAddress: head.customer_address ?? null,
+    customerCreditBalance: Number(head.customer_credit_balance ?? 0),
     relatedInvoiceNumber: meta.relatedInvoiceNumber ?? null,
     productionOrderCode: meta.productionOrderCode ?? null,
     purchaseOrderCode: meta.purchaseOrderCode ?? null,
