@@ -42,7 +42,7 @@ export interface ReceivableSummaryItem {
 
 export interface ReceivablePaymentItem {
   id: string;
-  receivableId: string;
+  receivableId: string | null;
   customerId: string;
   customerName?: string;
   warehouseId: string;
@@ -58,6 +58,7 @@ export interface ReceivablePaymentItem {
   receiptUrls?: string[];
   receiptFilename?: string | null;
   notes: string | null;
+  isInitial?: boolean;
   createdAt: string;
   createdByName: string | null;
 }
@@ -1117,6 +1118,177 @@ export async function addReceivablePayment(
 }
 
 /**
+ * Verifica si un cliente ya tiene registrado un saldo inicial en una sede específica.
+ */
+export async function checkCustomerHasInitial(
+  pool: pg.Pool,
+  customerId: string,
+  warehouseId: string
+): Promise<boolean> {
+  const { rows } = await pool.query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count 
+     FROM receivable_payments 
+     WHERE customer_id = $1::uuid AND warehouse_id = $2::uuid AND is_initial = true`,
+    [customerId, warehouseId]
+  );
+  return Number(rows[0]?.count ?? 0) > 0;
+}
+
+export interface DirectCustomerPaymentInput {
+  warehouseId: string;
+  customerId: string;
+  paymentMethod: string;
+  amount: number;
+  isInitial?: boolean;
+  notes?: string | null;
+  receiptUrl?: string | null;
+  receiptFilename?: string | null;
+  receiptUrls?: string[] | null;
+  userId?: string | null;
+}
+
+/**
+ * Registra un abono directo a favor de un cliente sin requerir factura o crédito previo.
+ * Si isInitial = true, se registra como saldo inicial previo (sin afectar recaudo ni caja de hoy)
+ * y valida que el cliente no tenga ya otro inicial en esa sede.
+ * Si isInitial = false, afecta la caja y recaudos de la sede e incrementa su saldo a favor.
+ */
+export async function addDirectCustomerPayment(
+  pool: pg.Pool,
+  input: DirectCustomerPaymentInput
+): Promise<{
+  payment: ReceivablePaymentItem;
+  customerCreditBalance: number;
+}> {
+  const roundedAmount = Math.round((Number(input.amount) || 0) * 100) / 100;
+  if (!Number.isFinite(roundedAmount) || roundedAmount <= 0) {
+    throw Object.assign(new Error("invalid_amount"), { code: "invalid_amount", message: "El monto debe ser mayor a 0." });
+  }
+
+  const cleanMethod = (input.paymentMethod || "efectivo").trim().toLowerCase();
+  if (cleanMethod === "saldo_a_favor") {
+    throw Object.assign(new Error("invalid_method"), { code: "invalid_method", message: "No puedes abonar a favor usando saldo a favor." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1. Validar cliente
+    const { rows: custRows } = await client.query<{ id: string; display_name: string }>(
+      "SELECT id, display_name FROM customers WHERE id = $1::uuid",
+      [input.customerId]
+    );
+    if (custRows.length === 0) {
+      throw Object.assign(new Error("customer_not_found"), { code: "customer_not_found" });
+    }
+
+    // 2. Validar sede
+    const { rows: whRows } = await client.query<{ id: string; code: string; name: string }>(
+      "SELECT id, code, name FROM warehouses WHERE id = $1::uuid",
+      [input.warehouseId]
+    );
+    if (whRows.length === 0) {
+      throw Object.assign(new Error("warehouse_not_found"), { code: "warehouse_not_found" });
+    }
+
+    // 3. Control de saldo inicial único por cliente en la sede
+    const isInitial = Boolean(input.isInitial);
+    if (isInitial) {
+      const { rows: initialCheck } = await client.query<{ id: string }>(
+        `SELECT id FROM receivable_payments 
+         WHERE customer_id = $1::uuid AND warehouse_id = $2::uuid AND is_initial = true 
+         LIMIT 1`,
+        [input.customerId, input.warehouseId]
+      );
+      if (initialCheck.length > 0) {
+        throw Object.assign(
+          new Error("customer_already_has_initial"),
+          { code: "customer_already_has_initial", message: "Este cliente ya cuenta con un registro inicial en esta sede. Solo se permite un registro inicial por cliente." }
+        );
+      }
+    }
+
+    // 4. Generar consecutivo de recibo de caja
+    const receiptNumber = await nextReceiptNumber(client, input.warehouseId);
+
+    // 5. Soporte fotográfico y comprobantes
+    const finalUrls = (input.receiptUrls && input.receiptUrls.length > 0)
+      ? input.receiptUrls
+      : (input.receiptUrl ? [input.receiptUrl] : []);
+    const primaryUrl = finalUrls[0] || input.receiptUrl || null;
+    const jsonUrls = JSON.stringify(finalUrls);
+
+    // 6. Insertar en receivable_payments con receivable_id = NULL
+    const { rows: payRows } = await client.query<ReceivablePaymentItem>(
+      `
+      INSERT INTO receivable_payments (
+        receivable_id, customer_id, warehouse_id, receipt_number,
+        payment_method, amount, applied_to_debt, excess_to_favour,
+        is_initial, notes, created_by, receipt_url, receipt_filename, receipt_urls
+      )
+      VALUES (NULL, $1::uuid, $2::uuid, $3, $4, $5, 0, $5, $6, $7, $8::uuid, $9, $10, $11::jsonb)
+      RETURNING
+        id::text,
+        receivable_id::text AS "receivableId",
+        customer_id::text AS "customerId",
+        warehouse_id::text AS "warehouseId",
+        receipt_number AS "receiptNumber",
+        payment_method AS "paymentMethod",
+        amount::float,
+        applied_to_debt::float AS "appliedToDebt",
+        excess_to_favour::float AS "excessToFavour",
+        receipt_url AS "receiptUrl",
+        receipt_filename AS "receiptFilename",
+        receipt_urls AS "receiptUrls",
+        notes,
+        is_initial AS "isInitial",
+        created_at AS "createdAt"
+      `,
+      [
+        input.customerId,
+        input.warehouseId,
+        receiptNumber,
+        cleanMethod,
+        roundedAmount,
+        isInitial,
+        input.notes?.trim() || (isInitial ? "Saldo inicial sin factura previa" : "Abono directo sin factura"),
+        input.userId || null,
+        primaryUrl,
+        input.receiptFilename?.trim() || null,
+        jsonUrls,
+      ]
+    );
+
+    // 7. Acreditar saldo a favor en customer_warehouse_credit_balances
+    const newCreditBalance = await creditCustomerWarehouseBalance(
+      client,
+      input.customerId,
+      input.warehouseId,
+      roundedAmount
+    );
+
+    await client.query("COMMIT");
+
+    const paymentItem = payRows[0]!;
+    paymentItem.customerName = custRows[0]!.display_name;
+    paymentItem.warehouseCode = whRows[0]!.code;
+    paymentItem.warehouseName = whRows[0]!.name;
+    paymentItem.invoiceNumber = isInitial ? "Saldo inicial previo" : "Abono directo sin factura";
+
+    return {
+      payment: paymentItem,
+      customerCreditBalance: newCreditBalance,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Consulta el estado de cuenta / ficha de crédito e historial completo de un cliente.
  */
 export async function getCustomerCreditProfile(
@@ -1225,7 +1397,7 @@ export async function getCustomerCreditProfile(
       w.code AS "warehouseCode",
       w.name AS "warehouseName",
       rp.receipt_number AS "receiptNumber",
-      ar.invoice_number AS "invoiceNumber",
+      COALESCE(ar.invoice_number, CASE WHEN rp.is_initial THEN 'Saldo inicial previo' ELSE 'Abono directo sin factura' END) AS "invoiceNumber",
       rp.payment_method AS "paymentMethod",
       rp.amount::float,
       rp.applied_to_debt::float AS "appliedToDebt",
@@ -1234,10 +1406,11 @@ export async function getCustomerCreditProfile(
       rp.receipt_filename AS "receiptFilename",
       COALESCE(rp.receipt_urls, '[]'::jsonb) AS "receiptUrls",
       rp.notes,
+      rp.is_initial AS "isInitial",
       rp.created_at AS "createdAt",
       u.full_name AS "createdByName"
     FROM receivable_payments rp
-    JOIN accounts_receivable ar ON ar.id = rp.receivable_id
+    LEFT JOIN accounts_receivable ar ON ar.id = rp.receivable_id
     JOIN warehouses w ON w.id = rp.warehouse_id
     LEFT JOIN users u ON u.id = rp.created_by
     WHERE rp.customer_id = $1::uuid ${whPayFilter}
@@ -1462,7 +1635,11 @@ export async function getCustomerCreditProfile(
         warehouseName: p.warehouseName || "",
         referenceNumber: p.receiptNumber,
         invoiceNumber: p.invoiceNumber || null,
-        description: `Abono mayor a la deuda en factura ${p.invoiceNumber || ""} (Recibo ${p.receiptNumber})`,
+        description: p.invoiceNumber?.includes("Saldo inicial")
+          ? `Saldo inicial registrado (Recibo ${p.receiptNumber})`
+          : p.receivableId
+          ? `Abono mayor a la deuda en factura ${p.invoiceNumber || ""} (Recibo ${p.receiptNumber})`
+          : `Abono directo sin factura a favor (Recibo ${p.receiptNumber})`,
         createdAt: p.createdAt,
       });
     }
@@ -1572,8 +1749,10 @@ export async function getCustomerCreditProfile(
   const totalCurrentDebt = recRows
     .filter((r) => r.status === "open" || r.status === "partial")
     .reduce((sum, r) => sum + r.balanceAmount, 0);
-  const totalAbonosCount = payRows.length;
-  const totalAbonosAmount = payRows.reduce((sum, p) => sum + p.amount, 0);
+  const totalAbonosCount = payRows.filter((p) => !p.isInitial).length;
+  const totalAbonosAmount = payRows
+    .filter((p) => !p.isInitial)
+    .reduce((sum, p) => sum + p.amount, 0);
 
   return {
     customer: {
@@ -1726,7 +1905,7 @@ export async function listCustomersWithSummary(
         COALESCE(SUM(rp.amount), 0)::float AS total_abonos,
         MAX(rp.created_at) AS last_pay_at
       FROM receivable_payments rp
-      WHERE 1=1
+      WHERE (rp.is_initial IS NOT TRUE)
         ${whPayCond}
       GROUP BY rp.customer_id
     ),
@@ -1754,7 +1933,7 @@ export async function listCustomersWithSummary(
         UNION ALL
         SELECT rp.customer_id, rp.warehouse_id, 0::int AS invoices_count, 0::float AS total_billed, 0::float AS total_debt, COALESCE(SUM(rp.amount), 0)::float AS total_abonos, 0::float AS credit_balance
         FROM receivable_payments rp
-        WHERE 1=1 ${whPayCond}
+        WHERE (rp.is_initial IS NOT TRUE) ${whPayCond}
         GROUP BY rp.customer_id, rp.warehouse_id
         UNION ALL
         SELECT cw.customer_id, cw.warehouse_id, 0::int AS invoices_count, 0::float AS total_billed, 0::float AS total_debt, 0::float AS total_abonos, COALESCE(cw.credit_balance, 0)::float AS credit_balance
@@ -1807,7 +1986,7 @@ export async function listCustomersWithSummary(
       LEFT JOIN ar_agg ON ar_agg.customer_id = c.id
       LEFT JOIN pay_agg ON pay_agg.customer_id = c.id
       LEFT JOIN wh_json ON wh_json.customer_id = c.id
-      WHERE 1=1
+      WHERE c.is_active = true
         ${ (opts.warehouseId || (opts.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0))
           ? `AND (doc_agg.customer_id IS NOT NULL OR ar_agg.customer_id IS NOT NULL OR pay_agg.customer_id IS NOT NULL OR ${creditBalanceExpr} > 0 ${searchCond ? "OR TRUE" : ""})`
           : ""
@@ -2126,7 +2305,7 @@ export async function getPaymentsCashSummary(
       COALESCE(SUM(rp.amount), 0)::text AS amount,
       COUNT(*)::int AS count
     FROM receivable_payments rp
-    WHERE 1=1
+    WHERE (rp.is_initial IS NOT TRUE)
       ${whRpFilter}
       ${dateRpFilter}
     GROUP BY LOWER(TRIM(rp.payment_method))
@@ -2260,7 +2439,7 @@ export async function getPaymentsCashSummary(
       LOWER(TRIM(rp.payment_method)) AS method,
       COALESCE(rp.amount, 0)::float AS amount,
       rp.receipt_number AS reference,
-      ar.invoice_number AS "relatedReference",
+      COALESCE(ar.invoice_number, CASE WHEN rp.is_initial THEN 'Saldo inicial' ELSE 'Abono sin factura' END) AS "relatedReference",
       COALESCE(c.display_name, 'Cliente') AS "thirdPartyName",
       rp.notes,
       w.code AS "warehouseCode",
@@ -2274,7 +2453,7 @@ export async function getPaymentsCashSummary(
     LEFT JOIN accounts_receivable ar ON ar.id = rp.receivable_id
     LEFT JOIN customers c ON c.id = rp.customer_id
     LEFT JOIN users u ON u.id = rp.created_by
-    WHERE 1=1
+    WHERE (rp.is_initial IS NOT TRUE)
       ${whRpFilter}
       ${dateRpFilter}
   `;
@@ -2946,4 +3125,152 @@ export async function getPaymentsCashSummary(
     methods,
     operations,
   };
+}
+
+/**
+ * Eliminar un cliente del sistema.
+ * Regla de negocio: Solo permitido desde la Sede Administrativa.
+ * Si tiene historial transaccional cerrado (ventas, créditos cerrados, pagos),
+ * se archiva (is_active = false) protegiendo la integridad y trazabilidad.
+ * Si no tiene ningún movimiento ni comprobante, se elimina definitivamente.
+ */
+export async function deleteCustomer(
+  pool: pg.Pool,
+  customerId: string
+): Promise<{ ok: boolean; action: "deleted" | "deactivated"; message: string }> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1. Obtener cliente y bloquear fila
+    const { rows: custRows } = await client.query<{
+      id: string;
+      display_name: string;
+      credit_balance: string;
+      is_active: boolean;
+    }>(
+      `SELECT id::text, display_name, COALESCE(credit_balance, 0)::text AS credit_balance, is_active 
+       FROM customers 
+       WHERE id = $1::uuid 
+       FOR UPDATE`,
+      [customerId]
+    );
+    if (!custRows[0]) {
+      await client.query("ROLLBACK");
+      throw Object.assign(new Error("customer_not_found"), { code: "customer_not_found", statusCode: 404 });
+    }
+    const customer = custRows[0];
+
+    // 2. Validar que no tenga saldo a favor acumulado en customers o por sedes
+    const totalCreditBalance = Number(customer.credit_balance || 0);
+    const { rows: whBalances } = await client.query<{ total: string }>(
+      `SELECT COALESCE(SUM(credit_balance), 0)::text AS total 
+       FROM customer_warehouse_credit_balances 
+       WHERE customer_id = $1::uuid`,
+      [customerId]
+    );
+    const totalWhBalance = Number(whBalances[0]?.total || 0);
+
+    if (totalCreditBalance > 0.01 || totalWhBalance > 0.01) {
+      await client.query("ROLLBACK");
+      const balanceToShow = Math.max(totalCreditBalance, totalWhBalance);
+      throw Object.assign(
+        new Error(
+          `No se puede eliminar el cliente "${customer.display_name}" porque tiene un saldo a favor de $${Math.round(balanceToShow).toLocaleString("es-CO")}. Debe consumir o retirar el saldo a favor antes de eliminarlo.`
+        ),
+        { code: "customer_has_credit_balance", statusCode: 400 }
+      );
+    }
+
+    // 3. Validar que no tenga cartera o deudas activas pendientes
+    const { rows: debtRows } = await client.query<{ total: string; count: string }>(
+      `SELECT COALESCE(SUM(balance_amount), 0)::text AS total, COUNT(*)::text AS count 
+       FROM accounts_receivable 
+       WHERE customer_id = $1::uuid AND status IN ('open', 'partial')`,
+      [customerId]
+    );
+    const pendingDebt = Number(debtRows[0]?.total || 0);
+    if (pendingDebt > 0.01) {
+      await client.query("ROLLBACK");
+      throw Object.assign(
+        new Error(
+          `No se puede eliminar el cliente "${customer.display_name}" porque tiene deudas activas por cobrar de $${Math.round(pendingDebt).toLocaleString("es-CO")}. Debe saldar o cancelar los créditos antes de eliminarlo.`
+        ),
+        { code: "customer_has_pending_debt", statusCode: 400 }
+      );
+    }
+
+    // 4. Validar que no tenga apartados activos (plan separé)
+    const { rows: layawayRows } = await client.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count 
+       FROM layaways 
+       WHERE customer_id = $1::uuid AND status IN ('open', 'partial')`,
+      [customerId]
+    );
+    const pendingLayaways = Number(layawayRows[0]?.count || 0);
+    if (pendingLayaways > 0) {
+      await client.query("ROLLBACK");
+      throw Object.assign(
+        new Error(
+          `No se puede eliminar el cliente "${customer.display_name}" porque tiene ${pendingLayaways} apartado(s) (plan separé) activo(s). Debe liquidar o cancelar los apartados antes de eliminarlo.`
+        ),
+        { code: "customer_has_active_layaways", statusCode: 400 }
+      );
+    }
+
+    // 5. Verificar si tiene referencias históricas cerradas
+    const { rows: historyRows } = await client.query<{
+      invoices: string;
+      credits: string;
+      payments: string;
+      layaways: string;
+    }>(
+      `
+      SELECT
+        (SELECT COUNT(*)::text FROM inventory_documents WHERE customer_id = $1::uuid) AS invoices,
+        (SELECT COUNT(*)::text FROM accounts_receivable WHERE customer_id = $1::uuid) AS credits,
+        (SELECT COUNT(*)::text FROM receivable_payments WHERE customer_id = $1::uuid) AS payments,
+        (SELECT COUNT(*)::text FROM layaways WHERE customer_id = $1::uuid) AS layaways
+      `,
+      [customerId]
+    );
+
+    const hasHistory =
+      Number(historyRows[0]?.invoices || 0) > 0 ||
+      Number(historyRows[0]?.credits || 0) > 0 ||
+      Number(historyRows[0]?.payments || 0) > 0 ||
+      Number(historyRows[0]?.layaways || 0) > 0;
+
+    if (hasHistory) {
+      await client.query(
+        `UPDATE customers SET is_active = false WHERE id = $1::uuid`,
+        [customerId]
+      );
+      await client.query("COMMIT");
+      return {
+        ok: true,
+        action: "deactivated",
+        message: `El cliente "${customer.display_name}" tiene facturas o pagos históricos registrados, por lo que fue desactivado y archivado para proteger la contabilidad.`,
+      };
+    }
+
+    // Si no tiene ningún registro: eliminación física
+    await client.query(
+      `DELETE FROM customer_warehouse_credit_balances WHERE customer_id = $1::uuid`,
+      [customerId]
+    );
+    await client.query(`DELETE FROM customers WHERE id = $1::uuid`, [customerId]);
+    await client.query("COMMIT");
+
+    return {
+      ok: true,
+      action: "deleted",
+      message: `El cliente "${customer.display_name}" fue eliminado definitivamente del sistema.`,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }

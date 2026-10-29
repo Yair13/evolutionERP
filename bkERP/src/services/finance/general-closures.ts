@@ -325,7 +325,7 @@ export async function getGeneralClosureData(
       COALESCE(SUM(rp.amount), 0)::text AS amount,
       COUNT(*)::int AS count
     FROM receivable_payments rp
-    WHERE 1=1
+    WHERE (rp.is_initial IS NOT TRUE)
       ${whFilterRp}
       ${timeFilterRp}
     GROUP BY LOWER(TRIM(rp.payment_method))

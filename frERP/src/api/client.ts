@@ -3,8 +3,14 @@ const base = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/
 async function parseError(res: Response): Promise<string> {
   try {
     const data: unknown = await res.json();
-    if (data && typeof data === "object" && "error" in data && typeof (data as { error: unknown }).error === "string") {
-      return (data as { error: string }).error;
+    if (data && typeof data === "object") {
+      const obj = data as Record<string, unknown>;
+      if (typeof obj.message === "string" && obj.message.trim()) {
+        return obj.message;
+      }
+      if (typeof obj.error === "string" && obj.error.trim()) {
+        return obj.error;
+      }
     }
   } catch {
     /* ignore */

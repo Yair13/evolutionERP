@@ -13,6 +13,7 @@ import {
   Wallet,
   X,
   ChevronRight,
+  Trash2,
   ArrowDownLeft,
 } from "lucide-react";
 import {
@@ -24,6 +25,7 @@ import {
 import {
   createCustomer,
   updateCustomer,
+  deleteCustomer,
   fetchDocument,
 } from "../../api/inventory.js";
 import type { InventoryDocumentDetail } from "../inventory/inventory.types.js";
@@ -32,6 +34,7 @@ import { useWarehouse } from "../../context/WarehouseContext.js";
 import { formatBogotaDateTime } from "../../lib/dateUtils.js";
 import { DocumentInvoicePrint } from "../../components/inventory/DocumentInvoicePrint.js";
 import { AddPaymentModal } from "../../components/finance/AddPaymentModal.js";
+import { AddDirectPaymentModal } from "../../components/finance/AddDirectPaymentModal.js";
 
 function formatMoney(n: number | null | undefined): string {
   const val = Math.round((Number(n) || 0) * 100) / 100;
@@ -125,7 +128,36 @@ export function CustomersPage() {
   // Modal para ver foto ampliada de recibo
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
 
+  // Modal para abono directo sin factura / saldo a favor
+  const [openDirectPayment, setOpenDirectPayment] = useState(false);
+
   // Carga del directorio
+    const handleDeleteCustomer = async (cust: { id: string; displayName: string }) => {
+    if (!isAllWarehouses) {
+      alert("Solo se pueden eliminar clientes desde la Sede Administrativa.");
+      return;
+    }
+    const ok = window.confirm(
+      `¿Estás seguro de que deseas eliminar al cliente "${cust.displayName}"?\n\n` +
+      `Esta acción solo está permitida desde la Sede Administrativa.\n` +
+      `• Si no tiene movimientos ni créditos registrados, se eliminará definitivamente.\n` +
+      `• Si tiene historial comercial cerrado, se archivará para proteger la contabilidad.\n` +
+      `• No podrá eliminarse si tiene deudas pendientes o saldos a favor.`
+    );
+    if (!ok) return;
+
+    try {
+      const res = await deleteCustomer(token!, cust.id);
+      alert(res.message || "Operación realizada con éxito.");
+      if (selectedCustomerId === cust.id) {
+        setSelectedCustomerId(null);
+      }
+      void loadDirectory();
+    } catch (err: any) {
+      alert(err?.message || "Error al eliminar el cliente.");
+    }
+  };
+
   const loadDirectory = useCallback(async () => {
     if (!token || whLoading) return;
     if (!isAllWarehouses && !warehouseId) return;
@@ -352,15 +384,26 @@ export function CustomersPage() {
               ← Volver al Directorio
             </button>
           ) : (
-            <button
-              type="button"
-              className="fin-btn fin-btn--primary"
-              onClick={() => setOpenCreateCustomer(true)}
-              style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
-            >
-              <PlusCircle size={17} />
-              <span>+ Nuevo Cliente</span>
-            </button>
+            <>
+              <button
+                type="button"
+                className="fin-btn fin-btn--emerald"
+                onClick={() => setOpenDirectPayment(true)}
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
+              >
+                <Wallet size={17} />
+                <span>+ Abono sin Factura</span>
+              </button>
+              <button
+                type="button"
+                className="fin-btn fin-btn--primary"
+                onClick={() => setOpenCreateCustomer(true)}
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
+              >
+                <PlusCircle size={17} />
+                <span>+ Nuevo Cliente</span>
+              </button>
+            </>
           )}
 
           <button
@@ -726,6 +769,18 @@ export function CustomersPage() {
                               <Eye size={14} />
                               <span>Ver Ficha</span>
                             </button>
+                            {isAllWarehouses && (
+                              <button
+                                type="button"
+                                className="fin-btn fin-btn--ghost fin-btn--sm"
+                                onClick={() => void handleDeleteCustomer(c)}
+                                title="Eliminar cliente (solo Sede Administrativa)"
+                                style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", color: "#dc2626" }}
+                              >
+                                <Trash2 size={13} />
+                                <span>Eliminar</span>
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -809,7 +864,16 @@ export function CustomersPage() {
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: "0.5rem" }}>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="fin-btn fin-btn--emerald fin-btn--sm"
+                    onClick={() => setOpenDirectPayment(true)}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
+                  >
+                    <Wallet size={14} />
+                    <span>+ Abonar sin Factura</span>
+                  </button>
                   <button
                     type="button"
                     className="fin-btn fin-btn--ghost fin-btn--sm"
@@ -819,6 +883,25 @@ export function CustomersPage() {
                     <Edit2 size={14} />
                     <span>Editar Datos</span>
                   </button>
+                  {isAllWarehouses && (
+                    <button
+                      type="button"
+                      className="fin-btn fin-btn--ghost fin-btn--sm"
+                      onClick={() => {
+                        if (customerProfile) {
+                          void handleDeleteCustomer({
+                            id: customerProfile.customer.id,
+                            displayName: customerProfile.customer.displayName,
+                          });
+                        }
+                      }}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", color: "#dc2626" }}
+                      title="Eliminar cliente (solo Sede Administrativa)"
+                    >
+                      <Trash2 size={14} />
+                      <span>Eliminar Cliente</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1741,6 +1824,21 @@ export function CustomersPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Modal para abono directo sin factura / saldo a favor */}
+      {openDirectPayment && (
+        <AddDirectPaymentModal
+          open={openDirectPayment}
+          onClose={() => setOpenDirectPayment(false)}
+          defaultWarehouseId={effectiveWarehouseId || undefined}
+          defaultCustomerId={customerProfile?.customer.id || undefined}
+          defaultCustomerName={customerProfile?.customer.displayName || undefined}
+          onSuccess={() => {
+            if (selectedCustomerId) void loadProfile(selectedCustomerId);
+            void loadDirectory();
+          }}
+        />
       )}
     </div>
   );

@@ -13,6 +13,7 @@ import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { formatBogotaDate } from "../../lib/dateUtils.js";
 import { AddPaymentModal } from "../../components/finance/AddPaymentModal.js";
+import { AddDirectPaymentModal } from "../../components/finance/AddDirectPaymentModal.js";
 import { ReceivableDetailModal } from "../../components/finance/ReceivableDetailModal.js";
 import { CreateReceivableModal } from "../../components/finance/CreateReceivableModal.js";
 import {
@@ -105,6 +106,7 @@ export function ReceivablesPage() {
 
   // Modales
   const [openCreateReceivable, setOpenCreateReceivable] = useState(false);
+  const [openDirectPayment, setOpenDirectPayment] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleDeleteInitial = async (c: ReceivableSummaryItem) => {
@@ -250,6 +252,16 @@ export function ReceivablesPage() {
 
         {/* Pestañas de navegación y acciones */}
         <div className="fin-header__actions" style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="fin-btn fin-btn--emerald"
+            onClick={() => setOpenDirectPayment(true)}
+            style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
+          >
+            <Wallet size={17} />
+            <span>+ Abono sin Factura</span>
+          </button>
+
           <button
             type="button"
             className="fin-btn fin-btn--primary"
@@ -994,6 +1006,22 @@ export function ReceivablesPage() {
           onOpenAddPayment={(detail) => {
             setActiveReceivableDetailId(null);
             setActiveReceivableForPayment(detail);
+          }}
+        />
+      )}
+
+      {/* Modal para Abono directo sin factura / saldo a favor */}
+      {openDirectPayment && (
+        <AddDirectPaymentModal
+          open={openDirectPayment}
+          onClose={() => setOpenDirectPayment(false)}
+          defaultWarehouseId={effectiveWarehouseId || warehouseId || undefined}
+          defaultCustomerId={selectedCustId || undefined}
+          defaultCustomerName={custProfile?.customer.displayName || undefined}
+          onSuccess={() => {
+            void loadCredits();
+            if (selectedCustId) void loadCustomerProfile(selectedCustId);
+            if (activeTab === "report") void loadReport();
           }}
         />
       )}

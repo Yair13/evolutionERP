@@ -3,6 +3,8 @@ import { getPool } from "../db.js";
 import { firstPathParam } from "../lib/path-params.js";
 import { canManageInventory } from "../lib/inventory-permissions.js";
 import { isUuid } from "../lib/uuid.js";
+import { isAdminSessionRequest } from "../lib/outflow-policy.js";
+import { deleteCustomer } from "../services/finance/receivables.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { requireAnyRole } from "../middleware/requireRoles.js";
 import { requireWarehouse, resolveWarehouseOptional } from "../middleware/requireWarehouse.js";
@@ -1391,10 +1393,11 @@ export function createInventoryRouter(): Router {
           ${creditBalanceExpr} AS "creditBalance",
           ${totalDebtExpr} AS "totalDebt"
         FROM customers c
+        WHERE c.is_active = true
       `;
 
       if (qParamIdx) {
-        queryStr += ` WHERE c.display_name ILIKE $${qParamIdx} OR c.tax_id ILIKE $${qParamIdx} OR c.phone ILIKE $${qParamIdx}`;
+        queryStr += ` AND (c.display_name ILIKE $${qParamIdx} OR c.tax_id ILIKE $${qParamIdx} OR c.phone ILIKE $${qParamIdx})`;
       }
 
       queryStr += ` ORDER BY (${creditBalanceExpr} > 0) DESC, c.display_name LIMIT 60`;
@@ -1468,6 +1471,55 @@ export function createInventoryRouter(): Router {
     } catch (err: any) {
       if (err.code === "23505") {
         res.status(409).json({ error: "customer_already_exists" });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  /**
+   * Eliminar un cliente.
+   * Regla de negocio: Solo permitido desde la Sede Administrativa.
+   */
+  r.delete("/customers/:id", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const isFromAdmin = isAdminSessionRequest(req);
+    const hasAdminAccess = req.auth?.hasAdminAccess === true || req.auth?.warehouseIds === null;
+
+    if (!isFromAdmin || !hasAdminAccess) {
+      res.status(403).json({
+        error: "admin_headquarters_required",
+        message: "Solo se pueden eliminar clientes desde la Sede Administrativa.",
+      });
+      return;
+    }
+
+    const id = firstPathParam(req.params.id);
+    if (!id || !isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+
+    try {
+      const result = await deleteCustomer(pool, id);
+      res.json(result);
+    } catch (err: any) {
+      if (
+        err?.statusCode ||
+        err?.code === "customer_not_found" ||
+        err?.code === "customer_has_credit_balance" ||
+        err?.code === "customer_has_pending_debt" ||
+        err?.code === "customer_has_active_layaways"
+      ) {
+        res.status(err.statusCode || 400).json({
+          error: err.code || "bad_request",
+          message: err.message,
+        });
         return;
       }
       next(err);

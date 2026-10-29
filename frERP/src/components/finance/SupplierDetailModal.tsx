@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   fetchSupplierProfile,
+  deleteSupplier,
   type SupplierProfile,
   type SupplierItem,
   type PayableSummaryItem,
 } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
+import { useWarehouse } from "../../context/WarehouseContext.js";
 import { formatBogotaDateTime, formatBogotaDate } from "../../lib/dateUtils.js";
 import {
   Building2,
@@ -19,6 +21,7 @@ import {
   Wallet,
   Receipt,
   Edit2,
+  Trash2,
   RefreshCw,
   PlusCircle,
   FileText,
@@ -66,6 +69,31 @@ export function SupplierDetailModal({
   onViewReceiptPhoto,
 }: Props) {
   const { token } = useAuth();
+  const { isAllWarehouses } = useWarehouse();
+
+  const handleDelete = async () => {
+    if (!profile) return;
+    if (!isAllWarehouses) {
+      alert("Solo se pueden eliminar proveedores desde la Sede Administrativa.");
+      return;
+    }
+    const ok = window.confirm(
+      `¿Estás seguro de que deseas eliminar al proveedor "${profile.supplier.name}"?\n\n` +
+      `Esta acción solo está permitida desde la Sede Administrativa.\n` +
+      `• Si no tiene facturas ni comprobantes registrados, se eliminará definitivamente.\n` +
+      `• Si tiene historial comercial cerrado, se archivará para proteger la contabilidad.\n` +
+      `• No podrá eliminarse si tiene cuentas pendientes de pago o saldos a favor.`
+    );
+    if (!ok) return;
+
+    try {
+      const res = await deleteSupplier(token!, profile.supplier.id);
+      alert(res.message || "Proveedor eliminado con éxito.");
+      onClose();
+    } catch (err: any) {
+      alert(err?.message || "Error al eliminar el proveedor.");
+    }
+  };
   const [profile, setProfile] = useState<SupplierProfile | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -257,6 +285,18 @@ export function SupplierDetailModal({
                   <PlusCircle size={14} />
                   <span>Nueva Factura</span>
                 </button>
+                {isAllWarehouses && (
+                  <button
+                    type="button"
+                    className="fin-btn fin-btn--ghost fin-btn--sm"
+                    onClick={() => void handleDelete()}
+                    title="Eliminar proveedor (solo Sede Administrativa)"
+                    style={{ color: "#dc2626", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <Trash2 size={14} />
+                    <span>Eliminar Proveedor</span>
+                  </button>
+                )}
               </>
             )}
             <button

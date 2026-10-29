@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   fetchPayables,
   fetchSuppliers,
+  deleteSupplier,
   type PayableSummaryItem,
   type SupplierItem,
   type PayableStatus,
@@ -34,6 +35,7 @@ import {
   MapPin,
   X,
   Users,
+  Trash2,
 } from "lucide-react";
 
 function formatMoney(n: number | null | undefined): string {
@@ -136,6 +138,33 @@ export function PayablesPage() {
   }, [token, isAllWarehouses, warehouseId, selectedWarehouse, selectedStatus, dueDateFrom, dueDateTo, searchPayables, payablesPage, whLoading]);
 
   // Cargar Proveedores
+    const handleDeleteSupplier = async (sup: { id: string; name: string }) => {
+    if (!isAllWarehouses) {
+      alert("Solo se pueden eliminar proveedores desde la Sede Administrativa.");
+      return;
+    }
+    const ok = window.confirm(
+      `¿Estás seguro de que deseas eliminar al proveedor "${sup.name}"?\n\n` +
+      `Esta acción solo está permitida desde la Sede Administrativa.\n` +
+      `• Si no tiene facturas ni comprobantes registrados, se eliminará definitivamente.\n` +
+      `• Si tiene historial comercial cerrado, se archivará para proteger la contabilidad.\n` +
+      `• No podrá eliminarse si tiene cuentas pendientes de pago o saldos a favor.`
+    );
+    if (!ok) return;
+
+    try {
+      const res = await deleteSupplier(token!, sup.id);
+      alert(res.message || "Operación realizada con éxito.");
+      if (selectedDetailSupplierId === sup.id) {
+        setSelectedDetailSupplierId(null);
+      }
+      void loadSuppliers();
+      void loadPayables();
+    } catch (err: any) {
+      alert(err?.message || "Error al eliminar el proveedor.");
+    }
+  };
+
   const loadSuppliers = useCallback(async () => {
     if (!token) return;
     setLoading(true);
@@ -962,6 +991,19 @@ export function PayablesPage() {
                         <PlusCircle size={13} />
                         <span>Factura</span>
                       </button>
+
+                      {isAllWarehouses && (
+                        <button
+                          type="button"
+                          className="fin-btn fin-btn--ghost fin-btn--sm"
+                          onClick={() => void handleDeleteSupplier(s)}
+                          title="Eliminar proveedor (solo Sede Administrativa)"
+                          style={{ color: "#dc2626" }}
+                        >
+                          <Trash2 size={13} />
+                          <span>Eliminar</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

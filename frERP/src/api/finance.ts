@@ -29,7 +29,7 @@ export interface ReceivableSummaryItem {
 
 export interface ReceivablePaymentItem {
   id: string;
-  receivableId: string;
+  receivableId: string | null;
   customerId: string;
   customerName?: string;
   warehouseId: string;
@@ -45,6 +45,7 @@ export interface ReceivablePaymentItem {
   receiptUrls?: string[];
   receiptFilename?: string | null;
   notes: string | null;
+  isInitial?: boolean;
   createdAt: string;
   createdByName: string | null;
 }
@@ -386,6 +387,42 @@ export async function addReceivablePayment(
     newStatus: ReceivableStatus;
     customerCreditBalance: number;
   }>(`/finance/receivables/${id}/payments`, data, token);
+}
+
+export interface AddDirectCustomerPaymentInput {
+  warehouseId: string;
+  customerId: string;
+  paymentMethod: string;
+  amount: number;
+  isInitial?: boolean;
+  notes?: string | null;
+  receiptUrl?: string | null;
+  receiptFilename?: string | null;
+  receiptUrls?: string[] | null;
+}
+
+export async function addDirectCustomerPayment(
+  token: string,
+  input: AddDirectCustomerPaymentInput
+): Promise<{
+  payment: ReceivablePaymentItem;
+  customerCreditBalance: number;
+}> {
+  return apiPost<{
+    payment: ReceivablePaymentItem;
+    customerCreditBalance: number;
+  }>("/finance/receivables/direct-payment", input, token);
+}
+
+export async function checkCustomerHasInitial(
+  token: string,
+  customerId: string,
+  warehouseId: string
+): Promise<{ hasInitial: boolean }> {
+  return apiGet<{ hasInitial: boolean }>(
+    `/finance/receivables/check-initial?customerId=${encodeURIComponent(customerId)}&warehouseId=${encodeURIComponent(warehouseId)}`,
+    token
+  );
 }
 
 export async function fetchCustomerCreditProfile(token: string, customerId: string, warehouseId?: string | null) {
@@ -1841,3 +1878,10 @@ export async function fetchGeneralClosureDetail(token: string, id: string) {
 
 
 
+
+export async function deleteSupplier(token: string, supplierId: string) {
+  return apiDelete<{ ok: boolean; action: string; message: string }>(
+    `/finance/suppliers/${encodeURIComponent(supplierId)}`,
+    token
+  );
+}

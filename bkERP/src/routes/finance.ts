@@ -15,6 +15,8 @@ import {
   createManualReceivable,
   deleteManualReceivable,
   resetInitialReceivablesByWarehouse,
+  addDirectCustomerPayment,
+  checkCustomerHasInitial,
 } from "../services/finance/receivables.js";
 import {
   addLayawayPayment,
@@ -27,6 +29,7 @@ import {
 import {
   createSupplier,
   updateSupplier,
+  deleteSupplier,
   listSuppliers,
   getSupplierProfile,
   createAccountPayable,
@@ -445,6 +448,136 @@ export function createFinanceRouter(): Router {
         res.status(404).json({ error: "receivable_not_found" });
         return;
       }
+      next(err);
+    }
+  });
+
+  /**
+   * Registra un abono directo a favor de un cliente sin requerir factura o crédito previo.
+   * Si isInitial = true, se valida que el cliente no tenga ya inicial en esa sede y no suma al recaudo de hoy.
+   */
+  r.post("/receivables/direct-payment", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const warehouseId =
+      typeof req.body?.warehouseId === "string" && isUuid(req.body.warehouseId)
+        ? req.body.warehouseId
+        : null;
+    if (!warehouseId) {
+      res.status(400).json({ error: "invalid_warehouse_id" });
+      return;
+    }
+
+    const customerId =
+      typeof req.body?.customerId === "string" && isUuid(req.body.customerId)
+        ? req.body.customerId
+        : null;
+    if (!customerId) {
+      res.status(400).json({ error: "invalid_customer_id" });
+      return;
+    }
+
+    const auth = req.auth!;
+    const canAccessWarehouse =
+      auth.hasAdminAccess === true ||
+      auth.warehouseIds === null ||
+      (auth.warehouseIds && auth.warehouseIds.includes(warehouseId));
+    if (!canAccessWarehouse) {
+      res.status(403).json({ error: "warehouse_forbidden" });
+      return;
+    }
+
+    const amount = Number(req.body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      res.status(400).json({ error: "invalid_amount", message: "El monto debe ser mayor a 0." });
+      return;
+    }
+
+    const paymentMethod = typeof req.body?.paymentMethod === "string" ? req.body.paymentMethod : "efectivo";
+    const isInitial = Boolean(req.body?.isInitial);
+
+    if (isInitial) {
+      const isSuperAdmin = auth.warehouseIds === null;
+      const isFromAdmin = isAdminSessionRequest(req);
+      const canManageInitial = isSuperAdmin || (isFromAdmin && auth.hasAdminAccess);
+      if (!canManageInitial) {
+        res.status(403).json({
+          error: "forbidden_initial_payment",
+          message: "Únicamente el administrador desde la Sede Administrativa puede registrar saldos iniciales.",
+        });
+        return;
+      }
+    }
+
+    const notes = typeof req.body?.notes === "string" ? req.body.notes : null;
+    const receiptUrl = typeof req.body?.receiptUrl === "string" ? req.body.receiptUrl : null;
+    const receiptFilename = typeof req.body?.receiptFilename === "string" ? req.body.receiptFilename : null;
+    const receiptUrls = Array.isArray(req.body?.receiptUrls)
+      ? req.body.receiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
+      : null;
+
+    try {
+      const result = await addDirectCustomerPayment(pool, {
+        warehouseId,
+        customerId,
+        paymentMethod,
+        amount,
+        isInitial,
+        notes,
+        receiptUrl,
+        receiptFilename,
+        receiptUrls,
+        userId: auth.userId,
+      });
+      res.status(201).json(result);
+    } catch (err: any) {
+      if (err.code === "customer_already_has_initial") {
+        res.status(409).json({
+          error: "customer_already_has_initial",
+          message: err.message || "Este cliente ya cuenta con un registro inicial en esta sede.",
+        });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  /**
+   * Consulta si un cliente ya tiene registrado un saldo inicial en una sede.
+   */
+  r.get("/receivables/check-initial", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const warehouseId =
+      typeof req.query.warehouseId === "string" && isUuid(req.query.warehouseId)
+        ? req.query.warehouseId
+        : null;
+    if (!warehouseId) {
+      res.status(400).json({ error: "invalid_warehouse_id" });
+      return;
+    }
+
+    const customerId =
+      typeof req.query.customerId === "string" && isUuid(req.query.customerId)
+        ? req.query.customerId
+        : null;
+    if (!customerId) {
+      res.status(400).json({ error: "invalid_customer_id" });
+      return;
+    }
+
+    try {
+      const hasInitial = await checkCustomerHasInitial(pool, customerId, warehouseId);
+      res.json({ hasInitial });
+    } catch (err: any) {
       next(err);
     }
   });
@@ -1083,6 +1216,54 @@ export function createFinanceRouter(): Router {
     } catch (err: any) {
       if (err.code === "supplier_not_found") {
         res.status(404).json({ error: "supplier_not_found" });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  /**
+   * Eliminar un proveedor.
+   * Regla de negocio: Solo permitido desde la Sede Administrativa.
+   */
+  r.delete("/suppliers/:id", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const isFromAdmin = isAdminSessionRequest(req);
+    const hasAdminAccess = req.auth?.hasAdminAccess === true || req.auth?.warehouseIds === null;
+
+    if (!isFromAdmin || !hasAdminAccess) {
+      res.status(403).json({
+        error: "admin_headquarters_required",
+        message: "Solo se pueden eliminar proveedores desde la Sede Administrativa.",
+      });
+      return;
+    }
+
+    const id = String(req.params.id);
+    if (!isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+
+    try {
+      const result = await deleteSupplier(pool, id);
+      res.json(result);
+    } catch (err: any) {
+      if (
+        err?.statusCode ||
+        err?.code === "supplier_not_found" ||
+        err?.code === "supplier_has_credit_balance" ||
+        err?.code === "supplier_has_pending_debt"
+      ) {
+        res.status(err.statusCode || 400).json({
+          error: err.code || "bad_request",
+          message: err.message,
+        });
         return;
       }
       next(err);

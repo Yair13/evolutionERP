@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "./client.js";
+import { apiGet, apiPost, apiDelete } from "./client.js";
 import type {
   CatalogItem,
   CountKind,
@@ -631,6 +631,13 @@ export async function createCustomer(
     throw new Error(msg);
   }
   return res.json() as Promise<{ item: Customer }>;
+}
+
+export async function deleteCustomer(token: string, customerId: string) {
+  return apiDelete<{ ok: boolean; action: string; message: string }>(
+    `/inventory/customers/${encodeURIComponent(customerId)}`,
+    token
+  );
 }
 
 export async function updateCustomer(

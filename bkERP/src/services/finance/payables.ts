@@ -317,7 +317,7 @@ export async function listSuppliers(
   const conditions: string[] = ["1=1"];
   const params: any[] = [];
 
-  if (opts?.activeOnly) {
+  if (opts?.activeOnly !== false) {
     conditions.push("s.is_active = true");
   }
 
@@ -1247,4 +1247,114 @@ export async function getEgressSummary(
   const totalDisbursed = methods.reduce((s, m) => s + m.totalAmount, 0);
 
   return { totalDisbursed, methods };
+}
+
+/**
+ * Eliminar un proveedor.
+ * Solo permitido desde la Sede Administrativa.
+ * Si tiene facturas o pagos históricos cerrados, se archiva (is_active = false).
+ * Si no tiene ningún registro asociado, se elimina físicamente de la base de datos.
+ */
+export async function deleteSupplier(
+  pool: pg.Pool,
+  supplierId: string
+): Promise<{ ok: boolean; action: "deleted" | "deactivated"; message: string }> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1. Obtener datos del proveedor
+    const { rows: supRows } = await client.query<{
+      id: string;
+      name: string;
+      credit_balance: string;
+      is_active: boolean;
+    }>(
+      `SELECT id::text, name, COALESCE(credit_balance, 0)::text AS credit_balance, is_active FROM suppliers WHERE id = $1::uuid FOR UPDATE`,
+      [supplierId]
+    );
+    if (!supRows[0]) {
+      await client.query("ROLLBACK");
+      throw Object.assign(new Error("supplier_not_found"), { code: "supplier_not_found", statusCode: 404 });
+    }
+    const supplier = supRows[0];
+
+    // 2. Validar que no tenga saldo a favor acumulado
+    const creditBalance = Number(supplier.credit_balance || 0);
+    if (creditBalance > 0.01) {
+      await client.query("ROLLBACK");
+      throw Object.assign(
+        new Error(
+          `No se puede eliminar el proveedor "${supplier.name}" porque tiene un saldo a favor de la empresa por $${Math.round(creditBalance).toLocaleString("es-CO")}. Debe utilizar o cruzar el saldo a favor antes de eliminarlo.`
+        ),
+        { code: "supplier_has_credit_balance", statusCode: 400 }
+      );
+    }
+
+    // 3. Validar que no tenga cuentas por pagar pendientes
+    const { rows: debtRows } = await client.query<{ total: string; count: string }>(
+      `SELECT COALESCE(SUM(balance_amount), 0)::text AS total, COUNT(*)::text AS count 
+       FROM accounts_payable 
+       WHERE supplier_id = $1::uuid AND status IN ('open', 'partial')`,
+      [supplierId]
+    );
+    const pendingDebt = Number(debtRows[0]?.total || 0);
+    if (pendingDebt > 0.01) {
+      await client.query("ROLLBACK");
+      throw Object.assign(
+        new Error(
+          `No se puede eliminar el proveedor "${supplier.name}" porque tiene facturas pendientes por pagar por $${Math.round(pendingDebt).toLocaleString("es-CO")}. Debe liquidar o cancelar las cuentas antes de eliminarlo.`
+        ),
+        { code: "supplier_has_pending_debt", statusCode: 400 }
+      );
+    }
+
+    // 4. Verificar si tiene registros históricos cerrados
+    const { rows: historyRows } = await client.query<{
+      payables: string;
+      payments: string;
+      egress: string;
+    }>(
+      `
+      SELECT
+        (SELECT COUNT(*)::text FROM accounts_payable WHERE supplier_id = $1::uuid) AS payables,
+        (SELECT COUNT(*)::text FROM payable_payments WHERE supplier_id = $1::uuid) AS payments,
+        (SELECT COUNT(*)::text FROM cash_egress_vouchers WHERE supplier_id = $1::uuid) AS egress
+      `,
+      [supplierId]
+    );
+
+    const hasHistory =
+      Number(historyRows[0]?.payables || 0) > 0 ||
+      Number(historyRows[0]?.payments || 0) > 0 ||
+      Number(historyRows[0]?.egress || 0) > 0;
+
+    if (hasHistory) {
+      await client.query(
+        `UPDATE suppliers SET is_active = false, updated_at = now() WHERE id = $1::uuid`,
+        [supplierId]
+      );
+      await client.query("COMMIT");
+      return {
+        ok: true,
+        action: "deactivated",
+        message: `El proveedor "${supplier.name}" tiene comprobantes o facturas históricas registradas, por lo que fue desactivado y archivado para proteger la contabilidad.`,
+      };
+    }
+
+    // Si no tiene registros en el sistema: eliminación física
+    await client.query(`DELETE FROM suppliers WHERE id = $1::uuid`, [supplierId]);
+    await client.query("COMMIT");
+
+    return {
+      ok: true,
+      action: "deleted",
+      message: `El proveedor "${supplier.name}" fue eliminado definitivamente del sistema.`,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
