@@ -98,6 +98,7 @@ export function createFinanceRouter(): Router {
     }
 
     const auth = req.auth!;
+    const isFromAdmin = isAdminSessionRequest(req);
     let targetWh: string | null = null;
     const requestedWh = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
 
@@ -106,12 +107,12 @@ export function createFinanceRouter(): Router {
         res.status(400).json({ error: "invalid_warehouse_id" });
         return;
       }
-      if (!auth.hasAdminAccess && (!auth.warehouseIds || !auth.warehouseIds.includes(requestedWh))) {
+      if (!isFromAdmin && (!auth.warehouseIds || !auth.warehouseIds.includes(requestedWh))) {
         res.status(403).json({ error: "warehouse_forbidden" });
         return;
       }
       targetWh = requestedWh;
-    } else if (!auth.hasAdminAccess) {
+    } else if (!isFromAdmin) {
       if (!auth.warehouseIds || auth.warehouseIds.length === 0) {
         res.status(403).json({ error: "no_warehouse_assigned" });
         return;
@@ -465,8 +466,27 @@ export function createFinanceRouter(): Router {
       return;
     }
 
+    const auth = req.auth!;
+    const isFromAdmin = isAdminSessionRequest(req);
+    const requestedWh = typeof req.query.warehouseId === "string" && isUuid(req.query.warehouseId)
+      ? req.query.warehouseId
+      : null;
+
+    let targetWh: string | null = null;
+    if (requestedWh) {
+      if (!isFromAdmin && (!auth.warehouseIds || !auth.warehouseIds.includes(requestedWh))) {
+        res.status(403).json({ error: "warehouse_forbidden" });
+        return;
+      }
+      targetWh = requestedWh;
+    } else if (!isFromAdmin) {
+      if (auth.warehouseIds && auth.warehouseIds.length > 0) {
+        targetWh = auth.warehouseIds[0]!;
+      }
+    }
+
     try {
-      const profile = await getCustomerCreditProfile(pool, customerId);
+      const profile = await getCustomerCreditProfile(pool, customerId, { warehouseId: targetWh });
       if (!profile) {
         res.status(404).json({ error: "customer_not_found" });
         return;
@@ -483,11 +503,21 @@ export function createFinanceRouter(): Router {
 
   /**
    * Reporte consolidado de cartera por sede.
+   * Solo permitido desde la Sede Administrativa.
    */
-  r.get("/reports/warehouse-receivables", requireAuth, async (_req, res, next) => {
+  r.get("/reports/warehouse-receivables", requireAuth, async (req, res, next) => {
     const pool = getPool();
     if (!pool) {
       res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const isFromAdmin = isAdminSessionRequest(req);
+    if (!isFromAdmin) {
+      res.status(403).json({
+        error: "admin_scope_required",
+        message: "El reporte consolidado de sedes solo está disponible desde la Sede Administrativa.",
+      });
       return;
     }
 
@@ -514,6 +544,7 @@ export function createFinanceRouter(): Router {
     }
 
     const auth = req.auth!;
+    const isFromAdmin = isAdminSessionRequest(req);
     let targetWh: string | null = null;
     const requestedWh = typeof req.query.warehouseId === "string" ? req.query.warehouseId.trim() : "";
 
@@ -522,12 +553,12 @@ export function createFinanceRouter(): Router {
         res.status(400).json({ error: "invalid_warehouse_id" });
         return;
       }
-      if (!auth.hasAdminAccess && (!auth.warehouseIds || !auth.warehouseIds.includes(requestedWh))) {
+      if (!isFromAdmin && (!auth.warehouseIds || !auth.warehouseIds.includes(requestedWh))) {
         res.status(403).json({ error: "warehouse_forbidden" });
         return;
       }
       targetWh = requestedWh;
-    } else if (!auth.hasAdminAccess) {
+    } else if (!isFromAdmin) {
       if (!auth.warehouseIds || auth.warehouseIds.length === 0) {
         res.status(403).json({ error: "no_warehouse_assigned" });
         return;
