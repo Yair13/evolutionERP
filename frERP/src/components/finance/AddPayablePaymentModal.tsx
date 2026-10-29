@@ -30,11 +30,14 @@ const PAYMENT_METHODS = [
 ] as const;
 
 function formatMoney(n: number): string {
+  const val = Math.round((Number(n) || 0) * 100) / 100;
+  const hasDecimals = Math.abs(val % 1) > 0;
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
-    maximumFractionDigits: 0,
-  }).format(n);
+    minimumFractionDigits: hasDecimals ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(val);
 }
 
 export function AddPayablePaymentModal({
@@ -60,10 +63,11 @@ export function AddPayablePaymentModal({
 
   if (!open || !payable) return null;
 
-  const amount = Number(amountStr) || 0;
-  const currentBalance = payable.balanceAmount;
-  const excess = Math.max(0, amount - currentBalance);
-  const remainingDebt = Math.max(0, currentBalance - amount);
+  const rawParsed = Number(String(amountStr).replace(",", "."));
+  const amount = Number.isFinite(rawParsed) ? Math.round(rawParsed * 100) / 100 : 0;
+  const currentBalance = Math.round((Number(payable.balanceAmount) || 0) * 100) / 100;
+  const excess = Math.max(0, Math.round((amount - currentBalance) * 100) / 100);
+  const remainingDebt = Math.max(0, Math.round((currentBalance - amount) * 100) / 100);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -298,11 +302,12 @@ export function AddPayablePaymentModal({
               <div style={{ display: "flex", gap: "0.5rem" }}>
                 <input
                   type="number"
-                  min="1"
-                  step="any"
+                  min="0.01"
+                  step="0.01"
+                  inputMode="decimal"
                   value={amountStr}
                   onChange={(e) => setAmountStr(e.target.value)}
-                  placeholder="Ej: 500000"
+                  placeholder="Ej: 500000 o 500000.50"
                   required
                   autoFocus
                   style={{ flex: 1 }}

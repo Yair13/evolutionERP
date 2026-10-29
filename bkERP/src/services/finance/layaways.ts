@@ -523,6 +523,7 @@ export async function addLayawayPayment(
 
     const customerId = layaway.customer_id;
     const cleanMethod = paymentMethod.trim().toLowerCase();
+    const cleanAmount = Math.round(Number(amount) * 100) / 100;
 
     // Si usa saldo a favor
     if (cleanMethod === "saldo_a_favor") {
@@ -531,20 +532,20 @@ export async function addLayawayPayment(
         [customerId]
       );
       const custBal = Number(cRows[0]?.credit_balance ?? 0);
-      if (custBal < amount) {
+      if (custBal + 0.001 < cleanAmount) {
         throw Object.assign(new Error("insufficient_credit_balance"), {
           code: "insufficient_credit_balance",
           available: custBal,
-          requested: amount,
+          requested: cleanAmount,
         });
       }
       await client.query(
-        `UPDATE customers SET credit_balance = credit_balance - $1 WHERE id = $2::uuid`,
-        [amount, customerId]
+        `UPDATE customers SET credit_balance = GREATEST(0, ROUND((credit_balance - $1)::numeric, 2)) WHERE id = $2::uuid`,
+        [cleanAmount, customerId]
       );
     }
 
-    const newPaid = Math.round((Number(layaway.paid_amount) + amount) * 100) / 100;
+    const newPaid = Math.round((Number(layaway.paid_amount) + cleanAmount) * 100) / 100;
     const newRemaining = Math.max(0, Math.round((Number(layaway.target_amount) - newPaid) * 100) / 100);
 
     await client.query(
@@ -588,7 +589,7 @@ export async function addLayawayPayment(
         warehouseId,
         receiptNumber,
         cleanMethod,
-        amount,
+        cleanAmount,
         notes?.trim() || null,
         userId || null,
         primaryUrl,

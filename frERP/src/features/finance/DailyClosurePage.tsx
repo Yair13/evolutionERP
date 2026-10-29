@@ -50,11 +50,14 @@ import { PrintDailyClosureModal } from "../../components/finance/PrintDailyClosu
 import { PrintGeneralClosureModal } from "../../components/finance/PrintGeneralClosureModal.js";
 
 function formatMoney(n: number): string {
+  const val = Math.round((Number(n) || 0) * 100) / 100;
+  const hasDecimals = Math.abs(val % 1) > 0;
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
-    maximumFractionDigits: 0,
-  }).format(n);
+    minimumFractionDigits: hasDecimals ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(val);
 }
 
 function localTodayYmd(): string {
@@ -1010,7 +1013,8 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                         className="fin-input"
                         type="number"
                         min="0"
-                        step="1000"
+                        step="0.01"
+                        inputMode="decimal"
                         disabled={worksheet.isExistingClosure}
                         readOnly={worksheet.isExistingClosure}
                         value={initialBaseInput}
@@ -1179,7 +1183,8 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                         className="fin-input"
                         type="number"
                         min="0"
-                        step="1000"
+                        step="0.01"
+                        inputMode="decimal"
                         required
                         disabled={worksheet.isExistingClosure}
                         readOnly={worksheet.isExistingClosure}
@@ -1355,8 +1360,8 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                         <tbody>
                           {worksheet.bankMethods.map((bm) => {
                             const declaredVal = parseFloat(declaredBankInputs[bm.method] ?? String(bm.amount)) || 0;
-                            const diff = declaredVal - bm.amount;
-                            const isMatched = diff === 0;
+                            const diff = Math.round((declaredVal - bm.amount) * 100) / 100;
+                            const isMatched = Math.abs(diff) < 0.005;
 
                             // Comprobantes de este medio
                             const methodAudits = worksheet.receiptAuditList.filter(
@@ -1397,7 +1402,8 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                                     className="fin-input"
                                     type="number"
                                     min="0"
-                                    step="1000"
+                                    step="0.01"
+                                    inputMode="decimal"
                                     disabled={worksheet.isExistingClosure}
                                     readOnly={worksheet.isExistingClosure}
                                     value={declaredBankInputs[bm.method] ?? String(bm.amount)}
@@ -2503,7 +2509,8 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                               className="fin-input"
                               type="number"
                               min="0"
-                              step="1000"
+                              step="0.01"
+                              inputMode="decimal"
                               value={generalCashToKeepInput}
                               onChange={(e) => setGeneralCashToKeepInput(e.target.value)}
                               style={{ fontSize: "1.1rem", fontWeight: 700, borderColor: "#0f766e" }}

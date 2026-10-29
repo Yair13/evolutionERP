@@ -92,11 +92,14 @@ type Props = {
 };
 
 function formatMoney(n: number): string {
+  const val = Math.round((Number(n) || 0) * 100) / 100;
+  const hasDecimals = Math.abs(val % 1) > 0;
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
-    maximumFractionDigits: 0,
-  }).format(n);
+    minimumFractionDigits: hasDecimals ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(val);
 }
 
 export function ExitCheckoutModal({
@@ -394,10 +397,10 @@ export function ExitCheckoutModal({
     const paymentBreakdown: PaymentPart[] =
       exitKind === "sale" || exitKind === "credit"
         ? payments
-            .filter((payment) => Number(payment.amount) > 0)
+            .filter((payment) => Number(String(payment.amount).replace(",", ".")) > 0)
             .map((payment) => ({
               method: payment.method,
-              amount: Number(payment.amount),
+              amount: Math.round((Number(String(payment.amount).replace(",", ".")) || 0) * 100) / 100,
             }))
         : [];
 
@@ -493,11 +496,13 @@ export function ExitCheckoutModal({
   });
 
   const selected = allowedKinds.find((o) => o.value === exitKind);
-  const paidTotal = payments.reduce((sum, payment) => {
-    const amount = Number(payment.amount);
-    return sum + (Number.isFinite(amount) ? amount : 0);
-  }, 0);
-  const paymentDifference = netTotal - paidTotal;
+  const paidTotal = Math.round(
+    payments.reduce((sum, payment) => {
+      const amount = Number(String(payment.amount).replace(",", "."));
+      return sum + (Number.isFinite(amount) ? amount : 0);
+    }, 0) * 100
+  ) / 100;
+  const paymentDifference = Math.round((netTotal - paidTotal) * 100) / 100;
 
   function handleDiscountChange(rawVal: string) {
     const digits = rawVal.replace(/[^\d]/g, "");
@@ -1155,9 +1160,9 @@ export function ExitCheckoutModal({
                       <span>Valor</span>
                       <input
                         type="number"
-                        min="1"
-                        step="1"
-                        inputMode="numeric"
+                        min="0.01"
+                        step="0.01"
+                        inputMode="decimal"
                         value={payment.amount}
                         onChange={(e) => updatePayment(payment.id, { amount: e.target.value })}
                         placeholder="0"
@@ -1214,8 +1219,8 @@ export function ExitCheckoutModal({
                     type="button"
                     onClick={() => {
                       const last = payments[payments.length - 1];
-                      const currentVal = Number(last.amount) || 0;
-                      updatePayment(last.id, { amount: String(Math.max(0, currentVal + paymentDifference)) });
+                      const currentVal = Number(String(last.amount).replace(",", ".")) || 0;
+                      updatePayment(last.id, { amount: String(Math.max(0, Math.round((currentVal + paymentDifference) * 100) / 100)) });
                     }}
                     style={{
                       marginLeft: "auto",

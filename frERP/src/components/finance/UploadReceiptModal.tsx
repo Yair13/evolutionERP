@@ -8,11 +8,14 @@ import {
 import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
 
 function formatMoney(n: number): string {
+  const val = Math.round((Number(n) || 0) * 100) / 100;
+  const hasDecimals = Math.abs(val % 1) > 0;
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
-    maximumFractionDigits: 0,
-  }).format(n);
+    minimumFractionDigits: hasDecimals ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(val);
 }
 
 type Props = {

@@ -8,11 +8,14 @@ import { formatBogotaDateTime } from "../../lib/dateUtils.js";
 const LOGO_SRC = "/logo-evolution.png?v=4";
 
 function formatMoney(n: number): string {
+  const val = Math.round((Number(n) || 0) * 100) / 100;
+  const hasDecimals = Math.abs(val % 1) > 0;
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
-    maximumFractionDigits: 0,
-  }).format(n);
+    minimumFractionDigits: hasDecimals ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(val);
 }
 
 function paymentMethodLabel(method: string): string {

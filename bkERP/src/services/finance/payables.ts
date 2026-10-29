@@ -985,28 +985,29 @@ export async function addPayablePayment(
     );
 
     let suppCredit = Number(sRows[0]?.credit_balance ?? 0);
+    const cleanAmount = Math.round(Number(amount) * 100) / 100;
 
     // Si se usa saldo a favor
     if (paymentMethod === "saldo_a_favor") {
-      if (amount > suppCredit) {
+      if (cleanAmount > suppCredit + 0.001) {
         throw Object.assign(new Error("insufficient_credit_balance"), {
           code: "insufficient_credit_balance",
           available: suppCredit,
-          requested: amount,
+          requested: cleanAmount,
         });
       }
       await client.query(
-        `UPDATE suppliers SET credit_balance = credit_balance - $1 WHERE id = $2::uuid`,
-        [amount, supplierId]
+        `UPDATE suppliers SET credit_balance = GREATEST(0, ROUND((credit_balance - $1)::numeric, 2)) WHERE id = $2::uuid`,
+        [cleanAmount, supplierId]
       );
-      suppCredit -= amount;
+      suppCredit = Math.max(0, Math.round((suppCredit - cleanAmount) * 100) / 100);
     }
 
-    const currentBalance = Number(payable.balance_amount);
-    const appliedToDebt = Math.min(amount, currentBalance);
+    const currentBalance = Math.round(Number(payable.balance_amount) * 100) / 100;
+    const appliedToDebt = Math.round(Math.min(cleanAmount, currentBalance) * 100) / 100;
     const excessToFavour = paymentMethod === "saldo_a_favor"
       ? 0
-      : Math.max(0, Math.round((amount - currentBalance) * 100) / 100);
+      : Math.max(0, Math.round((cleanAmount - currentBalance) * 100) / 100);
 
     const newBalance = Math.max(0, Math.round((currentBalance - appliedToDebt) * 100) / 100);
     const newPaid = Math.round((Number(payable.paid_amount) + appliedToDebt) * 100) / 100;
@@ -1015,10 +1016,10 @@ export async function addPayablePayment(
     // Si pagó de más con dinero real, el sobrante pasa a Saldo a Favor de la empresa con ese proveedor
     if (excessToFavour > 0) {
       await client.query(
-        `UPDATE suppliers SET credit_balance = credit_balance + $1 WHERE id = $2::uuid`,
+        `UPDATE suppliers SET credit_balance = ROUND((credit_balance + $1)::numeric, 2) WHERE id = $2::uuid`,
         [excessToFavour, supplierId]
       );
-      suppCredit += excessToFavour;
+      suppCredit = Math.round((suppCredit + excessToFavour) * 100) / 100;
     }
 
     // Actualizar cuenta por pagar

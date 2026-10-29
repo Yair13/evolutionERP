@@ -150,6 +150,7 @@ export async function recordCreditFromExitDocument(
   let initialPaidTotal = 0;
   if (initialPayments && initialPayments.length > 0) {
     for (const p of initialPayments) {
+      const pAmount = Math.round((Number(p.amount) || 0) * 100) / 100;
       if (p.method === "saldo_a_favor") {
         // Descontar del saldo a favor del cliente
         const { rows: custRows } = await client.query<{ credit_balance: string }>(
@@ -157,19 +158,19 @@ export async function recordCreditFromExitDocument(
           [customerId]
         );
         const currentBalance = Number(custRows[0]?.credit_balance ?? 0);
-        if (currentBalance < p.amount) {
+        if (currentBalance + 0.001 < pAmount) {
           throw Object.assign(new Error("insufficient_credit_balance"), {
             code: "insufficient_credit_balance",
             available: currentBalance,
-            requested: p.amount,
+            requested: pAmount,
           });
         }
         await client.query(
-          `UPDATE customers SET credit_balance = credit_balance - $1 WHERE id = $2::uuid`,
-          [p.amount, customerId]
+          `UPDATE customers SET credit_balance = GREATEST(0, ROUND((credit_balance - $1)::numeric, 2)) WHERE id = $2::uuid`,
+          [pAmount, customerId]
         );
       }
-      initialPaidTotal += Number(p.amount) || 0;
+      initialPaidTotal = Math.round((initialPaidTotal + pAmount) * 100) / 100;
     }
   }
 
@@ -788,7 +789,8 @@ export async function addReceivablePayment(
       throw Object.assign(new Error("receivable_is_cancelled"), { code: "receivable_is_cancelled" });
     }
 
-    const currentBalance = Number(ar.balance_amount);
+    const currentBalance = Math.round(Number(ar.balance_amount) * 100) / 100;
+    const cleanAmount = Math.round(Number(amount) * 100) / 100;
     const customerId = ar.customer_id;
     const cleanMethod = paymentMethod.trim().toLowerCase();
 
@@ -799,22 +801,22 @@ export async function addReceivablePayment(
         [customerId]
       );
       const custBalance = Number(cRows[0]?.credit_balance ?? 0);
-      if (custBalance < amount) {
+      if (custBalance + 0.001 < cleanAmount) {
         throw Object.assign(new Error("insufficient_credit_balance"), {
           code: "insufficient_credit_balance",
           available: custBalance,
-          requested: amount,
+          requested: cleanAmount,
         });
       }
       await client.query(
-        `UPDATE customers SET credit_balance = credit_balance - $1 WHERE id = $2::uuid`,
-        [amount, customerId]
+        `UPDATE customers SET credit_balance = GREATEST(0, ROUND((credit_balance - $1)::numeric, 2)) WHERE id = $2::uuid`,
+        [cleanAmount, customerId]
       );
     }
 
     // Amortización vs Excedente
-    const appliedToDebt = Math.min(amount, currentBalance);
-    const excessToFavour = Math.max(0, Math.round((amount - appliedToDebt) * 100) / 100);
+    const appliedToDebt = Math.round(Math.min(cleanAmount, currentBalance) * 100) / 100;
+    const excessToFavour = Math.max(0, Math.round((cleanAmount - appliedToDebt) * 100) / 100);
 
     const newBalance = Math.max(0, Math.round((currentBalance - appliedToDebt) * 100) / 100);
     const newPaidAmount = Math.round((Number(ar.paid_amount) + appliedToDebt) * 100) / 100;
@@ -837,7 +839,7 @@ export async function addReceivablePayment(
     // Si hubo excedente, sumarlo al saldo a favor del cliente
     if (excessToFavour > 0 && cleanMethod !== "saldo_a_favor") {
       await client.query(
-        `UPDATE customers SET credit_balance = credit_balance + $1 WHERE id = $2::uuid`,
+        `UPDATE customers SET credit_balance = ROUND((credit_balance + $1)::numeric, 2) WHERE id = $2::uuid`,
         [excessToFavour, customerId]
       );
     }
@@ -881,7 +883,7 @@ export async function addReceivablePayment(
         warehouseId,
         receiptNumber,
         cleanMethod,
-        amount,
+        cleanAmount,
         appliedToDebt,
         excessToFavour,
         notes?.trim() || null,

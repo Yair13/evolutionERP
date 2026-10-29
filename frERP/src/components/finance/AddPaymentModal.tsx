@@ -26,11 +26,14 @@ const PAYMENT_METHODS = [
 ] as const;
 
 function formatMoney(n: number): string {
+  const val = Math.round((Number(n) || 0) * 100) / 100;
+  const hasDecimals = Math.abs(val % 1) > 0;
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
-    maximumFractionDigits: 0,
-  }).format(n);
+    minimumFractionDigits: hasDecimals ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(val);
 }
 
 export function AddPaymentModal({
@@ -53,10 +56,11 @@ export function AddPaymentModal({
 
   if (!open || !receivable) return null;
 
-  const amount = Number(amountStr) || 0;
-  const currentBalance = receivable.balanceAmount;
-  const excess = Math.max(0, amount - currentBalance);
-  const remainingDebt = Math.max(0, currentBalance - amount);
+  const rawParsed = Number(String(amountStr).replace(",", "."));
+  const amount = Number.isFinite(rawParsed) ? Math.round(rawParsed * 100) / 100 : 0;
+  const currentBalance = Math.round((Number(receivable.balanceAmount) || 0) * 100) / 100;
+  const excess = Math.max(0, Math.round((amount - currentBalance) * 100) / 100);
+  const remainingDebt = Math.max(0, Math.round((currentBalance - amount) * 100) / 100);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -189,8 +193,9 @@ export function AddPaymentModal({
               <span>Monto a abonar *</span>
               <input
                 type="number"
-                min="100"
-                step="100"
+                min="0.01"
+                step="0.01"
+                inputMode="decimal"
                 required
                 autoFocus
                 value={amountStr}
@@ -198,7 +203,7 @@ export function AddPaymentModal({
                   setAmountStr(e.target.value);
                   setError(null);
                 }}
-                placeholder="Ej. 100000"
+                placeholder="Ej. 100000 o 100000.50"
               />
             </label>
 

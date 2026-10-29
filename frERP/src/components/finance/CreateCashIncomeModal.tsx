@@ -110,16 +110,12 @@ export function CreateCashIncomeModal({ open, onClose, onSuccess }: Props) {
 
   if (!open) return null;
 
-  const numAmount = Number(amountStr.replace(/[^0-9]/g, "")) || 0;
+  const parsedRaw = Number(String(amountStr).replace(",", "."));
+  const numAmount = Number.isFinite(parsedRaw) ? Math.round(parsedRaw * 100) / 100 : 0;
 
   function handleAmountChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const raw = e.target.value.replace(/[^0-9]/g, "");
-    if (!raw) {
-      setAmountStr("");
-      return;
-    }
-    const val = Number(raw);
-    setAmountStr(new Intl.NumberFormat("es-CO").format(val));
+    setAmountStr(e.target.value);
+    setError(null);
   }
 
   const isBankMethod = paymentMethod !== "efectivo";
@@ -415,10 +411,13 @@ export function CreateCashIncomeModal({ open, onClose, onSuccess }: Props) {
                   $
                 </span>
                 <input
-                  type="text"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  inputMode="decimal"
                   className="inv-input"
                   style={{ width: "100%", padding: "0.5rem 0.5rem 0.5rem 1.6rem", fontSize: "1.1rem", fontWeight: 800, color: "#059669" }}
-                  placeholder="0"
+                  placeholder="0.00"
                   value={amountStr}
                   onChange={handleAmountChange}
                   disabled={submitting}
