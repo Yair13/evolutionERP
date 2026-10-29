@@ -85,7 +85,7 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
     } else {
       document.body.classList.remove("inv-print-voucher");
       document.body.classList.add("inv-print-invoice");
-      pageStyle.textContent = "@page { size: 8.5in 5.5in; margin: 0.2in; }";
+      pageStyle.textContent = "@page { size: letter portrait; margin: 0.2in; }";
     }
 
     window.setTimeout(() => window.print(), 80);

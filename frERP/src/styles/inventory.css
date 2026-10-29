@@ -6405,9 +6405,9 @@ button.inv-pos__pick-media--expand:focus-visible {
     margin: 0;
   }
 
-  /* Media hoja carta: 8.5" × 5.5" (si hay muchos ítems → varias páginas) */
+  /* Media hoja carta: se imprime en orientación vertical (portrait) ocupando la mitad superior (8.5" × 5.5") */
   @page inv-invoice-half-letter {
-    size: 8.5in 5.5in;
+    size: letter portrait;
     margin: 0.2in;
   }
 
@@ -6562,7 +6562,11 @@ button.inv-pos__pick-media--expand:focus-visible {
   }
 
   /* Comprobante — solo la mitad superior de la hoja carta */
+  html:has(body.inv-print-invoice),
   body.inv-print-invoice {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
     margin: 0 !important;
     padding: 0 !important;
     background: #fff !important;
