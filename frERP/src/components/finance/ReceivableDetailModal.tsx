@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
-import { fetchReceivableDetail, type ReceivableDetail, type ReceiptAuditItem } from "../../api/finance.js";
+import { fetchReceivableDetail, deleteManualReceivable, type ReceivableDetail, type ReceiptAuditItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
-import { Package, Receipt, X, Camera, Upload } from "lucide-react";
+import { useWarehouse } from "../../context/WarehouseContext.js";
+import { Package, Receipt, X, Camera, Upload, Trash2 } from "lucide-react";
 import { formatBogotaDateTime } from "../../lib/dateUtils.js";
 import { ViewReceiptPhotosModal } from "../common/ViewReceiptPhotosModal.js";
 import { UploadReceiptModal } from "./UploadReceiptModal.js";
@@ -11,6 +12,7 @@ type Props = {
   receivableId: string | null;
   onClose: () => void;
   onOpenAddPayment: (detail: ReceivableDetail) => void;
+  onDeleteSuccess?: () => void;
 };
 
 function formatMoney(n: number): string {
@@ -30,11 +32,36 @@ export function ReceivableDetailModal({
   receivableId,
   onClose,
   onOpenAddPayment,
+  onDeleteSuccess,
 }: Props) {
   const { token } = useAuth();
+  const { canViewAllWarehouses } = useWarehouse();
   const [detail, setDetail] = useState<ReceivableDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleDeleteCredit = async () => {
+    if (!detail || !token) return;
+    const confirmed = window.confirm(
+      `¿Deseas eliminar / resetear la deuda "${detail.invoiceNumber}" del cliente ${detail.customerName}?\n\n` +
+      `Monto Total: ${formatMoney(detail.totalAmount)}\n` +
+      `Saldo Pendiente: ${formatMoney(detail.balanceAmount)}\n\n` +
+      `Esta acción dejará el saldo de este cliente en $0.`
+    );
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      await deleteManualReceivable(token, detail.id);
+      onClose();
+      onDeleteSuccess?.();
+    } catch (err: any) {
+      alert(err?.message || "Error al eliminar / resetear deuda del cliente.");
+    } finally {
+      setDeleting(false);
+    }
+  };
   const [viewingUrls, setViewingUrls] = useState<string[] | null>(null);
   const [viewingRef, setViewingRef] = useState<string>("");
   const [uploadItem, setUploadItem] = useState<ReceiptAuditItem | null>(null);
@@ -305,19 +332,37 @@ export function ReceivableDetailModal({
           </div>
         ) : null}
 
-        <div style={{ marginTop: "1rem", paddingTop: "0.75rem", borderTop: "1px solid var(--border-color, rgba(255,255,255,0.08))", display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
-          <button type="button" className="inv-btn inv-btn--ghost" onClick={onClose}>
-            Cerrar
-          </button>
-          {detail && detail.balanceAmount > 0 && (
-            <button
-              type="button"
-              className="inv-btn inv-btn--primary"
-              onClick={() => onOpenAddPayment(detail)}
-            >
-              Registrar Abono
+        <div style={{ marginTop: "1rem", paddingTop: "0.75rem", borderTop: "1px solid var(--border-color, rgba(255,255,255,0.08))", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
+          <div>
+            {canViewAllWarehouses && detail && (
+              <button
+                type="button"
+                className="inv-btn inv-btn--danger"
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
+                onClick={handleDeleteCredit}
+                disabled={deleting}
+                title="Eliminar / Resetear la deuda de este cliente"
+              >
+                <Trash2 size={16} />
+                <span>{deleting ? "Eliminando..." : "Eliminar / Resetear Deuda"}</span>
+              </button>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button type="button" className="inv-btn inv-btn--ghost" onClick={onClose} disabled={deleting}>
+              Cerrar
             </button>
-          )}
+            {detail && detail.balanceAmount > 0 && (
+              <button
+                type="button"
+                className="inv-btn inv-btn--primary"
+                onClick={() => onOpenAddPayment(detail)}
+                disabled={deleting}
+              >
+                Registrar Abono
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

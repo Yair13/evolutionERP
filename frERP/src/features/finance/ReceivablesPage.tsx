@@ -547,14 +547,14 @@ export function ReceivablesPage() {
                             >
                               Detalles
                             </button>
-                            {canManageInitial && c.documentId === null && (
+                            {canManageInitial && (
                               <button
                                 type="button"
                                 className="fin-btn fin-btn--ghost fin-btn--sm"
                                 style={{ color: "#ef4444" }}
                                 onClick={() => handleDeleteInitial(c)}
                                 disabled={deletingId === c.id}
-                                title="Eliminar saldo inicial erróneo"
+                                title="Eliminar / Resetear saldo de este cliente"
                               >
                                 <Trash2 size={15} />
                               </button>
@@ -753,14 +753,14 @@ export function ReceivablesPage() {
                                 Ver
                               </button>
                             )}
-                            {canManageInitial && r.documentId === null && (
+                            {canManageInitial && (
                               <button
                                 type="button"
                                 className="fin-btn fin-btn--ghost fin-btn--sm"
                                 style={{ color: "#ef4444", marginLeft: "0.25rem" }}
                                 onClick={() => handleDeleteInitial(r)}
                                 disabled={deletingId === r.id}
-                                title="Eliminar saldo inicial erróneo"
+                                title="Eliminar / Resetear saldo de este cliente"
                               >
                                 <Trash2 size={15} />
                               </button>
@@ -950,6 +950,11 @@ export function ReceivablesPage() {
           open={Boolean(activeReceivableDetailId)}
           receivableId={activeReceivableDetailId}
           onClose={() => setActiveReceivableDetailId(null)}
+          onDeleteSuccess={() => {
+            void loadCredits();
+            if (selectedCustId) void loadCustomerProfile(selectedCustId);
+            if (activeTab === "report") void loadReport();
+          }}
           onOpenAddPayment={(detail) => {
             setActiveReceivableDetailId(null);
             setActiveReceivableForPayment(detail);

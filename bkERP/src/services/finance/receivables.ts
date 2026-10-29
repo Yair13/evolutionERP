@@ -387,13 +387,6 @@ export async function deleteManualReceivable(
     }
 
     const ar = rows[0]!;
-    if (ar.document_id !== null) {
-      throw Object.assign(new Error("cannot_delete_sales_credit"), {
-        code: "cannot_delete_sales_credit",
-        statusCode: 400,
-        message: "Solo se pueden eliminar saldos iniciales creados manualmente. Los créditos originados en ventas deben anularse en el módulo de ventas.",
-      });
-    }
 
     await client.query(`DELETE FROM receivable_payments WHERE receivable_id = $1::uuid`, [receivableId]);
     await client.query(`DELETE FROM accounts_receivable WHERE id = $1::uuid`, [receivableId]);
@@ -1149,6 +1142,48 @@ export async function getReceivablesByWarehouseReport(
   return { warehouses: list, totals };
 }
 
+export interface PaymentCashOperationItem {
+  id: string;
+  sourceType:
+    | "sale"
+    | "credit_payment"
+    | "layaway_payment"
+    | "cash_income"
+    | "cash_outflow"
+    | "cash_payroll";
+  sourceLabel: string;
+  direction: "in" | "out";
+  paymentMethod: string;
+  paymentMethodLabel: string;
+  amount: number;
+  reference: string;
+  relatedReference: string | null;
+  thirdPartyName: string | null;
+  concept: string | null;
+  itemsSummary: string | null;
+  warehouseCode: string | null;
+  warehouseName: string | null;
+  createdByName: string | null;
+  createdAt: string;
+  receiptUrls: string[];
+}
+
+function parseOpReceiptUrls(raw: any, singleFallback: string | null): string[] {
+  if (Array.isArray(raw)) {
+    const list = raw.filter((u): u is string => typeof u === "string" && u.trim().length > 0);
+    if (list.length > 0) return list;
+  } else if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const list = parsed.filter((u): u is string => typeof u === "string" && u.trim().length > 0);
+        if (list.length > 0) return list;
+      }
+    } catch {}
+  }
+  return singleFallback ? [singleFallback] : [];
+}
+
 /**
  * Resumen de ingresos por método de pago (ventas directas + abonos de créditos).
  */
@@ -1177,6 +1212,7 @@ export async function getPaymentsCashSummary(
     totalAmount: number;
     transactionCount: number;
   }[];
+  operations: PaymentCashOperationItem[];
 }> {
   const params: unknown[] = [];
   let whDocFilter = "";
@@ -1269,7 +1305,9 @@ export async function getPaymentsCashSummary(
   const payrollParams: unknown[] = [];
   const whPayrollFilter = opts.warehouseId
     ? `AND p.warehouse_id = $${payrollParams.push(opts.warehouseId)}::uuid`
-    : "";
+    : opts.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0
+      ? `AND p.warehouse_id = ANY($${payrollParams.push(opts.allowedWarehouseIds)}::uuid[])`
+      : "";
   let datePayrollFilter = "";
   if (opts.dateFrom) {
     const idx = payrollParams.push(opts.dateFrom);
@@ -1292,7 +1330,9 @@ export async function getPaymentsCashSummary(
   const outflowParams: unknown[] = [];
   const whOutflowFilter = opts.warehouseId
     ? `AND o.warehouse_id = $${outflowParams.push(opts.warehouseId)}::uuid`
-    : "";
+    : opts.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0
+      ? `AND o.warehouse_id = ANY($${outflowParams.push(opts.allowedWarehouseIds)}::uuid[])`
+      : "";
   let dateOutflowFilter = "";
   if (opts.dateFrom) {
     const idx = outflowParams.push(opts.dateFrom);
@@ -1311,6 +1351,172 @@ export async function getPaymentsCashSummary(
       ${dateOutflowFilter}
   `;
 
+  // Consultas de detalle de operaciones individuales
+  const salesDetailQuery = `
+    SELECT
+      d.id::text AS id,
+      LOWER(TRIM(p->>'method')) AS method,
+      COALESCE((p->>'amount')::numeric, 0)::float AS amount,
+      COALESCE(d.invoice_number, 'DOC-' || SUBSTRING(d.id::text, 1, 6)) AS reference,
+      d.metadata->>'relatedInvoiceNumber' AS "relatedReference",
+      d.exit_kind AS "exitKind",
+      COALESCE(c.display_name, d.metadata->>'customerName', 'Cliente Mostrador') AS "thirdPartyName",
+      d.notes,
+      (
+        SELECT STRING_AGG(idl.quantity::text || 'x ' || pr.name, ', ')
+        FROM inventory_document_lines idl
+        JOIN products pr ON pr.id = idl.product_id
+        WHERE idl.document_id = d.id
+      ) AS "itemsSummary",
+      w.code AS "warehouseCode",
+      w.name AS "warehouseName",
+      u.full_name AS "createdByName",
+      COALESCE(d.completed_at, d.created_at) AS "createdAt",
+      d.receipt_url AS "receiptUrl",
+      COALESCE(d.receipt_urls, '[]'::jsonb) AS "receiptUrls"
+    FROM inventory_documents d
+    JOIN warehouses w ON w.id = d.warehouse_id
+    LEFT JOIN customers c ON c.id = d.customer_id
+    LEFT JOIN users u ON u.id = d.created_by,
+    jsonb_array_elements(
+      CASE 
+        WHEN jsonb_typeof(d.metadata->'paymentBreakdown') = 'array' 
+        THEN d.metadata->'paymentBreakdown'
+        ELSE '[]'::jsonb
+      END
+    ) AS p
+    WHERE d.status = 'completed'
+      AND d.doc_type IN ('exit', 'sale')
+      ${whDocFilter}
+      ${dateDocFilter}
+  `;
+
+  const paymentsDetailQuery = `
+    SELECT
+      rp.id::text AS id,
+      LOWER(TRIM(rp.payment_method)) AS method,
+      COALESCE(rp.amount, 0)::float AS amount,
+      rp.receipt_number AS reference,
+      ar.invoice_number AS "relatedReference",
+      COALESCE(c.display_name, 'Cliente') AS "thirdPartyName",
+      rp.notes,
+      w.code AS "warehouseCode",
+      w.name AS "warehouseName",
+      u.full_name AS "createdByName",
+      rp.created_at AS "createdAt",
+      rp.receipt_url AS "receiptUrl",
+      COALESCE(rp.receipt_urls, '[]'::jsonb) AS "receiptUrls"
+    FROM receivable_payments rp
+    JOIN warehouses w ON w.id = rp.warehouse_id
+    LEFT JOIN accounts_receivable ar ON ar.id = rp.receivable_id
+    LEFT JOIN customers c ON c.id = rp.customer_id
+    LEFT JOIN users u ON u.id = rp.created_by
+    WHERE 1=1
+      ${whRpFilter}
+      ${dateRpFilter}
+  `;
+
+  const layawaysDetailQuery = `
+    SELECT
+      lp.id::text AS id,
+      LOWER(TRIM(lp.payment_method)) AS method,
+      COALESCE(lp.amount, 0)::float AS amount,
+      lp.receipt_number AS reference,
+      l.code AS "relatedReference",
+      COALESCE(c.display_name, 'Cliente') AS "thirdPartyName",
+      lp.notes,
+      w.code AS "warehouseCode",
+      w.name AS "warehouseName",
+      u.full_name AS "createdByName",
+      lp.created_at AS "createdAt",
+      lp.receipt_url AS "receiptUrl",
+      COALESCE(lp.receipt_urls, '[]'::jsonb) AS "receiptUrls"
+    FROM layaway_payments lp
+    JOIN warehouses w ON w.id = lp.warehouse_id
+    LEFT JOIN layaways l ON l.id = lp.layaway_id
+    LEFT JOIN customers c ON c.id = COALESCE(lp.customer_id, l.customer_id)
+    LEFT JOIN users u ON u.id = lp.created_by
+    WHERE 1=1
+      ${whRpFilter.replace(/rp\./g, "lp.")}
+      ${dateRpFilter.replace(/rp\./g, "lp.")}
+  `;
+
+  const incomesDetailQuery = `
+    SELECT
+      ci.id::text AS id,
+      LOWER(TRIM(ci.payment_method)) AS method,
+      COALESCE(ci.amount, 0)::float AS amount,
+      ci.voucher_number AS reference,
+      ci.reference_code AS "relatedReference",
+      ci.payer_name AS "thirdPartyName",
+      ci.concept,
+      ci.notes,
+      w.code AS "warehouseCode",
+      w.name AS "warehouseName",
+      u.full_name AS "createdByName",
+      ci.created_at AS "createdAt",
+      ci.receipt_url AS "receiptUrl",
+      COALESCE(ci.receipt_urls, '[]'::jsonb) AS "receiptUrls"
+    FROM cash_incomes ci
+    JOIN warehouses w ON w.id = ci.warehouse_id
+    LEFT JOIN users u ON u.id = ci.created_by
+    WHERE 1=1
+      ${whRpFilter.replace(/rp\./g, "ci.")}
+      ${dateRpFilter.replace(/rp\./g, "ci.")}
+  `;
+
+  const payrollDetailQuery = `
+    SELECT
+      p.id::text AS id,
+      LOWER(TRIM(p.payment_method)) AS method,
+      COALESCE(p.net_amount, 0)::float AS amount,
+      p.voucher_number AS reference,
+      p.reference_code AS "relatedReference",
+      e.full_name AS "thirdPartyName",
+      p.period_concept AS concept,
+      p.notes,
+      w.code AS "warehouseCode",
+      w.name AS "warehouseName",
+      u.full_name AS "createdByName",
+      p.created_at AS "createdAt",
+      p.transfer_receipt_url AS "receiptUrl",
+      COALESCE(p.transfer_receipt_urls, '[]'::jsonb) AS "receiptUrls"
+    FROM payroll_payments p
+    JOIN employees e ON e.id = p.employee_id
+    JOIN warehouses w ON w.id = p.warehouse_id
+    LEFT JOIN users u ON u.id = p.created_by
+    WHERE p.payment_method = 'efectivo'
+      AND p.deducted_from_cash_register = true
+      ${whPayrollFilter}
+      ${datePayrollFilter}
+  `;
+
+  const outflowDetailQuery = `
+    SELECT
+      o.id::text AS id,
+      LOWER(TRIM(o.payment_method)) AS method,
+      COALESCE(o.amount, 0)::float AS amount,
+      o.voucher_number AS reference,
+      COALESCE(o.reference_code, ap.bill_number) AS "relatedReference",
+      COALESCE(s.name, o.beneficiary_name) AS "thirdPartyName",
+      o.concept,
+      o.notes,
+      w.code AS "warehouseCode",
+      w.name AS "warehouseName",
+      u.full_name AS "createdByName",
+      o.created_at AS "createdAt",
+      o.receipt_url AS "receiptUrl",
+      COALESCE(o.receipt_urls, '[]'::jsonb) AS "receiptUrls"
+    FROM cash_outflows o
+    JOIN warehouses w ON w.id = o.warehouse_id
+    LEFT JOIN suppliers s ON s.id = o.supplier_id
+    LEFT JOIN accounts_payable ap ON ap.id = o.payable_id
+    LEFT JOIN users u ON u.id = o.created_by
+    WHERE o.payment_method = 'efectivo'
+      ${whOutflowFilter}
+      ${dateOutflowFilter}
+  `;
+
   const [
     { rows: salesRows },
     { rows: payRows },
@@ -1318,6 +1524,12 @@ export async function getPaymentsCashSummary(
     { rows: incomeRows },
     { rows: payrollRows },
     { rows: outflowRows },
+    { rows: salesDetailRows },
+    { rows: payDetailRows },
+    { rows: layDetailRows },
+    { rows: incomeDetailRows },
+    { rows: payrollDetailRows },
+    { rows: outflowDetailRows },
   ] = await Promise.all([
     pool.query<{ method: string; amount: string; count: number }>(salesQuery, params),
     pool.query<{ method: string; amount: string; count: number }>(paymentsQuery, params),
@@ -1325,6 +1537,12 @@ export async function getPaymentsCashSummary(
     pool.query<{ method: string; amount: string; count: number }>(incomesQuery, params),
     pool.query<{ amount: string; count: number }>(payrollQuery, payrollParams),
     pool.query<{ amount: string; count: number }>(outflowQuery, outflowParams),
+    pool.query<any>(salesDetailQuery, params),
+    pool.query<any>(paymentsDetailQuery, params),
+    pool.query<any>(layawaysDetailQuery, params),
+    pool.query<any>(incomesDetailQuery, params),
+    pool.query<any>(payrollDetailQuery, payrollParams),
+    pool.query<any>(outflowDetailQuery, outflowParams),
   ]);
 
   const map = new Map<
@@ -1415,6 +1633,151 @@ export async function getPaymentsCashSummary(
   const cashOutflowsAmount = Number(outflowRows[0]?.amount || 0);
   const netCashInDrawer = cashCollected - cashPayrollAmount - cashOutflowsAmount;
 
+  const operations: PaymentCashOperationItem[] = [];
+
+  for (const r of salesDetailRows) {
+    const m = r.method || "otro";
+    operations.push({
+      id: `sale-${r.id}-${m}-${operations.length}`,
+      sourceType: "sale",
+      sourceLabel: r.exitKind === "credit" ? "Venta a Crédito (Inicial)" : "Venta Mostrador",
+      direction: "in",
+      paymentMethod: m,
+      paymentMethodLabel: methodLabels[m] || m.toUpperCase(),
+      amount: Number(r.amount || 0),
+      reference: r.reference || "S/N",
+      relatedReference: r.relatedReference || null,
+      thirdPartyName: r.thirdPartyName || "Cliente Mostrador",
+      concept: r.notes || null,
+      itemsSummary: r.itemsSummary || null,
+      warehouseCode: r.warehouseCode || null,
+      warehouseName: r.warehouseName || null,
+      createdByName: r.createdByName || null,
+      createdAt: new Date(r.createdAt).toISOString(),
+      receiptUrls: parseOpReceiptUrls(r.receiptUrls, r.receiptUrl || null),
+    });
+  }
+
+  for (const r of payDetailRows) {
+    const m = r.method || "otro";
+    operations.push({
+      id: `rp-${r.id}`,
+      sourceType: "credit_payment",
+      sourceLabel: "Abono de Cartera",
+      direction: "in",
+      paymentMethod: m,
+      paymentMethodLabel: methodLabels[m] || m.toUpperCase(),
+      amount: Number(r.amount || 0),
+      reference: r.reference || "S/N",
+      relatedReference: r.relatedReference ? `Fact. ${r.relatedReference}` : null,
+      thirdPartyName: r.thirdPartyName || "Cliente",
+      concept: r.notes || (r.relatedReference ? `Abono a factura ${r.relatedReference}` : "Abono de cartera"),
+      itemsSummary: null,
+      warehouseCode: r.warehouseCode || null,
+      warehouseName: r.warehouseName || null,
+      createdByName: r.createdByName || null,
+      createdAt: new Date(r.createdAt).toISOString(),
+      receiptUrls: parseOpReceiptUrls(r.receiptUrls, r.receiptUrl || null),
+    });
+  }
+
+  for (const r of layDetailRows) {
+    const m = r.method || "otro";
+    operations.push({
+      id: `lp-${r.id}`,
+      sourceType: "layaway_payment",
+      sourceLabel: "Abono Plan Separe",
+      direction: "in",
+      paymentMethod: m,
+      paymentMethodLabel: methodLabels[m] || m.toUpperCase(),
+      amount: Number(r.amount || 0),
+      reference: r.reference || "S/N",
+      relatedReference: r.relatedReference ? `Sep. ${r.relatedReference}` : null,
+      thirdPartyName: r.thirdPartyName || "Cliente",
+      concept: r.notes || (r.relatedReference ? `Abono a apartado ${r.relatedReference}` : "Abono plan separe"),
+      itemsSummary: null,
+      warehouseCode: r.warehouseCode || null,
+      warehouseName: r.warehouseName || null,
+      createdByName: r.createdByName || null,
+      createdAt: new Date(r.createdAt).toISOString(),
+      receiptUrls: parseOpReceiptUrls(r.receiptUrls, r.receiptUrl || null),
+    });
+  }
+
+  for (const r of incomeDetailRows) {
+    const m = r.method || "otro";
+    const conceptText = [r.concept, r.notes].filter(Boolean).join(" · ") || "Otro ingreso en caja";
+    operations.push({
+      id: `ci-${r.id}`,
+      sourceType: "cash_income",
+      sourceLabel: "Otro Ingreso / Recibo Caja",
+      direction: "in",
+      paymentMethod: m,
+      paymentMethodLabel: methodLabels[m] || m.toUpperCase(),
+      amount: Number(r.amount || 0),
+      reference: r.reference || "S/N",
+      relatedReference: r.relatedReference || null,
+      thirdPartyName: r.thirdPartyName || "Pagador",
+      concept: conceptText,
+      itemsSummary: null,
+      warehouseCode: r.warehouseCode || null,
+      warehouseName: r.warehouseName || null,
+      createdByName: r.createdByName || null,
+      createdAt: new Date(r.createdAt).toISOString(),
+      receiptUrls: parseOpReceiptUrls(r.receiptUrls, r.receiptUrl || null),
+    });
+  }
+
+  for (const r of outflowDetailRows) {
+    const m = r.method || "efectivo";
+    const conceptText = [r.concept, r.notes].filter(Boolean).join(" · ") || "Egreso de caja";
+    operations.push({
+      id: `co-${r.id}`,
+      sourceType: "cash_outflow",
+      sourceLabel: "Egreso de Caja",
+      direction: "out",
+      paymentMethod: m,
+      paymentMethodLabel: methodLabels[m] || m.toUpperCase(),
+      amount: Number(r.amount || 0),
+      reference: r.reference || "S/N",
+      relatedReference: r.relatedReference || null,
+      thirdPartyName: r.thirdPartyName || "Beneficiario",
+      concept: conceptText,
+      itemsSummary: null,
+      warehouseCode: r.warehouseCode || null,
+      warehouseName: r.warehouseName || null,
+      createdByName: r.createdByName || null,
+      createdAt: new Date(r.createdAt).toISOString(),
+      receiptUrls: parseOpReceiptUrls(r.receiptUrls, r.receiptUrl || null),
+    });
+  }
+
+  for (const r of payrollDetailRows) {
+    const m = r.method || "efectivo";
+    const conceptText = [r.concept, r.notes].filter(Boolean).join(" · ") || "Pago de nómina en efectivo";
+    operations.push({
+      id: `nom-${r.id}`,
+      sourceType: "cash_payroll",
+      sourceLabel: "Nómina en Efectivo",
+      direction: "out",
+      paymentMethod: m,
+      paymentMethodLabel: methodLabels[m] || m.toUpperCase(),
+      amount: Number(r.amount || 0),
+      reference: r.reference || "S/N",
+      relatedReference: r.relatedReference || null,
+      thirdPartyName: r.thirdPartyName || "Empleado",
+      concept: conceptText,
+      itemsSummary: null,
+      warehouseCode: r.warehouseCode || null,
+      warehouseName: r.warehouseName || null,
+      createdByName: r.createdByName || null,
+      createdAt: new Date(r.createdAt).toISOString(),
+      receiptUrls: parseOpReceiptUrls(r.receiptUrls, r.receiptUrl || null),
+    });
+  }
+
+  operations.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
   return {
     dateFrom: opts.dateFrom || getTodayBogotaYmd(),
     dateTo: opts.dateTo || getTodayBogotaYmd(),
@@ -1425,5 +1788,6 @@ export async function getPaymentsCashSummary(
     cashOutflowsAmount,
     netCashInDrawer,
     methods,
+    operations,
   };
 }

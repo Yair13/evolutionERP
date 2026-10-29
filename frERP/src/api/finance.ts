@@ -96,6 +96,32 @@ export interface WarehouseReceivablesReport {
   };
 }
 
+export interface PaymentCashOperationItem {
+  id: string;
+  sourceType:
+    | "sale"
+    | "credit_payment"
+    | "layaway_payment"
+    | "cash_income"
+    | "cash_outflow"
+    | "cash_payroll";
+  sourceLabel: string;
+  direction: "in" | "out";
+  paymentMethod: string;
+  paymentMethodLabel: string;
+  amount: number;
+  reference: string;
+  relatedReference: string | null;
+  thirdPartyName: string | null;
+  concept: string | null;
+  itemsSummary: string | null;
+  warehouseCode: string | null;
+  warehouseName: string | null;
+  createdByName: string | null;
+  createdAt: string;
+  receiptUrls: string[];
+}
+
 export interface PaymentsCashSummary {
   dateFrom: string;
   dateTo: string;
@@ -113,6 +139,7 @@ export interface PaymentsCashSummary {
     totalAmount: number;
     transactionCount: number;
   }[];
+  operations?: PaymentCashOperationItem[];
 }
 
 export async function fetchReceivables(
