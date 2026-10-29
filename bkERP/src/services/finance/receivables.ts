@@ -1404,11 +1404,11 @@ export async function getPaymentsCashSummary(
       COALESCE(d.receipt_urls, '[]'::jsonb) AS "receiptUrls",
       COALESCE(
         NULLIF(d.discount_amount, 0),
-        NULLIF((d.metadata->>'discountAmount')::numeric, 0),
+        NULLIF(NULLIF(TRIM(d.metadata->>'discountAmount'), '')::numeric, 0),
         0
       )::float AS "discountAmount",
       COALESCE(NULLIF(TRIM(d.discount_reason), ''), NULLIF(TRIM(d.metadata->>'discountReason'), '')) AS "discountReason",
-      COALESCE((d.metadata->>'subtotalAmount')::numeric, 0)::float AS "subtotalAmount"
+      COALESCE(NULLIF(TRIM(d.metadata->>'subtotalAmount'), '')::numeric, 0)::float AS "subtotalAmount"
     FROM inventory_documents d
     JOIN warehouses w ON w.id = d.warehouse_id
     LEFT JOIN customers c ON c.id = d.customer_id
@@ -1592,22 +1592,22 @@ export async function getPaymentsCashSummary(
       ct.id::text AS id,
       LOWER(TRIM(ct.payment_method)) AS method,
       COALESCE(ct.amount, 0)::float AS amount,
-      ct.transfer_code AS reference,
-      ct.reference_code AS "relatedReference",
+      ct.code AS reference,
+      NULL::text AS "relatedReference",
       wd.name AS "thirdPartyName",
       ct.concept,
-      ct.notes,
+      ct.carrier_name AS notes,
       ct.status,
       wo.code AS "warehouseCode",
       wo.name AS "warehouseName",
       u.full_name AS "createdByName",
       ct.created_at AS "createdAt",
-      ct.receipt_url AS "receiptUrl",
-      COALESCE(ct.receipt_urls, '[]'::jsonb) AS "receiptUrls"
+      ct.sender_receipt_url AS "receiptUrl",
+      COALESCE(ct.sender_receipt_urls, '[]'::jsonb) AS "receiptUrls"
     FROM cash_transfers ct
     JOIN warehouses wo ON wo.id = ct.origin_warehouse_id
     JOIN warehouses wd ON wd.id = ct.destination_warehouse_id
-    LEFT JOIN users u ON u.id = ct.sent_by
+    LEFT JOIN users u ON u.id = ct.created_by
     WHERE LOWER(TRIM(ct.payment_method)) = 'efectivo'
       ${whTransferOrigFilter}
       ${dateTransferCreatedFilter}
@@ -1618,22 +1618,22 @@ export async function getPaymentsCashSummary(
       ct.id::text AS id,
       LOWER(TRIM(ct.payment_method)) AS method,
       COALESCE(ct.amount, 0)::float AS amount,
-      ct.transfer_code AS reference,
-      ct.reference_code AS "relatedReference",
+      ct.code AS reference,
+      NULL::text AS "relatedReference",
       wd.name AS "thirdPartyName",
       ct.concept,
-      ct.notes,
+      ct.carrier_name AS notes,
       ct.rejection_reason AS "rejectionReason",
       wo.code AS "warehouseCode",
       wo.name AS "warehouseName",
       COALESCE(ua.full_name, us.full_name) AS "createdByName",
       COALESCE(ct.approved_at, ct.created_at) AS "createdAt",
-      ct.receipt_url AS "receiptUrl",
-      COALESCE(ct.receipt_urls, '[]'::jsonb) AS "receiptUrls"
+      ct.sender_receipt_url AS "receiptUrl",
+      COALESCE(ct.sender_receipt_urls, '[]'::jsonb) AS "receiptUrls"
     FROM cash_transfers ct
     JOIN warehouses wo ON wo.id = ct.origin_warehouse_id
     JOIN warehouses wd ON wd.id = ct.destination_warehouse_id
-    LEFT JOIN users us ON us.id = ct.sent_by
+    LEFT JOIN users us ON us.id = ct.created_by
     LEFT JOIN users ua ON ua.id = ct.approved_by
     WHERE ct.status = 'rejected'
       AND LOWER(TRIM(ct.payment_method)) = 'efectivo'
@@ -1646,21 +1646,21 @@ export async function getPaymentsCashSummary(
       ct.id::text AS id,
       LOWER(TRIM(ct.payment_method)) AS method,
       COALESCE(ct.amount, 0)::float AS amount,
-      ct.transfer_code AS reference,
-      ct.reference_code AS "relatedReference",
+      ct.code AS reference,
+      NULL::text AS "relatedReference",
       wo.name AS "thirdPartyName",
       ct.concept,
-      ct.notes,
+      ct.carrier_name AS notes,
       wd.code AS "warehouseCode",
       wd.name AS "warehouseName",
       COALESCE(ua.full_name, us.full_name) AS "createdByName",
       COALESCE(ct.approved_at, ct.created_at) AS "createdAt",
-      COALESCE(ct.receive_receipt_url, ct.receipt_url) AS "receiptUrl",
-      COALESCE(ct.receive_receipt_urls, ct.receipt_urls, '[]'::jsonb) AS "receiptUrls"
+      COALESCE(ct.receiver_receipt_url, ct.sender_receipt_url) AS "receiptUrl",
+      COALESCE(ct.receiver_receipt_urls, ct.sender_receipt_urls, '[]'::jsonb) AS "receiptUrls"
     FROM cash_transfers ct
     JOIN warehouses wo ON wo.id = ct.origin_warehouse_id
     JOIN warehouses wd ON wd.id = ct.destination_warehouse_id
-    LEFT JOIN users us ON us.id = ct.sent_by
+    LEFT JOIN users us ON us.id = ct.created_by
     LEFT JOIN users ua ON ua.id = ct.approved_by
     WHERE ct.status = 'approved'
       AND LOWER(TRIM(ct.payment_method)) = 'efectivo'
@@ -1676,12 +1676,12 @@ export async function getPaymentsCashSummary(
       COALESCE(c.display_name, d.metadata->>'customerName', 'Cliente Mostrador') AS "customerName",
       COALESCE(
         NULLIF(d.discount_amount, 0),
-        NULLIF((d.metadata->>'discountAmount')::numeric, 0),
+        NULLIF(NULLIF(TRIM(d.metadata->>'discountAmount'), '')::numeric, 0),
         0
       )::float AS "discountAmount",
       COALESCE(NULLIF(TRIM(d.discount_reason), ''), NULLIF(TRIM(d.metadata->>'discountReason'), ''), d.notes) AS "discountReason",
       COALESCE(
-        (d.metadata->>'subtotalAmount')::numeric,
+        NULLIF(TRIM(d.metadata->>'subtotalAmount'), '')::numeric,
         (
           SELECT COALESCE(SUM(idl.quantity * COALESCE(idl.unit_sale_price, 0)), 0)
           FROM inventory_document_lines idl
@@ -1690,7 +1690,7 @@ export async function getPaymentsCashSummary(
         0
       )::float AS "subtotalAmount",
       COALESCE(
-        (d.metadata->>'totalAmount')::numeric,
+        NULLIF(TRIM(d.metadata->>'totalAmount'), '')::numeric,
         GREATEST(
           0,
           COALESCE(
@@ -1700,7 +1700,7 @@ export async function getPaymentsCashSummary(
               WHERE idl.document_id = d.id
             ),
             0
-          ) - COALESCE(NULLIF(d.discount_amount, 0), NULLIF((d.metadata->>'discountAmount')::numeric, 0), 0)
+          ) - COALESCE(NULLIF(d.discount_amount, 0), NULLIF(NULLIF(TRIM(d.metadata->>'discountAmount'), '')::numeric, 0), 0)
         )
       )::float AS "totalAmount",
       (
@@ -1719,7 +1719,7 @@ export async function getPaymentsCashSummary(
     LEFT JOIN users u ON u.id = d.created_by
     WHERE d.status = 'completed'
       AND d.doc_type IN ('exit', 'sale')
-      AND COALESCE(NULLIF(d.discount_amount, 0), NULLIF((d.metadata->>'discountAmount')::numeric, 0), 0) > 0
+      AND COALESCE(NULLIF(d.discount_amount, 0), NULLIF(NULLIF(TRIM(d.metadata->>'discountAmount'), '')::numeric, 0), 0) > 0
       ${whDocFilter}
       ${dateDocFilter}
     ORDER BY COALESCE(d.completed_at, d.created_at) DESC

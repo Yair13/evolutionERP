@@ -560,7 +560,7 @@ async function getDiscountAuditItemsBetween(
       COALESCE(d.exit_kind, 'sale') AS "exitKind",
       COALESCE(c.display_name, d.metadata->>'customerName', 'Cliente Mostrador') AS "customerName",
       COALESCE(
-        (d.metadata->>'subtotalAmount')::numeric,
+        NULLIF(TRIM(d.metadata->>'subtotalAmount'), '')::numeric,
         (
           SELECT COALESCE(SUM(idl.quantity * COALESCE(idl.unit_sale_price, 0)), 0)
           FROM inventory_document_lines idl
@@ -570,11 +570,11 @@ async function getDiscountAuditItemsBetween(
       )::float AS "subtotalAmount",
       COALESCE(
         NULLIF(d.discount_amount, 0),
-        NULLIF((d.metadata->>'discountAmount')::numeric, 0),
+        NULLIF(NULLIF(TRIM(d.metadata->>'discountAmount'), '')::numeric, 0),
         0
       )::float AS "discountAmount",
       COALESCE(
-        (d.metadata->>'totalAmount')::numeric,
+        NULLIF(TRIM(d.metadata->>'totalAmount'), '')::numeric,
         GREATEST(
           0,
           COALESCE(
@@ -584,7 +584,7 @@ async function getDiscountAuditItemsBetween(
               WHERE idl.document_id = d.id
             ),
             0
-          ) - COALESCE(NULLIF(d.discount_amount, 0), NULLIF((d.metadata->>'discountAmount')::numeric, 0), 0)
+          ) - COALESCE(NULLIF(d.discount_amount, 0), NULLIF(NULLIF(TRIM(d.metadata->>'discountAmount'), '')::numeric, 0), 0)
         )
       )::float AS "totalAmount",
       COALESCE(NULLIF(TRIM(d.discount_reason), ''), NULLIF(TRIM(d.metadata->>'discountReason'), ''), d.notes) AS "discountReason",
@@ -604,7 +604,7 @@ async function getDiscountAuditItemsBetween(
       AND d.warehouse_id = $1::uuid
       ${fromTime ? `AND COALESCE(d.completed_at, d.created_at) > '${fromTime}'::timestamptz` : ""}
       AND COALESCE(d.completed_at, d.created_at) <= '${toTime}'::timestamptz
-      AND COALESCE(NULLIF(d.discount_amount, 0), NULLIF((d.metadata->>'discountAmount')::numeric, 0), 0) > 0
+      AND COALESCE(NULLIF(d.discount_amount, 0), NULLIF(NULLIF(TRIM(d.metadata->>'discountAmount'), '')::numeric, 0), 0) > 0
     ORDER BY COALESCE(d.completed_at, d.created_at) DESC
     `,
     [warehouseId]
