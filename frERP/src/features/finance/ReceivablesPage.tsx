@@ -15,7 +15,6 @@ import { formatBogotaDate } from "../../lib/dateUtils.js";
 import { AddPaymentModal } from "../../components/finance/AddPaymentModal.js";
 import { ReceivableDetailModal } from "../../components/finance/ReceivableDetailModal.js";
 import { CreateReceivableModal } from "../../components/finance/CreateReceivableModal.js";
-import { ResetInitialReceivablesModal } from "../../components/finance/ResetInitialReceivablesModal.js";
 import {
   Building2,
   Clock,
@@ -27,7 +26,6 @@ import {
   ArrowDownRight,
   TrendingUp,
   PlusCircle,
-  RotateCcw,
   Trash2,
 } from "lucide-react";
 
@@ -103,7 +101,6 @@ export function ReceivablesPage() {
 
   // Modales
   const [openCreateReceivable, setOpenCreateReceivable] = useState(false);
-  const [openResetModal, setOpenResetModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleDeleteInitial = async (c: ReceivableSummaryItem) => {
@@ -254,19 +251,6 @@ export function ReceivablesPage() {
             <PlusCircle size={17} />
             <span>+ Saldo Inicial / Factura Anterior</span>
           </button>
-
-          {canManageInitial && (
-            <button
-              type="button"
-              className="fin-btn fin-btn--danger"
-              onClick={() => setOpenResetModal(true)}
-              style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
-              title="Resetear o limpiar saldos iniciales manuales por sede"
-            >
-              <RotateCcw size={16} />
-              <span>Resetear Saldos Iniciales</span>
-            </button>
-          )}
 
           <div className="fin-tabs">
             <button
@@ -934,18 +918,6 @@ export function ReceivablesPage() {
           ) : null}
         </div>
       )}
-
-      {/* Modal para Registrar Saldo Inicial / Factura Anterior */}
-      <ResetInitialReceivablesModal
-        open={openResetModal}
-        onClose={() => setOpenResetModal(false)}
-        initialWarehouseId={warehouseId || selectedWarehouseId || ""}
-        onSuccess={() => {
-          void loadCredits();
-          if (selectedCustId) void loadCustomerProfile(selectedCustId);
-          if (activeTab === "report") void loadReport();
-        }}
-      />
 
       <CreateReceivableModal
         open={openCreateReceivable}
