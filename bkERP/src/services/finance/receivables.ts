@@ -1667,7 +1667,7 @@ export async function listCustomersWithSummary(
   let filterCond = "";
   const creditBalanceExpr = opts.warehouseId
     ? `COALESCE((SELECT cw.credit_balance FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = c.id AND cw.warehouse_id = $1::uuid), 0)`
-    : `COALESCE(c.credit_balance, 0)`;
+    : `COALESCE((SELECT SUM(cw.credit_balance) FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = c.id), c.credit_balance, 0)`;
 
   if (opts.filter === "with_debt") {
     filterCond = `AND COALESCE(ar_agg.total_debt, 0) > 0`;
@@ -1739,22 +1739,27 @@ export async function listCustomersWithSummary(
         SUM(sub.invoices_count)::int AS invoices_count,
         SUM(sub.total_billed)::float AS total_billed,
         SUM(sub.total_debt)::float AS total_debt,
-        SUM(sub.total_abonos)::float AS total_abonos
+        SUM(sub.total_abonos)::float AS total_abonos,
+        SUM(sub.credit_balance)::float AS credit_balance
       FROM (
-        SELECT customer_id, warehouse_id, COUNT(*)::int AS invoices_count, COALESCE(SUM(net_total), 0)::float AS total_billed, 0::float AS total_debt, 0::float AS total_abonos
+        SELECT customer_id, warehouse_id, COUNT(*)::int AS invoices_count, COALESCE(SUM(net_total), 0)::float AS total_billed, 0::float AS total_debt, 0::float AS total_abonos, 0::float AS credit_balance
         FROM doc_totals
         WHERE warehouse_id IS NOT NULL
         GROUP BY customer_id, warehouse_id
         UNION ALL
-        SELECT ar.customer_id, ar.warehouse_id, COUNT(*) FILTER (WHERE ar.document_id IS NULL)::int AS invoices_count, COALESCE(SUM(ar.total_amount) FILTER (WHERE ar.document_id IS NULL), 0)::float AS total_billed, COALESCE(SUM(ar.balance_amount) FILTER (WHERE ar.status IN ('open', 'partial')), 0)::float AS total_debt, 0::float AS total_abonos
+        SELECT ar.customer_id, ar.warehouse_id, COUNT(*) FILTER (WHERE ar.document_id IS NULL)::int AS invoices_count, COALESCE(SUM(ar.total_amount) FILTER (WHERE ar.document_id IS NULL), 0)::float AS total_billed, COALESCE(SUM(ar.balance_amount) FILTER (WHERE ar.status IN ('open', 'partial')), 0)::float AS total_debt, 0::float AS total_abonos, 0::float AS credit_balance
         FROM accounts_receivable ar
         WHERE ar.status != 'cancelled' ${whArCond}
         GROUP BY ar.customer_id, ar.warehouse_id
         UNION ALL
-        SELECT rp.customer_id, rp.warehouse_id, 0::int AS invoices_count, 0::float AS total_billed, 0::float AS total_debt, COALESCE(SUM(rp.amount), 0)::float AS total_abonos
+        SELECT rp.customer_id, rp.warehouse_id, 0::int AS invoices_count, 0::float AS total_billed, 0::float AS total_debt, COALESCE(SUM(rp.amount), 0)::float AS total_abonos, 0::float AS credit_balance
         FROM receivable_payments rp
         WHERE 1=1 ${whPayCond}
         GROUP BY rp.customer_id, rp.warehouse_id
+        UNION ALL
+        SELECT cw.customer_id, cw.warehouse_id, 0::int AS invoices_count, 0::float AS total_billed, 0::float AS total_debt, 0::float AS total_abonos, COALESCE(cw.credit_balance, 0)::float AS credit_balance
+        FROM customer_warehouse_credit_balances cw
+        WHERE cw.credit_balance > 0 ${opts.warehouseId ? `AND cw.warehouse_id = $1::uuid` : ""}
       ) sub
       JOIN warehouses w ON w.id = sub.warehouse_id
       GROUP BY sub.customer_id, sub.warehouse_id, w.code, w.name
@@ -1771,7 +1776,7 @@ export async function listCustomersWithSummary(
             'totalBilled', total_billed,
             'totalDebt', total_debt,
             'totalAbonos', total_abonos,
-            'creditBalance', COALESCE((SELECT cw.credit_balance FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = sub.customer_id AND cw.warehouse_id = sub.warehouse_id), 0)::float
+            'creditBalance', credit_balance
           ) ORDER BY warehouse_name
         ) AS warehouses
       FROM wh_breakdown
@@ -1787,7 +1792,7 @@ export async function listCustomersWithSummary(
         ${
           opts.warehouseId
             ? `COALESCE((SELECT cw.credit_balance FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = c.id AND cw.warehouse_id = $1::uuid), 0)::float`
-            : `COALESCE(c.credit_balance, 0)::float`
+            : `COALESCE((SELECT SUM(cw.credit_balance) FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = c.id), c.credit_balance, 0)::float`
         } AS "creditBalance",
         (COALESCE(doc_agg.invoices_count, 0) + COALESCE(ar_agg.manual_count, 0))::int AS "invoicesCount",
         (COALESCE(doc_agg.total_billed, 0) + COALESCE(ar_agg.manual_billed, 0))::float AS "totalBilled",

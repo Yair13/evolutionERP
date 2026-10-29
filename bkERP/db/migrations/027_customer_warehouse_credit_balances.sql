@@ -92,3 +92,11 @@ GROUP BY sub.customer_id, sub.warehouse_id
 HAVING SUM(sub.amount) > 0
 ON CONFLICT (customer_id, warehouse_id)
 DO UPDATE SET credit_balance = EXCLUDED.credit_balance, updated_at = now();
+
+-- Sincronizar saldo consolidado en tabla principal de clientes
+UPDATE customers c
+SET credit_balance = COALESCE((
+  SELECT SUM(cw.credit_balance)
+  FROM customer_warehouse_credit_balances cw
+  WHERE cw.customer_id = c.id
+), 0);
