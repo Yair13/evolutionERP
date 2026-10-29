@@ -44,11 +44,22 @@ FROM (
   SELECT
     d.customer_id,
     d.warehouse_id,
-    COALESCE((d.metadata->>'excessToFavour')::numeric, 0) AS amount
+    COALESCE(
+      CASE
+        WHEN (d.metadata->>'excessToFavour') ~ '^[0-9]+(\.[0-9]+)?$'
+        THEN (d.metadata->>'excessToFavour')::numeric
+        ELSE 0
+      END,
+      0
+    ) AS amount
   FROM inventory_documents d
   WHERE d.customer_id IS NOT NULL
     AND d.status = 'completed'
-    AND COALESCE((d.metadata->>'excessToFavour')::numeric, 0) > 0
+    AND d.metadata IS NOT NULL
+    AND jsonb_typeof(d.metadata) = 'object'
+    AND (d.metadata->>'excessToFavour') IS NOT NULL
+    AND (d.metadata->>'excessToFavour') ~ '^[0-9]+(\.[0-9]+)?$'
+    AND (d.metadata->>'excessToFavour')::numeric > 0
 
   UNION ALL
 
@@ -56,9 +67,22 @@ FROM (
   SELECT
     d.customer_id,
     d.warehouse_id,
-    -COALESCE((elem->>'amount')::numeric, 0) AS amount
+    -COALESCE(
+      CASE
+        WHEN (elem->>'amount') ~ '^-?[0-9]+(\.[0-9]+)?$'
+        THEN (elem->>'amount')::numeric
+        ELSE 0
+      END,
+      0
+    ) AS amount
   FROM inventory_documents d,
-  LATERAL jsonb_array_elements(COALESCE(d.metadata->'paymentBreakdown', '[]'::jsonb)) AS elem
+  LATERAL jsonb_array_elements(
+    CASE
+      WHEN jsonb_typeof(d.metadata->'paymentBreakdown') = 'array'
+      THEN d.metadata->'paymentBreakdown'
+      ELSE '[]'::jsonb
+    END
+  ) AS elem
   WHERE d.customer_id IS NOT NULL
     AND d.status = 'completed'
     AND elem->>'method' = 'saldo_a_favor'
