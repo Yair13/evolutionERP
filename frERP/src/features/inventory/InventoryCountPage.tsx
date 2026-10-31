@@ -175,7 +175,6 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
   const pistolDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pistolBusyRef = useRef(false);
   const pistolValueRef = useRef("");
-  const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     if (canViewAllWarehouses) return;
@@ -326,15 +325,15 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
       try {
         const item = await resolveScan(code);
         await bumpLine(item.id, 1);
-        const el = listRef.current?.querySelector(`[data-product-id="${item.id}"]`);
-        el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Código no reconocido");
       } finally {
         pistolBusyRef.current = false;
         setPistolCode("");
         pistolValueRef.current = "";
-        pistolInputRef.current?.focus();
+        if (document.activeElement === pistolInputRef.current) {
+          pistolInputRef.current?.focus({ preventScroll: true });
+        }
       }
     },
     [count, resolveScan, bumpLine]
@@ -504,12 +503,6 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
       : liveStats.countedTotal > 0
         ? 100
         : 0;
-
-  useEffect(() => {
-    if (count?.status === "open") {
-      pistolInputRef.current?.focus();
-    }
-  }, [count?.id, count?.status]);
 
   return (
     <div className="inv-page inv-count">
@@ -742,7 +735,7 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
             ))}
           </div>
 
-          <ul className="inv-count-list" ref={listRef}>
+          <ul className="inv-count-list">
             {filteredLines.map((line) => {
               const st = lineStatus(line);
               const pct = progressPct(line.countedQuantity, line.expectedQuantity);
