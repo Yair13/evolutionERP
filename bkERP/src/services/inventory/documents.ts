@@ -152,7 +152,7 @@ export type UnlockDocumentEditingInput = {
   observation: string;
 };
 
-export type MovementKind = "entry" | ExitKind;
+export type MovementKind = "entry" | "exit" | ExitKind;
 
 export type EditCompletedDocumentInput = {
   movementKind: MovementKind;
@@ -170,7 +170,8 @@ function parseMovementKind(kind: MovementKind): {
   if (kind === "entry") {
     return { docType: "entry", exitKind: null, isEntry: true };
   }
-  return { docType: docTypeForExitKind(kind), exitKind: kind, isEntry: false };
+  const effectiveExitKind: ExitKind = kind === "exit" ? "sale" : kind;
+  return { docType: docTypeForExitKind(effectiveExitKind), exitKind: effectiveExitKind, isEntry: false };
 }
 
 function mergeEditLines(lines: ConfirmLineInput[]): ConfirmLineInput[] {

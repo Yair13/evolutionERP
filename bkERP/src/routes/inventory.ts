@@ -412,7 +412,18 @@ export function createInventoryRouter(): Router {
       res.status(400).json({ error: "invalid_lines" });
       return;
     }
-    const validKinds = ["entry", "sale", "return", "credit", "warranty"] as const;
+    const validKinds = [
+      "entry",
+      "exit",
+      "sale",
+      "return",
+      "credit",
+      "warranty",
+      "distribution",
+      "transfer",
+      "return_to_factory",
+      "exchange",
+    ] as const;
     if (!movementKind || !validKinds.includes(movementKind)) {
       res.status(400).json({ error: "invalid_movement_kind" });
       return;

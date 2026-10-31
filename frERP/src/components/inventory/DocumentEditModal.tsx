@@ -19,6 +19,7 @@ const ERROR_LABELS: Record<string, string> = {
   document_not_today: "Solo se pueden editar movimientos del día de hoy.",
   movement_edit_forbidden: "No tienes permiso para editar movimientos.",
   editing_not_unlocked: "Primero activa la edición en la tarjeta del movimiento.",
+  invalid_movement_kind: "Tipo de movimiento no válido.",
   customer_name_required: "Venta: indica el nombre del cliente.",
   related_invoice_required: "Garantía: indica el número de factura original.",
   sale_price_below_suggested: "El valor de salida no puede ser menor al precio sugerido del catálogo.",
@@ -44,7 +45,10 @@ type Props = {
 
 function initialMovementKind(doc: InventoryDocumentDetail): MovementKind {
   if (doc.docType === "entry") return "entry";
-  return doc.exitKind ?? "sale";
+  if (doc.exitKind && EXIT_KIND_OPTIONS.some((o) => o.value === doc.exitKind)) {
+    return doc.exitKind;
+  }
+  return "sale";
 }
 
 function linesToCart(doc: InventoryDocumentDetail): CartLine[] {
