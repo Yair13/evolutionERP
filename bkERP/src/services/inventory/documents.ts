@@ -1330,9 +1330,6 @@ export async function unlockDocumentEditing(
     if (!doc || doc.status !== "completed") {
       throw Object.assign(new Error("document_not_found"), { code: "document_not_found" });
     }
-    if (!doc.is_today) {
-      throw Object.assign(new Error("document_not_today"), { code: "document_not_today" });
-    }
 
     if (!doc.already_unlocked) {
       await client.query(
@@ -1431,10 +1428,6 @@ export async function editCompletedDocument(
       throw Object.assign(new Error("document_not_found"), { code: "document_not_found" });
     }
 
-    if (!doc.is_today) {
-      throw Object.assign(new Error("document_not_today"), { code: "document_not_today" });
-    }
-
     if (!doc.editing_unlocked) {
       throw Object.assign(new Error("editing_not_unlocked"), { code: "editing_not_unlocked" });
     }
@@ -1457,33 +1450,11 @@ export async function editCompletedDocument(
 
     const customerId = isEntry ? null : await resolveCustomerId(client, customerName);
 
-    const { rows: oldMovements } = await client.query<{
-      product_id: string;
-      quantity: string;
-    }>(
-      `SELECT product_id::text, quantity::text
-       FROM stock_movements WHERE batch_id = $1::uuid`,
+    // Revertir el inventario previo del comprobante antes de aplicar las nuevas cantidades
+    await client.query(
+      `DELETE FROM stock_movements WHERE batch_id = $1::uuid`,
       [documentId]
     );
-
-    for (const mov of oldMovements) {
-      await client.query(
-        `
-        INSERT INTO stock_movements (
-          warehouse_id, product_id, movement_type, quantity, batch_id, created_by, notes
-        )
-        VALUES ($1::uuid, $2::uuid, 'adjustment', $3, $4::uuid, $5::uuid, $6)
-        `,
-        [
-          warehouseId,
-          mov.product_id,
-          -Number(mov.quantity),
-          documentId,
-          auth.userId,
-          "Reversión edición · anula movimiento anterior",
-        ]
-      );
-    }
 
     await client.query(`DELETE FROM inventory_document_lines WHERE document_id = $1::uuid`, [documentId]);
 
@@ -1599,6 +1570,30 @@ export async function editCompletedDocument(
         auth.userId,
       ]
     );
+
+    if (exitKind === "credit") {
+      const { rows: sumRows } = await client.query<{ subtotal: string }>(
+        `SELECT COALESCE(SUM(quantity * COALESCE(unit_sale_price, 0)), 0)::text AS subtotal
+         FROM inventory_document_lines WHERE document_id = $1::uuid`,
+        [documentId]
+      );
+      const subtotal = Number(sumRows[0]?.subtotal ?? 0);
+      const discount = Number((doc as { discount_amount?: string | number }).discount_amount ?? 0);
+      const newTotal = Math.max(0, subtotal - discount);
+      await client.query(
+        `UPDATE accounts_receivable
+         SET total_amount = $2,
+             balance_amount = GREATEST(0, $2 - COALESCE(initial_payment, 0) - COALESCE(paid_amount, 0)),
+             status = CASE
+               WHEN GREATEST(0, $2 - COALESCE(initial_payment, 0) - COALESCE(paid_amount, 0)) <= 0 THEN 'paid'
+               WHEN COALESCE(paid_amount, 0) > 0 OR COALESCE(initial_payment, 0) > 0 THEN 'partial'
+               ELSE 'open'
+             END,
+             updated_at = now()
+         WHERE document_id = $1::uuid`,
+        [documentId, newTotal]
+      );
+    }
 
     await client.query(
       `

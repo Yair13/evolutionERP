@@ -220,7 +220,11 @@ export function AddDirectPaymentModal({
       onSuccess(res);
       onClose();
     } catch (err: any) {
-      setError(err?.message || "Error al registrar el abono sin factura.");
+      if (err?.message === "Failed to fetch" || (err instanceof TypeError && err.message?.includes("fetch"))) {
+        setError("Error de conexión con el servidor al registrar el abono. Verifica tu conexión a internet.");
+      } else {
+        setError(err?.message || "Error al registrar el abono sin factura.");
+      }
     } finally {
       setSubmitting(false);
     }

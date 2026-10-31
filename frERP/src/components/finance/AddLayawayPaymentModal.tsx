@@ -110,6 +110,8 @@ export function AddLayawayPaymentModal({
     } catch (err: any) {
       if (err.message === "insufficient_credit_balance") {
         setError("El cliente no tiene suficiente saldo a favor.");
+      } else if (err.message === "Failed to fetch" || (err instanceof TypeError && err.message?.includes("fetch"))) {
+        setError("Error de conexión con el servidor al registrar el abono. Verifica tu conexión a internet.");
       } else {
         setError(err instanceof Error ? err.message : "Error al registrar el abono.");
       }

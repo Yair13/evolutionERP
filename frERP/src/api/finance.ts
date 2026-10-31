@@ -1624,22 +1624,31 @@ export async function uploadClosureReceiptFile(
   const base = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${base}/finance/closures/upload-receipt`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body: form,
-  });
-  if (!res.ok) {
-    let msg = res.statusText;
-    try {
-      const data = await res.json();
-      if (data?.error) msg = String(data.error);
-    } catch {
-      /* ignore */
+  try {
+    const res = await fetch(`${base}/finance/closures/upload-receipt`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!res.ok) {
+      let msg = res.statusText;
+      try {
+        const data = await res.json();
+        if (data?.error) msg = String(data.error);
+      } catch {
+        /* ignore */
+      }
+      throw new Error(msg);
     }
-    throw new Error(msg);
+    return (await res.json()) as { filename: string; publicUrl: string };
+  } catch (err: any) {
+    if (err instanceof TypeError && err.message.includes("fetch")) {
+      throw new Error(
+        "No se pudo conectar con el servidor para subir el comprobante. Verifica tu conexión o que la imagen no sea demasiado pesada."
+      );
+    }
+    throw err;
   }
-  return res.json() as Promise<{ filename: string; publicUrl: string }>;
 }
 
 export async function uploadClosureReceiptFiles(

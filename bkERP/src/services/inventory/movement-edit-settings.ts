@@ -14,7 +14,10 @@ export type MovementEditSettings = {
 };
 
 export function canManageMovementEditing(auth: AuthContext): boolean {
-  return auth.roles.some((r) => r === "super_admin" || r === "secretaria");
+  return (
+    auth.hasAdminAccess ||
+    auth.roles.some((r) => r === "super_admin" || r === "secretaria" || r === "admin_local")
+  );
 }
 
 export function isOutboundDocType(docType: string): boolean {

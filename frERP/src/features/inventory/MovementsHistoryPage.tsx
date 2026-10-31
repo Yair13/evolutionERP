@@ -48,7 +48,6 @@ import {
   getDaysAgoBogotaYmd,
   getFirstDayOfMonthBogotaYmd,
   formatBogotaDateTimeShort,
-  isTodayBogota,
 } from "../../lib/dateUtils.js";
 
 type FilterDocType = "" | DocType | "adjustment";
@@ -81,10 +80,6 @@ function localMonthStartYmd(): string {
   return getFirstDayOfMonthBogotaYmd();
 }
 
-function docIsToday(doc: { completedAt?: string | null; createdAt: string }): boolean {
-  return isTodayBogota(doc.completedAt ?? doc.createdAt);
-}
-
 function isExitCategory(docType: string): boolean {
   return docType === "exit" || docType === "warranty" || docType === "return";
 }
@@ -100,7 +95,12 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
   const { canViewAllWarehouses, warehouses, isAllWarehouses, sessionLabel, effectiveWarehouseId } =
     useInventoryScope();
   const canManageEditing =
-    user?.roles.includes("super_admin") || user?.roles.includes("secretaria") || false;
+    user?.roles.includes("super_admin") ||
+    user?.roles.includes("secretaria") ||
+    user?.roles.includes("admin_local") ||
+    user?.hasAdminAccess ||
+    canViewAllWarehouses ||
+    false;
   const isAdminSede =
     canManageEditing || canViewAllWarehouses || user?.roles.includes("admin_local") || false;
 
@@ -926,7 +926,7 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
             const showAmount = !isEntry && !isAdjustment && (doc.totalAmount ?? 0) > 0;
             const edited = (doc.editCount ?? 0) > 0;
             const showEditActions =
-              canManageEditing && docIsToday(doc) && !cancelled && !isAdjustment;
+              canManageEditing && !cancelled && !isAdjustment;
             const unlocked = doc.editingUnlocked === true;
             const docCode = doc.invoiceNumber || doc.productionOrderCode || doc.purchaseOrderCode;
             const countSubLabel =

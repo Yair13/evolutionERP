@@ -19,11 +19,17 @@ function isMobileOrTablet(): boolean {
 }
 
 async function compressImageFile(file: File): Promise<File> {
-  if (!file.type.startsWith("image/") || file.type.includes("svg") || file.type.includes("gif")) {
+  const name = (file.name || "").toLowerCase();
+  const isImageExt = /\.(jpe?g|png|webp|heic|heif|bmp|jfif)$/i.test(name);
+  const isImageMime = (file.type || "").startsWith("image/");
+
+  // Si no es imagen (ej. PDF) o es SVG/GIF animado, no alterar
+  if ((!isImageMime && !isImageExt) || file.type.includes("svg") || file.type.includes("gif")) {
     return file;
   }
-  // Si pesa menos de 800 KB, no requiere compresión
-  if (file.size < 800 * 1024) {
+
+  // Si ya es un JPEG/PNG/WebP de menos de 200 KB, no requiere recompresión
+  if (file.size < 200 * 1024 && (file.type === "image/jpeg" || file.type === "image/png" || file.type === "image/webp")) {
     return file;
   }
 
@@ -32,7 +38,7 @@ async function compressImageFile(file: File): Promise<File> {
     const url = URL.createObjectURL(file);
     img.onload = () => {
       URL.revokeObjectURL(url);
-      const maxDim = 1920;
+      const maxDim = 1280; // Resolución óptima para leer perfectamente comprobantes bancarios
       let width = img.width;
       let height = img.height;
 
@@ -61,14 +67,15 @@ async function compressImageFile(file: File): Promise<File> {
             resolve(file);
             return;
           }
-          const compressed = new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), {
+          const baseName = (file.name || "comprobante.jpg").replace(/\.[^.]+$/, "");
+          const compressed = new File([blob], `${baseName}.jpg`, {
             type: "image/jpeg",
             lastModified: Date.now(),
           });
           resolve(compressed);
         },
         "image/jpeg",
-        0.85
+        0.75 // 75%: comprobantes nítidos, texto ultra legible y peso menor a 150 KB
       );
     };
     img.onerror = () => {

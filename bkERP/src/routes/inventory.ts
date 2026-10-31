@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import { getPool } from "../db.js";
 import { firstPathParam } from "../lib/path-params.js";
 import { canManageInventory } from "../lib/inventory-permissions.js";
@@ -109,7 +109,21 @@ export function createInventoryRouter(): Router {
   r.use(requireAuth);
 
   const superAdminOnly = requireAnyRole("super_admin");
-  const movementEditManagers = requireAnyRole("super_admin", "secretaria");
+  const movementEditManagers: RequestHandler = (req, res, next) => {
+    const auth = req.auth;
+    if (!auth) {
+      res.status(401).json({ error: "missing_auth" });
+      return;
+    }
+    const ok =
+      auth.hasAdminAccess ||
+      auth.roles.some((r: string) => r === "super_admin" || r === "secretaria" || r === "admin_local");
+    if (!ok) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    next();
+  };
 
   r.get("/utilities/summary", requireAuth, superAdminOnly, async (req, res, next) => {
     const pool = getPool();

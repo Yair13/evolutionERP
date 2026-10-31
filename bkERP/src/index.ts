@@ -9,6 +9,7 @@ import express from "express";
 import { join } from "node:path";
 import { checkDb, closePool } from "./db.js";
 import { ensureUploadsDir, UPLOADS_ROOT } from "./lib/product-uploads.js";
+import { ensureClosureUploadsDir } from "./lib/closure-uploads.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createDashboardRouter } from "./routes/dashboard.js";
 import { createRolesRouter } from "./routes/roles.js";
@@ -35,7 +36,8 @@ app.use(
     },
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(
   "/uploads",
   express.static(join(UPLOADS_ROOT), {
@@ -76,17 +78,18 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     return;
   }
   if (e?.code === "LIMIT_FILE_SIZE") {
-    res.status(400).json({ error: "file_too_large" });
+    res.status(400).json({ error: "El archivo del comprobante es demasiado pesado." });
     return;
   }
-  if (e?.message === "invalid_image_type") {
-    res.status(400).json({ error: "invalid_image_type" });
+  if (e?.message === "invalid_receipt_file_type" || e?.message === "invalid_image_type") {
+    res.status(400).json({ error: "Formato de imagen no válido. Usa JPG, PNG, WEBP o PDF." });
     return;
   }
   res.status(500).json({ error: "internal_error" });
 });
 
 await ensureUploadsDir();
+await ensureClosureUploadsDir();
 try {
   await runMigrations();
 } catch (migErr) {
