@@ -51,6 +51,7 @@ import {
   listCounts,
   openCount,
   resetCountedQuantities,
+  syncCountExpectedStock,
   updateCountLine,
   type CountKind,
   type CountStatus,
@@ -1700,6 +1701,43 @@ export function createInventoryRouter(): Router {
         code === "count_not_open" ||
         code === "product_not_found" ||
         code === "invalid_quantity" ||
+        code === "warehouse_forbidden" ||
+        code === "initial_count_requires_admin"
+      ) {
+        res.status(
+          code === "warehouse_forbidden" || code === "initial_count_requires_admin"
+            ? 403
+            : code === "count_not_found"
+              ? 404
+              : 400
+        ).json({
+          error: code,
+        });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  r.post("/counts/:id/sync-stock", requireWarehouse, manageInventory, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+    const id = firstPathParam(req.params.id);
+    if (!id || !isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+    try {
+      const item = await syncCountExpectedStock(pool, req.auth!, id);
+      res.json({ item });
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (
+        code === "count_not_found" ||
+        code === "count_not_open" ||
         code === "warehouse_forbidden" ||
         code === "initial_count_requires_admin"
       ) {

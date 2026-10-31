@@ -16,6 +16,7 @@ import {
   Minus,
   Package,
   Plus,
+  RefreshCw,
   RotateCcw,
   ScanLine,
   Search,
@@ -28,6 +29,7 @@ import {
   fetchOpenInventoryCount,
   openInventoryCount,
   resetInventoryCountCounted,
+  syncInventoryCountStock,
   updateInventoryCountLine,
 } from "../../api/inventory.js";
 const BarcodeScannerModal = lazy(() =>
@@ -161,6 +163,7 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [flashProductId, setFlashProductId] = useState<string | null>(null);
@@ -378,6 +381,22 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
       setError(countErrorMessage(msg));
     } finally {
       setOpening(false);
+    }
+  };
+
+  const handleSyncStock = async () => {
+    if (!token || !activeWarehouseId || !count || count.status !== "open") return;
+    setSyncing(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const { item } = await syncInventoryCountStock(token, activeWarehouseId, count.id);
+      applyServerCount(item);
+      setSuccess("Stock del sistema actualizado con las ventas, salidas y entradas recientes. Lo contado se conserva.");
+    } catch (err) {
+      setError(countErrorMessage(err instanceof Error ? err.message : "Error al actualizar stock"));
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -634,16 +653,41 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
         <>
           <section className="inv-count-summary" aria-label="Resumen del cierre">
             <div className="inv-count-summary__top">
-              <div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 <p className="inv-count-summary__kind">
                   {count.countKind === "initial" ? "Inventario inicial" : "Cierre / descuadre"}
                   {selectedWarehouse ? ` · ${selectedWarehouse.name}` : ""}
                   {count.invoiceNumber ? ` · ${count.invoiceNumber}` : ""}
                 </p>
-                <p className="inv-count-summary__totals">
-                  Contado <strong>{liveStats.countedTotal}</strong> / Sistema{" "}
-                  <strong>{liveStats.expectedTotal}</strong>
-                </p>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                  <p className="inv-count-summary__totals" style={{ margin: 0 }}>
+                    Contado <strong>{liveStats.countedTotal}</strong> / Sistema{" "}
+                    <strong>{liveStats.expectedTotal}</strong>
+                  </p>
+                  <button
+                    type="button"
+                    className="inv-btn inv-btn--ghost inv-btn--sm"
+                    disabled={syncing || saving}
+                    onClick={() => void handleSyncStock()}
+                    title="Actualizar stock del sistema con las ventas, salidas y entradas ocurridas durante el conteo"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      padding: "4px 10px",
+                      fontSize: "0.8rem",
+                      fontWeight: 600,
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      background: "#ffffff",
+                      color: "#0f766e",
+                      cursor: syncing || saving ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    <RefreshCw size={13} className={syncing ? "spin" : ""} aria-hidden />
+                    <span>{syncing ? "Actualizando stock…" : "Actualizar stock del sistema"}</span>
+                  </button>
+                </div>
               </div>
               <div className="inv-count-summary__chips" role="list">
                 <span className="inv-count-chip inv-count-chip--ok" role="listitem">
@@ -856,7 +900,17 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
             <button
               type="button"
               className="inv-btn inv-btn--ghost"
-              disabled={saving}
+              disabled={syncing || saving}
+              onClick={() => void handleSyncStock()}
+              title="Refrescar el stock del sistema con las ventas, salidas y entradas recientes"
+            >
+              <RefreshCw size={16} strokeWidth={2} className={syncing ? "spin" : ""} aria-hidden />
+              <span>{syncing ? "Actualizando stock…" : "Actualizar stock del sistema"}</span>
+            </button>
+            <button
+              type="button"
+              className="inv-btn inv-btn--ghost"
+              disabled={syncing || saving}
               onClick={() => void handleResetCounted()}
             >
               <RotateCcw size={16} strokeWidth={2} aria-hidden />

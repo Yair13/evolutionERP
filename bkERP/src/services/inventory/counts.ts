@@ -615,6 +615,102 @@ export async function resetCountedQuantities(
   }
 }
 
+/**
+ * Actualiza el stock esperado del sistema (expected_quantity) de un conteo abierto
+ * consultando el stock actual real en v_warehouse_product_stock.
+ * Permite reflejar ventas, salidas o entradas ocurridas en caja o almacén mientras el conteo sigue abierto.
+ * Conserva intacto todo lo que ya se haya pistoleado o contado (counted_quantity).
+ */
+export async function syncCountExpectedStock(
+  pool: pg.Pool,
+  auth: AuthContext,
+  countId: string
+): Promise<InventoryCountDetail> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: heads } = await client.query<{
+      id: string;
+      warehouse_id: string;
+      status: string;
+      count_kind: string;
+    }>(
+      `
+      SELECT id::text, warehouse_id::text, status, count_kind
+      FROM inventory_counts
+      WHERE id = $1::uuid
+      FOR UPDATE
+      `,
+      [countId]
+    );
+    const head = heads[0];
+    if (!head) {
+      throw Object.assign(new Error("count_not_found"), { code: "count_not_found" });
+    }
+    if (head.status !== "open") {
+      throw Object.assign(new Error("count_not_open"), { code: "count_not_open" });
+    }
+    if (head.count_kind === "initial" && !auth.hasAdminAccess) {
+      throw Object.assign(new Error("initial_count_requires_admin"), {
+        code: "initial_count_requires_admin",
+      });
+    }
+    if (
+      auth.warehouseIds !== null &&
+      !auth.warehouseIds.includes(head.warehouse_id)
+    ) {
+      throw Object.assign(new Error("warehouse_forbidden"), { code: "warehouse_forbidden" });
+    }
+
+    // 1. Actualizar expected_quantity en las líneas existentes con el stock actual de v_warehouse_product_stock
+    await client.query(
+      `
+      UPDATE inventory_count_lines l
+      SET expected_quantity = COALESCE(s.quantity_on_hand, 0)
+      FROM products p
+      LEFT JOIN v_warehouse_product_stock s
+        ON s.product_id = p.id AND s.warehouse_id = $2::uuid
+      WHERE l.count_id = $1::uuid
+        AND l.product_id = p.id
+      `,
+      [countId, head.warehouse_id]
+    );
+
+    // 2. Insertar productos nuevos activos que no estuvieran en el snapshot inicial
+    await client.query(
+      `
+      INSERT INTO inventory_count_lines (count_id, product_id, expected_quantity, counted_quantity)
+      SELECT
+        $1::uuid,
+        p.id,
+        COALESCE(s.quantity_on_hand, 0),
+        0
+      FROM products p
+      LEFT JOIN v_warehouse_product_stock s
+        ON s.product_id = p.id AND s.warehouse_id = $2::uuid
+      WHERE p.is_active = true
+        AND NOT EXISTS (
+          SELECT 1 FROM inventory_count_lines l2 
+          WHERE l2.count_id = $1::uuid AND l2.product_id = p.id
+        )
+      `,
+      [countId, head.warehouse_id]
+    );
+
+    await client.query("COMMIT");
+
+    const detail = await getCount(pool, auth, countId, head.warehouse_id);
+    if (!detail) throw new Error("count_sync_failed");
+    return detail;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function cancelCount(
   pool: pg.Pool,
   auth: AuthContext,

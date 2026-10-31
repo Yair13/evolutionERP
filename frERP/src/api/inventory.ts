@@ -753,6 +753,19 @@ export async function resetInventoryCountCounted(
   );
 }
 
+export async function syncInventoryCountStock(
+  token: string,
+  warehouseId: string,
+  countId: string
+) {
+  return inventoryFetch<{ item: InventoryCountDetail }>(
+    `/inventory/counts/${countId}/sync-stock?warehouseId=${warehouseId}`,
+    token,
+    warehouseId,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
+  );
+}
+
 export async function cancelInventoryCount(
   token: string,
   warehouseId: string,
