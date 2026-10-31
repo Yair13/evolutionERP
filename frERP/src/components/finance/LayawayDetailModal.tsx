@@ -1,10 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { fetchLayawayDetail, cancelLayaway, type LayawayDetail, type LayawaySummaryItem, type ReceiptAuditItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
-import { Bookmark, X, Calendar, Wallet, AlertCircle, Ban, Camera, Upload } from "lucide-react";
+import { Bookmark, X, Calendar, Wallet, AlertCircle, Ban, Camera, Upload, Printer } from "lucide-react";
 import { formatBogotaDateTime } from "../../lib/dateUtils.js";
 import { ViewReceiptPhotosModal } from "../common/ViewReceiptPhotosModal.js";
 import { UploadReceiptModal } from "./UploadReceiptModal.js";
+import {
+  PrintLayawayPaymentVoucherModal,
+  type LayawayPaymentVoucherData,
+} from "./PrintLayawayPaymentVoucherModal.js";
 
 type Props = {
   open: boolean;
@@ -49,6 +53,7 @@ export function LayawayDetailModal({
   const [viewingUrls, setViewingUrls] = useState<string[] | null>(null);
   const [viewingRef, setViewingRef] = useState<string>("");
   const [uploadItem, setUploadItem] = useState<ReceiptAuditItem | null>(null);
+  const [voucherToPrint, setVoucherToPrint] = useState<LayawayPaymentVoucherData | null>(null);
 
   const loadData = useCallback(async () => {
     if (!token || !layawayId) return;
@@ -260,10 +265,11 @@ export function LayawayDetailModal({
                           <th style={{ textAlign: "center" }}>Soporte</th>
                           <th>Registrado por</th>
                           <th>Notas</th>
+                          <th style={{ textAlign: "center" }}>Imprimir</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {detail.payments.map((p) => {
+                        {detail.payments.map((p, pIdx) => {
                           const urls = (p.receiptUrls && p.receiptUrls.length > 0)
                             ? p.receiptUrls
                             : (p.receiptUrl ? [p.receiptUrl] : []);
@@ -342,6 +348,52 @@ export function LayawayDetailModal({
                               </td>
                               <td>{p.createdByName || "—"}</td>
                               <td>{p.notes || "—"}</td>
+                              <td style={{ textAlign: "center" }}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const accumulatedUpTo = detail.payments
+                                      .slice(0, pIdx + 1)
+                                      .reduce((sum, item) => sum + item.amount, 0);
+                                    const remainingAtThatPoint = Math.max(0, detail.targetAmount - accumulatedUpTo);
+
+                                    setVoucherToPrint({
+                                      receiptNumber: p.receiptNumber,
+                                      createdAt: p.createdAt,
+                                      amount: p.amount,
+                                      paymentMethod: p.paymentMethod,
+                                      notes: p.notes,
+                                      createdByName: p.createdByName,
+                                      layawayCode: detail.code,
+                                      warehouseName: p.warehouseName || detail.warehouseName,
+                                      warehouseCode: p.warehouseCode || detail.warehouseCode,
+                                      customerName: detail.customerName,
+                                      customerTaxId: detail.customerTaxId,
+                                      customerPhone: detail.customerPhone,
+                                      targetAmount: detail.targetAmount,
+                                      paidAmount: accumulatedUpTo,
+                                      remainingAmount: remainingAtThatPoint,
+                                      expiryDate: detail.expiryDate,
+                                      layawayNotes: detail.notes,
+                                      items: detail.items,
+                                    });
+                                  }}
+                                  className="inv-btn inv-btn--ghost"
+                                  style={{
+                                    fontSize: "0.72rem",
+                                    padding: "2px 7px",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "0.25rem",
+                                    color: "#4f46e5",
+                                    border: "1px solid rgba(79, 70, 229, 0.3)",
+                                  }}
+                                  title="Imprimir Comprobante de Abono"
+                                >
+                                  <Printer size={13} />
+                                  <span>Voucher</span>
+                                </button>
+                              </td>
                             </tr>
                           );
                         })}
@@ -468,6 +520,15 @@ export function LayawayDetailModal({
             setUploadItem(null);
             loadData();
           }}
+        />
+      )}
+
+      {/* Modal para Imprimir Comprobante de Abono */}
+      {voucherToPrint && (
+        <PrintLayawayPaymentVoucherModal
+          open={Boolean(voucherToPrint)}
+          data={voucherToPrint}
+          onClose={() => setVoucherToPrint(null)}
         />
       )}
     </div>

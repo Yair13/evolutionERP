@@ -2,8 +2,12 @@ import { useState } from "react";
 import { addLayawayPayment, uploadClosureReceiptFiles, type LayawaySummaryItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
-import { Wallet, X, CheckCircle2 } from "lucide-react";
+import { Wallet, X, CheckCircle2, Printer } from "lucide-react";
 import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
+import {
+  PrintLayawayPaymentVoucherModal,
+  type LayawayPaymentVoucherData,
+} from "./PrintLayawayPaymentVoucherModal.js";
 
 type Props = {
   open: boolean;
@@ -43,7 +47,7 @@ export function AddLayawayPaymentModal({
   onClose,
   onSuccess,
 }: Props) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { warehouseId } = useWarehouse();
   const targetWh = warehouseId || layaway?.warehouseId;
 
@@ -54,6 +58,7 @@ export function AddLayawayPaymentModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receiptResult, setReceiptResult] = useState<any | null>(null);
+  const [openPrintVoucher, setOpenPrintVoucher] = useState(false);
 
   if (!open || !layaway) return null;
 
@@ -121,12 +126,36 @@ export function AddLayawayPaymentModal({
   }
 
   function handleClose() {
+    setOpenPrintVoucher(false);
     setReceiptResult(null);
     setAmountStr("");
     setNotes("");
     setError(null);
     onClose();
   }
+
+  const voucherData: LayawayPaymentVoucherData | null = receiptResult && layaway
+    ? {
+        receiptNumber: receiptResult.payment?.receiptNumber || "RAP-—",
+        createdAt: receiptResult.payment?.createdAt || new Date().toISOString(),
+        amount: Number(receiptResult.payment?.amount) || amount,
+        paymentMethod: receiptResult.payment?.paymentMethod || method,
+        notes: receiptResult.payment?.notes || notes || null,
+        createdByName: receiptResult.payment?.createdByName || user?.fullName || null,
+        layawayCode: layaway.code,
+        warehouseName: receiptResult.payment?.warehouseName || layaway.warehouseName,
+        warehouseCode: receiptResult.payment?.warehouseCode || layaway.warehouseCode,
+        customerName: layaway.customerName,
+        customerTaxId: layaway.customerTaxId,
+        customerPhone: layaway.customerPhone,
+        targetAmount: layaway.targetAmount,
+        paidAmount: receiptResult.newPaidAmount,
+        remainingAmount: receiptResult.newRemainingAmount,
+        expiryDate: layaway.expiryDate,
+        layawayNotes: layaway.notes,
+        items: layaway.items,
+      }
+    : null;
 
   return (
     <div className="inv-modal-backdrop" role="presentation" onClick={() => !submitting && handleClose()}>
@@ -206,10 +235,19 @@ export function AddLayawayPaymentModal({
             <div style={{ display: "flex", gap: "0.75rem", justifyContent: "center" }}>
               <button
                 type="button"
-                className="inv-btn inv-btn--primary"
+                className="inv-btn inv-btn--ghost"
                 onClick={handleClose}
               >
-                Aceptar
+                Cerrar
+              </button>
+              <button
+                type="button"
+                className="inv-btn inv-btn--primary"
+                onClick={() => setOpenPrintVoucher(true)}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <Printer size={16} />
+                <span>Imprimir Comprobante</span>
               </button>
             </div>
           </div>
@@ -365,6 +403,15 @@ export function AddLayawayPaymentModal({
           </form>
         )}
       </div>
+
+      {/* Modal para Imprimir Comprobante de Abono */}
+      {openPrintVoucher && voucherData && (
+        <PrintLayawayPaymentVoucherModal
+          open={openPrintVoucher}
+          data={voucherData}
+          onClose={() => setOpenPrintVoucher(false)}
+        />
+      )}
     </div>
   );
 }

@@ -10029,3 +10029,52 @@ button.inv-pos__pick-media--expand:focus-visible {
 
 
 
+
+/* --- Impresión de Acta de Cierre de Inventario (Baucher / Media Carta) --- */
+@media print {
+  body.inv-print-count-voucher {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    overflow: hidden !important;
+  }
+  body.inv-print-count-voucher > *:not(#inv-count-voucher-print-area) {
+    display: none !important;
+    height: 0 !important;
+    min-height: 0 !important;
+  }
+  body.inv-print-count-voucher #inv-count-voucher-print-area {
+    display: block !important;
+    position: static !important;
+    width: 72mm !important;
+    max-width: 72mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  body.inv-print-count-half-letter {
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+  body.inv-print-count-half-letter > *:not(#inv-count-half-letter-print-area) {
+    display: none !important;
+    height: 0 !important;
+    min-height: 0 !important;
+  }
+  body.inv-print-count-half-letter #inv-count-half-letter-print-area {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 800px !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+}

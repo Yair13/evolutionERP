@@ -15,6 +15,7 @@ import {
   Factory,
   Minus,
   Package,
+  Printer,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -37,6 +38,7 @@ const BarcodeScannerModal = lazy(() =>
     default: m.BarcodeScannerModal,
   }))
 );
+import { PrintInventoryCountModal } from "../../components/inventory/PrintInventoryCountModal.js";
 import { InventoryPageHeader } from "../../components/inventory/InventoryPageHeader.js";
 import { InvScopeBar } from "../../components/inventory/InvScopeBar.js";
 import { useAuth } from "../../context/AuthContext.js";
@@ -173,6 +175,7 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [notes, setNotes] = useState("");
+  const [printCountModalData, setPrintCountModalData] = useState<InventoryCountDetail | null>(null);
 
   const pistolInputRef = useRef<HTMLInputElement>(null);
   const pistolDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -450,6 +453,7 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
       setCount(null);
       setConfirmOpen(false);
       setNotes("");
+      setPrintCountModalData(item);
       setSuccess(
         diffs > 0
           ? item.countKind === "initial"
@@ -911,6 +915,16 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
               type="button"
               className="inv-btn inv-btn--ghost"
               disabled={syncing || saving}
+              onClick={() => setPrintCountModalData(count)}
+              title="Imprimir acta de cierre en Baucher o Media Carta"
+            >
+              <Printer size={16} strokeWidth={2} aria-hidden />
+              <span>Imprimir acta</span>
+            </button>
+            <button
+              type="button"
+              className="inv-btn inv-btn--ghost"
+              disabled={syncing || saving}
               onClick={() => void handleResetCounted()}
             >
               <RotateCcw size={16} strokeWidth={2} aria-hidden />
@@ -983,6 +997,13 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {printCountModalData ? (
+        <PrintInventoryCountModal
+          count={printCountModalData}
+          onClose={() => setPrintCountModalData(null)}
+        />
       ) : null}
 
       {cameraOpen ? (

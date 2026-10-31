@@ -1,10 +1,14 @@
 import { useState, useEffect } from "react";
-import { createLayaway, uploadClosureReceiptFiles } from "../../api/finance.js";
+import { createLayaway, uploadClosureReceiptFiles, type LayawayDetail } from "../../api/finance.js";
 import { fetchCustomers, createCustomer, type Customer } from "../../api/inventory.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
-import { Bookmark, X, UserCheck, PlusCircle } from "lucide-react";
+import { Bookmark, X, UserCheck, PlusCircle, CheckCircle2, Printer } from "lucide-react";
 import { ReceiptPhotosUploader } from "../common/ReceiptPhotosUploader.js";
+import {
+  PrintLayawayPaymentVoucherModal,
+  type LayawayPaymentVoucherData,
+} from "./PrintLayawayPaymentVoucherModal.js";
 
 type Props = {
   open: boolean;
@@ -36,7 +40,7 @@ function formatMoney(n: number): string {
 }
 
 export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
 
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
@@ -70,6 +74,8 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [createdLayaway, setCreatedLayaway] = useState<LayawayDetail | null>(null);
+  const [showPrintModal, setShowPrintModal] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -85,6 +91,8 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
       setSelectedCustomer(null);
       setShowCreateNew(false);
       setError(null);
+      setCreatedLayaway(null);
+      setShowPrintModal(false);
     }
   }, [open, warehouseId, warehouses]);
 
@@ -185,7 +193,7 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
         }
       }
 
-      await createLayaway(token, {
+      const res = await createLayaway(token, {
         warehouseId: selectedWarehouseId,
         customerId: selectedCustomer.id,
         targetAmount,
@@ -198,8 +206,13 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
         receiptFilename: uploadedFilename,
       });
 
-      onSuccess();
-      onClose();
+      if (initialPayment > 0 && res.item?.payments?.length > 0) {
+        setCreatedLayaway(res.item);
+        onSuccess();
+      } else {
+        onSuccess();
+        handleClose();
+      }
     } catch (err: any) {
       if (err.message === "insufficient_credit_balance") {
         setError("El cliente no tiene suficiente saldo a favor.");
@@ -213,12 +226,43 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
     }
   }
 
+  function handleClose() {
+    setCreatedLayaway(null);
+    setShowPrintModal(false);
+    setError(null);
+    onClose();
+  }
+
   const initialPaymentNum = Number(initialPaymentStr) || 0;
   const targetAmountNum = Number(targetAmountStr) || 0;
   const remaining = Math.max(0, targetAmountNum - initialPaymentNum);
 
+  const firstPayment = createdLayaway?.payments?.[0];
+  const voucherData: LayawayPaymentVoucherData | null = createdLayaway && firstPayment
+    ? {
+        receiptNumber: firstPayment.receiptNumber,
+        createdAt: firstPayment.createdAt,
+        amount: firstPayment.amount,
+        paymentMethod: firstPayment.paymentMethod,
+        notes: firstPayment.notes,
+        createdByName: firstPayment.createdByName || user?.fullName || null,
+        layawayCode: createdLayaway.code,
+        warehouseName: firstPayment.warehouseName || createdLayaway.warehouseName,
+        warehouseCode: firstPayment.warehouseCode || createdLayaway.warehouseCode,
+        customerName: createdLayaway.customerName,
+        customerTaxId: createdLayaway.customerTaxId,
+        customerPhone: createdLayaway.customerPhone,
+        targetAmount: createdLayaway.targetAmount,
+        paidAmount: createdLayaway.paidAmount,
+        remainingAmount: createdLayaway.remainingAmount,
+        expiryDate: createdLayaway.expiryDate,
+        layawayNotes: createdLayaway.notes,
+        items: createdLayaway.items,
+      }
+    : null;
+
   return (
-    <div className="inv-modal-backdrop" role="presentation" onClick={() => !submitting && onClose()}>
+    <div className="inv-modal-backdrop" role="presentation" onClick={() => !submitting && handleClose()}>
       <div
         className="inv-modal"
         role="dialog"
@@ -236,12 +280,90 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
           <button
             type="button"
             className="inv-btn inv-btn--ghost inv-btn--icon"
-            onClick={onClose}
+            onClick={handleClose}
             disabled={submitting}
           >
             <X size={18} />
           </button>
         </div>
+
+        {createdLayaway ? (
+          <div className="inv-modal__body" style={{ textAlign: "center", padding: "1.5rem 1rem" }}>
+            <CheckCircle2 size={48} color="#10b981" style={{ margin: "0 auto 1rem" }} />
+            <h3 style={{ fontSize: "1.2rem", fontWeight: 700, margin: "0 0 0.5rem" }}>
+              ¡Apartado Creado con Éxito!
+            </h3>
+            {firstPayment && (
+              <p style={{ color: "var(--inv-text-muted)", margin: "0 0 1.25rem" }}>
+                Comprobante de Abono Inicial: <strong>{firstPayment.receiptNumber}</strong>
+              </p>
+            )}
+
+            <div
+              style={{
+                background: "var(--inv-bg-elevated)",
+                padding: "1rem",
+                borderRadius: 8,
+                textAlign: "left",
+                marginBottom: "1.5rem",
+                fontSize: "0.9rem",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.4rem",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>Código Apartado:</span>
+                <strong>{createdLayaway.code}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>Cliente:</span>
+                <strong>{createdLayaway.customerName}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>Total Meta:</span>
+                <strong>{formatMoney(createdLayaway.targetAmount)}</strong>
+              </div>
+              {firstPayment && (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>Abono Inicial:</span>
+                    <strong style={{ color: "#10b981" }}>{formatMoney(firstPayment.amount)}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>Medio de Pago:</span>
+                    <strong style={{ textTransform: "capitalize" }}>{firstPayment.paymentMethod}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>Saldo Restante:</span>
+                    <strong style={{ color: "#f59e0b" }}>{formatMoney(createdLayaway.remainingAmount)}</strong>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: "0.75rem", justifyContent: "center" }}>
+              <button
+                type="button"
+                className="inv-btn inv-btn--ghost"
+                onClick={handleClose}
+              >
+                Finalizar
+              </button>
+              {firstPayment && (
+                <button
+                  type="button"
+                  className="inv-btn inv-btn--primary"
+                  onClick={() => setShowPrintModal(true)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <Printer size={16} />
+                  <span>Imprimir Comprobante</span>
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
 
         <form onSubmit={handleSubmit} className="inv-modal__body" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           {error && <div className="inv-form-error">{error}</div>}
@@ -486,7 +608,17 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
             </button>
           </div>
         </form>
+        )}
       </div>
+
+      {/* Modal para Imprimir Comprobante de Abono Inicial */}
+      {showPrintModal && voucherData && (
+        <PrintLayawayPaymentVoucherModal
+          open={showPrintModal}
+          data={voucherData}
+          onClose={() => setShowPrintModal(false)}
+        />
+      )}
     </div>
   );
 }

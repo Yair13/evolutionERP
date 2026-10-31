@@ -598,6 +598,34 @@ export async function addLayawayPayment(
       ]
     );
 
+    const paymentId = payRows[0]!.id;
+
+    const { rows: fullPayRows } = await client.query<LayawayPaymentItem>(
+      `
+      SELECT
+        lp.id::text,
+        lp.layaway_id::text AS "layawayId",
+        lp.customer_id::text AS "customerId",
+        lp.warehouse_id::text AS "warehouseId",
+        w.code AS "warehouseCode",
+        w.name AS "warehouseName",
+        lp.receipt_number AS "receiptNumber",
+        lp.payment_method AS "paymentMethod",
+        lp.amount::float,
+        lp.receipt_url AS "receiptUrl",
+        lp.receipt_filename AS "receiptFilename",
+        COALESCE(lp.receipt_urls, '[]'::jsonb) AS "receiptUrls",
+        lp.notes,
+        lp.created_at AS "createdAt",
+        u.full_name AS "createdByName"
+      FROM layaway_payments lp
+      JOIN warehouses w ON w.id = lp.warehouse_id
+      LEFT JOIN users u ON u.id = lp.created_by
+      WHERE lp.id = $1::uuid
+      `,
+      [paymentId]
+    );
+
     const { rows: custFinal } = await client.query<{ credit_balance: string }>(
       `SELECT credit_balance::text FROM customers WHERE id = $1::uuid`,
       [customerId]
@@ -606,7 +634,7 @@ export async function addLayawayPayment(
     await client.query("COMMIT");
 
     return {
-      payment: payRows[0]!,
+      payment: fullPayRows[0] ?? payRows[0]!,
       newPaidAmount: newPaid,
       newRemainingAmount: newRemaining,
       customerCreditBalance: Number(custFinal[0]?.credit_balance ?? 0),
