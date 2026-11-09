@@ -172,6 +172,7 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
   const [savingGeneral, setSavingGeneral] = useState(false);
   const [generalHistory, setGeneralHistory] = useState<GeneralClosureRecord[]>([]);
   const [loadingGeneralHistory, setLoadingGeneralHistory] = useState(false);
+  const [generalPeriodDailyClosures, setGeneralPeriodDailyClosures] = useState<DailyClosureRecord[]>([]);
 
   // Modales
   const [uploadItem, setUploadItem] = useState<ReceiptAuditItem | null>(null);
@@ -267,12 +268,21 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
     setError(null);
     try {
       const from = customDateFrom ?? generalDateFrom;
-      const res = await fetchGeneralClosureWorksheet(token, {
-        warehouseId: generalWarehouseId || undefined,
-        dateFrom: from,
-        dateTo: generalDateTo,
-      });
+      const to = generalDateTo < from ? from : generalDateTo;
+      const [res, dailyRes] = await Promise.all([
+        fetchGeneralClosureWorksheet(token, {
+          warehouseId: generalWarehouseId || undefined,
+          dateFrom: from,
+          dateTo: to,
+        }),
+        fetchDailyClosures(token, {
+          warehouseId: generalWarehouseId || undefined,
+          dateFrom: from,
+          dateTo: to,
+        }).catch(() => ({ items: [] as DailyClosureRecord[] })),
+      ]);
       setGeneralWorksheet(res);
+      setGeneralPeriodDailyClosures(dailyRes.items || []);
       if (res.lastClosure) {
         setHasPreviousGeneralClosure(true);
         setLastGeneralClosureInfo({
@@ -2421,6 +2431,231 @@ export function DailyClosurePage({ defaultTab }: { defaultTab?: "current" | "his
                   </table>
                 </div>
               </div>
+
+              {/* Detalle directo de Cierres Diarios que no cuadraron (Sobrantes o Faltantes en Efectivo) */}
+              {(() => {
+                const unbalancedClosures = generalPeriodDailyClosures.filter(
+                  (c) => Math.round((Number(c.cashDifference) || 0) * 100) !== 0
+                );
+                const netDiscrepancy = unbalancedClosures.reduce(
+                  (acc, c) => acc + (Number(c.cashDifference) || 0),
+                  0
+                );
+
+                if (unbalancedClosures.length === 0) {
+                  return (
+                    <div
+                      style={{
+                        background: "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)",
+                        border: "1px solid #6ee7b7",
+                        borderRadius: 14,
+                        padding: "1rem 1.35rem",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: "0.75rem",
+                        boxShadow: "0 1px 3px rgba(16, 185, 129, 0.08)",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
+                        <div
+                          style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: 10,
+                            backgroundColor: "#d1fae5",
+                            color: "#059669",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <CheckCircle2 size={22} />
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 800, color: "#047857", fontSize: "0.98rem" }}>
+                            Todos los cierres diarios son exactos — No hay descuadre de efectivo
+                          </div>
+                          <div style={{ fontSize: "0.84rem", color: "#065f46", marginTop: 2 }}>
+                            {generalPeriodDailyClosures.length > 0
+                              ? `Se verificaron ${generalPeriodDailyClosures.length} cierre(s) diario(s) en este período y todos cuadraron exactamente ($0 de diferencia entre efectivo esperado y contado).`
+                              : "No se registran cierres diarios con descuadre (ni sobrantes ni faltantes de efectivo) en este período."}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="fin-badge fin-badge--success" style={{ fontSize: "0.78rem", padding: "4px 10px" }}>
+                        ✓ Sin Descuadres ({generalPeriodDailyClosures.length} exactos)
+                      </span>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="fin-table-card" style={{ border: "1px solid #fca5a5" }}>
+                    <div
+                      className="fin-table-header"
+                      style={{
+                        background: "linear-gradient(135deg, #fff1f2 0%, #fffbeb 100%)",
+                        borderBottom: "1px solid #fecdd3",
+                      }}
+                    >
+                      <h3 className="fin-table-title" style={{ color: "#9f1239" }}>
+                        <AlertTriangle size={18} color="#e11d48" />
+                        <span>Historial de Cierres Diarios que No Cuadraron (Descuadres de Efectivo)</span>
+                      </h3>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                        <span className="fin-badge fin-badge--danger">
+                          {unbalancedClosures.length}{" "}
+                          {unbalancedClosures.length === 1 ? "acta con descuadre" : "actas con descuadre"}
+                        </span>
+                        <span
+                          className={`fin-badge ${
+                            netDiscrepancy < 0 ? "fin-badge--danger" : "fin-badge--warning"
+                          }`}
+                        >
+                          Diferencia neta: {netDiscrepancy > 0 ? "+" : ""}
+                          {formatMoney(netDiscrepancy)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="fin-table-wrap">
+                      <table className="fin-table">
+                        <thead>
+                          <tr>
+                            <th>Acta #</th>
+                            <th>Fecha / Turno</th>
+                            <th>Horario</th>
+                            <th>Sede</th>
+                            <th style={{ textAlign: "right" }}>Arranque</th>
+                            <th style={{ textAlign: "right" }}>Esperado</th>
+                            <th style={{ textAlign: "right" }}>Contado</th>
+                            <th style={{ textAlign: "center" }}>Cuadre / Dif.</th>
+                            <th>Cajero</th>
+                            <th style={{ textAlign: "center" }}>Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {unbalancedClosures.map((c) => {
+                            const isShort = c.cashDifference < 0;
+
+                            return (
+                              <tr key={c.id}>
+                                <td>
+                                  <button
+                                    type="button"
+                                    onClick={() => setViewingClosure(c)}
+                                    style={{
+                                      background: "transparent",
+                                      border: "none",
+                                      color: "var(--accent)",
+                                      fontWeight: 700,
+                                      cursor: "pointer",
+                                      padding: 0,
+                                    }}
+                                  >
+                                    {c.closingVoucherNumber}
+                                  </button>
+                                </td>
+                                <td style={{ whiteSpace: "nowrap" }}>
+                                  <div>
+                                    <strong>{c.closureDate}</strong>
+                                  </div>
+                                  {c.shiftNumber ? (
+                                    <span
+                                      className="fin-badge fin-badge--neutral"
+                                      style={{ fontSize: "0.68rem", padding: "1px 6px" }}
+                                    >
+                                      Turno {c.shiftNumber}
+                                    </span>
+                                  ) : null}
+                                </td>
+                                <td style={{ fontSize: "0.8rem", color: "#64748b", whiteSpace: "nowrap" }}>
+                                  {c.startedAt && c.closedAt
+                                    ? `${new Date(c.startedAt).toLocaleTimeString("es-CO", {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })} → ${new Date(c.closedAt).toLocaleTimeString("es-CO", {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })}`
+                                    : c.submittedAt
+                                    ? new Date(c.submittedAt).toLocaleTimeString("es-CO", {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })
+                                    : "—"}
+                                </td>
+                                <td>
+                                  <span className="fin-badge fin-badge--neutral">
+                                    {c.warehouseCode ?? "MAIN"}
+                                  </span>
+                                </td>
+                                <td className="fin-table-num">{formatMoney(c.openingCash)}</td>
+                                <td className="fin-table-num" style={{ fontWeight: 600 }}>
+                                  {formatMoney(c.expectedCash)}
+                                </td>
+                                <td
+                                  className="fin-table-num"
+                                  style={{
+                                    fontWeight: 700,
+                                    color: isShort ? "#dc2626" : "#d97706",
+                                  }}
+                                >
+                                  {formatMoney(c.countedCash)}
+                                </td>
+                                <td style={{ textAlign: "center" }}>
+                                  <span
+                                    className={`fin-badge ${
+                                      isShort ? "fin-badge--danger" : "fin-badge--warning"
+                                    }`}
+                                    title={isShort ? "Dio menos plata en efectivo (Faltante)" : "Dio más plata en efectivo (Sobrante)"}
+                                  >
+                                    {c.cashDifference > 0 ? "+" : ""}
+                                    {formatMoney(c.cashDifference)} ({isShort ? "Faltante" : "Sobrante"})
+                                  </span>
+                                </td>
+                                <td style={{ color: "#64748b" }}>
+                                  {c.cashierName ?? c.createdByName ?? "—"}
+                                </td>
+                                <td style={{ textAlign: "center" }}>
+                                  <div style={{ display: "inline-flex", gap: "0.35rem" }}>
+                                    <button
+                                      type="button"
+                                      className="fin-btn fin-btn--ghost fin-btn--sm"
+                                      onClick={() => {
+                                        setSelectedWarehouseId(c.warehouseId);
+                                        setClosureDate(c.closureDate);
+                                        setSelectedClosureId(c.id);
+                                        handleTabChange("current");
+                                      }}
+                                      title="Cargar este turno en la pantalla de Cierre del Día"
+                                    >
+                                      <Eye size={14} />
+                                      <span>Ver Cuadre</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="fin-btn fin-btn--ghost fin-btn--sm"
+                                      onClick={() => setViewingClosure(c)}
+                                      title="Ver e imprimir acta oficial de cierre"
+                                    >
+                                      <Printer size={14} />
+                                      <span>Acta</span>
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Liquidación: Fondo en caja que se va a dejar y Efectivo a retirar */}
               <div
