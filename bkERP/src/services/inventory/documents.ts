@@ -1888,6 +1888,10 @@ export async function cancelDocument(
   documentId: string,
   _warehouseId?: string | null
 ): Promise<InventoryDocumentDetail> {
+  if (!canManageMovementEditing(auth)) {
+    throw Object.assign(new Error("movement_edit_forbidden"), { code: "movement_edit_forbidden" });
+  }
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");

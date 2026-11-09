@@ -15,8 +15,9 @@ export type MovementEditSettings = {
 
 export function canManageMovementEditing(auth: AuthContext): boolean {
   return (
-    auth.hasAdminAccess ||
-    auth.roles.some((r) => r === "super_admin" || r === "secretaria" || r === "admin_local")
+    auth.hasAdminAccess === true ||
+    auth.warehouseIds === null ||
+    auth.roles.some((r) => r === "super_admin")
   );
 }
 

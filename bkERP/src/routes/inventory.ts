@@ -116,11 +116,16 @@ export function createInventoryRouter(): Router {
       res.status(401).json({ error: "missing_auth" });
       return;
     }
-    const ok =
-      auth.hasAdminAccess ||
-      auth.roles.some((r: string) => r === "super_admin" || r === "secretaria" || r === "admin_local");
-    if (!ok) {
-      res.status(403).json({ error: "forbidden" });
+    const isFromAdmin = isAdminSessionRequest(req);
+    const hasAdminAccess =
+      auth.hasAdminAccess === true ||
+      auth.warehouseIds === null ||
+      auth.roles.some((r: string) => r === "super_admin");
+    if (!isFromAdmin || !hasAdminAccess) {
+      res.status(403).json({
+        error: "admin_headquarters_required",
+        message: "Solo se puede activar la edición o anular comprobantes desde la Sede Administrativa.",
+      });
       return;
     }
     next();

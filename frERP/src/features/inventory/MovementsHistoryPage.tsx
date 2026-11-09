@@ -94,15 +94,14 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
   const navigate = useNavigate();
   const { canViewAllWarehouses, warehouses, isAllWarehouses, sessionLabel, effectiveWarehouseId } =
     useInventoryScope();
-  const canManageEditing =
+  const hasAdminHeadquartersAccess =
+    user?.hasAdminAccess === true ||
     user?.roles.includes("super_admin") ||
-    user?.roles.includes("secretaria") ||
-    user?.roles.includes("admin_local") ||
-    user?.hasAdminAccess ||
     canViewAllWarehouses ||
     false;
-  const isAdminSede =
-    canManageEditing || canViewAllWarehouses || user?.roles.includes("admin_local") || false;
+  // Solo quien tenga acceso a la sede administrativa Y esté operando desde la Sede Administrativa
+  const canManageEditing = Boolean(hasAdminHeadquartersAccess && isAllWarehouses);
+  const isAdminSede = canManageEditing;
 
   const [filterType, setFilterType] = useState<FilterDocType>(fixedType ?? "");
   const effectiveType: FilterDocType = fixedType ?? filterType;

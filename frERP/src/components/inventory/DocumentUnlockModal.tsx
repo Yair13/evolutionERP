@@ -7,6 +7,7 @@ const ERROR_LABELS: Record<string, string> = {
   observation_required: "Debes escribir el motivo para activar la edición.",
   document_not_today: "Solo se puede activar edición en movimientos del día de hoy.",
   movement_edit_forbidden: "No tienes permiso para activar la edición.",
+  admin_headquarters_required: "Solo se puede activar la edición desde la Sede Administrativa.",
   document_not_found: "Documento no encontrado.",
 };
 

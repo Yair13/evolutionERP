@@ -11,7 +11,11 @@ import type { Request, Response } from "express";
 export function isAdminSessionRequest(req: Request): boolean {
   const header = req.headers["x-session-scope"];
   const scope = typeof header === "string" ? header.trim().toLowerCase() : "";
-  return scope === "admin" && req.auth?.hasAdminAccess === true;
+  const hasAdmin =
+    req.auth?.hasAdminAccess === true ||
+    req.auth?.warehouseIds === null ||
+    (req.auth?.roles ?? []).includes("super_admin");
+  return scope === "admin" && hasAdmin;
 }
 
 /** Métodos que no representan salida de dinero de una cuenta (permitidos en sedes físicas). */

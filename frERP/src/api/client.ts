@@ -23,7 +23,7 @@ async function parseError(res: Response): Promise<string> {
  * Regla: solo la Sede Administrativa puede pagar/egresar con cuentas; las sedes físicas solo en efectivo.
  * (El backend además valida que el usuario realmente tenga acceso administrativo.)
  */
-function sessionScopeHeaders(): Record<string, string> {
+export function sessionScopeHeaders(): Record<string, string> {
   try {
     const raw = localStorage.getItem("evolution_erp_warehouse");
     if (raw === "__all__") return { "X-Session-Scope": "admin" };
@@ -53,7 +53,7 @@ export async function apiGet<T>(path: string, token: string, query?: Record<stri
     if (qs) url += `${path.includes("?") ? "&" : "?"}${qs}`;
   }
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...sessionScopeHeaders() },
   });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json() as Promise<T>;

@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiDelete } from "./client.js";
+import { apiGet, apiPost, apiDelete, sessionScopeHeaders } from "./client.js";
 import type {
   CatalogItem,
   CountKind,
@@ -28,6 +28,7 @@ async function inventoryFetch<T>(
     ...init,
     headers: {
       Authorization: `Bearer ${token}`,
+      ...sessionScopeHeaders(),
       ...whHeaders(warehouseId),
       ...(init?.headers as Record<string, string> | undefined),
     },
@@ -36,7 +37,8 @@ async function inventoryFetch<T>(
     let msg = res.statusText;
     try {
       const data = await res.json();
-      if (data?.error) msg = String(data.error);
+      if (data?.message) msg = String(data.message);
+      else if (data?.error) msg = String(data.error);
     } catch {
       /* ignore */
     }
