@@ -602,8 +602,8 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
                 Limpiar filtros
               </button>
             ) : null}
-            {canViewAllWarehouses ? (
-              <span className="inv-history-panel__badge">Área Administrativa · Acceso total</span>
+            {isAllWarehouses ? (
+              <span className="inv-history-panel__badge">Sede Administrativa · Acceso total</span>
             ) : null}
           </div>
         </div>
