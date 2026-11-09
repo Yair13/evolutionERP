@@ -389,6 +389,63 @@ export async function addReceivablePayment(
   }>(`/finance/receivables/${id}/payments`, data, token);
 }
 
+export async function addCustomerPortfolioPayment(
+  token: string,
+  data: {
+    customerId: string;
+    warehouseId: string;
+    paymentMethod: string;
+    amount: number;
+    notes?: string | null;
+    receiptUrl?: string | null;
+    receiptUrls?: string[] | null;
+    receiptFilename?: string | null;
+  }
+) {
+  return apiPost<{
+    payment: ReceivablePaymentItem;
+    allPayments: ReceivablePaymentItem[];
+    totalAppliedToDebt: number;
+    excessToFavour: number;
+    customerCreditBalance: number;
+  }>("/finance/receivables/customer-payment", data, token);
+}
+
+export async function updateReceivablePayment(
+  token: string,
+  paymentId: string,
+  data: {
+    amount: number;
+    paymentMethod: string;
+    notes?: string | null;
+  }
+) {
+  return apiPut<{
+    payment: ReceivablePaymentItem;
+    customerCreditBalance: number;
+  }>(`/finance/receivables/payments/${paymentId}`, data, token);
+}
+
+export async function deleteReceivablePayment(token: string, paymentId: string) {
+  return apiDelete<{ ok: boolean; deletedId: string; receiptNumber: string }>(
+    `/finance/receivables/payments/${paymentId}`,
+    token
+  );
+}
+
+export async function reconcileCustomerCreditBalance(
+  token: string,
+  customerId: string,
+  warehouseId: string
+) {
+  return apiPost<{
+    ok: boolean;
+    reconciledAmount: number;
+    remainingDebt: number;
+    remainingCreditBalance: number;
+  }>(`/finance/customers/${customerId}/reconcile-credit-balance`, { warehouseId }, token);
+}
+
 export interface AddDirectCustomerPaymentInput {
   warehouseId: string;
   customerId: string;

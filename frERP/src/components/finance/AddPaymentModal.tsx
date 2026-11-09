@@ -275,7 +275,7 @@ export function AddPaymentModal({
               </div>
               {excess > 0 && (
                 <div style={{ marginTop: "0.35rem", color: "#10b981", fontWeight: 600 }}>
-                  ✨ ¡Paga más de lo adeudado! Excedente de <strong>{formatMoney(excess)}</strong> quedará guardado como Saldo a Favor del cliente para su próxima compra.
+                  ✨ ¡Paga más del saldo de esta factura! El excedente de <strong>{formatMoney(excess)}</strong> se amortizará automáticamente en las demás facturas pendientes del cliente (o como Saldo a Favor si ya no tiene más deudas).
                 </div>
               )}
             </div>

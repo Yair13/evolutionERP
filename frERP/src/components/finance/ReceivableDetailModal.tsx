@@ -2,10 +2,11 @@ import { useEffect, useState, useCallback } from "react";
 import { fetchReceivableDetail, deleteManualReceivable, type ReceivableDetail, type ReceiptAuditItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
-import { Package, Receipt, X, Camera, Upload, Trash2 } from "lucide-react";
+import { Package, Receipt, X, Camera, Upload, Trash2, Edit3 } from "lucide-react";
 import { formatBogotaDateTime } from "../../lib/dateUtils.js";
 import { ViewReceiptPhotosModal } from "../common/ViewReceiptPhotosModal.js";
 import { UploadReceiptModal } from "./UploadReceiptModal.js";
+import { EditPaymentModal } from "./EditPaymentModal.js";
 
 type Props = {
   open: boolean;
@@ -42,6 +43,7 @@ export function ReceivableDetailModal({
   const [detail, setDetail] = useState<ReceivableDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleDeleteCredit = async () => {
@@ -236,6 +238,7 @@ export function ReceivableDetailModal({
                         <th style={{ padding: "6px 10px", textAlign: "right" }}>Abono</th>
                         <th style={{ padding: "6px 10px", textAlign: "center" }}>Soporte</th>
                         <th style={{ padding: "6px 10px" }}>Notas</th>
+                        <th style={{ padding: "6px 10px", textAlign: "right" }}>Acción</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -324,6 +327,18 @@ export function ReceivableDetailModal({
                               )}
                             </td>
                             <td style={{ padding: "6px 10px", color: "var(--text-muted)" }}>{p.notes || "—"}</td>
+                            <td style={{ padding: "6px 10px", textAlign: "right" }}>
+                              <button
+                                type="button"
+                                className="inv-btn inv-btn--ghost"
+                                style={{ fontSize: "0.72rem", padding: "2px 6px" }}
+                                onClick={() => setEditingPayment(p)}
+                                title="Editar valor y medio de pago"
+                              >
+                                <Edit3 size={12} style={{ marginRight: 3 }} />
+                                Editar
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
@@ -368,6 +383,18 @@ export function ReceivableDetailModal({
           </div>
         </div>
       </div>
+
+      {editingPayment && (
+        <EditPaymentModal
+          open={Boolean(editingPayment)}
+          payment={editingPayment}
+          onClose={() => setEditingPayment(null)}
+          onSuccess={() => {
+            void loadDetail();
+            onDeleteSuccess?.();
+          }}
+        />
+      )}
 
       {/* Modal para ver fotos de soporte */}
       {viewingUrls && viewingUrls.length > 0 && (

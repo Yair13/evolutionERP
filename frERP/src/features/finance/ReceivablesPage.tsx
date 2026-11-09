@@ -4,7 +4,10 @@ import {
   fetchReceivables,
   fetchWarehouseReceivablesReport,
   deleteManualReceivable,
+  deleteReceivablePayment,
+  reconcileCustomerCreditBalance,
   type CustomerCreditProfile,
+  type ReceivablePaymentItem,
   type ReceivableSummaryItem,
   type WarehouseReceivablesReport,
 } from "../../api/finance.js";
@@ -14,6 +17,8 @@ import { useWarehouse } from "../../context/WarehouseContext.js";
 import { formatBogotaDate } from "../../lib/dateUtils.js";
 import { AddPaymentModal } from "../../components/finance/AddPaymentModal.js";
 import { AddDirectPaymentModal } from "../../components/finance/AddDirectPaymentModal.js";
+import { AddCustomerPaymentModal } from "../../components/finance/AddCustomerPaymentModal.js";
+import { EditPaymentModal } from "../../components/finance/EditPaymentModal.js";
 import { ReceivableDetailModal } from "../../components/finance/ReceivableDetailModal.js";
 import { CreateReceivableModal } from "../../components/finance/CreateReceivableModal.js";
 import {
@@ -27,6 +32,8 @@ import {
   ArrowDownRight,
   PlusCircle,
   Trash2,
+  Edit3,
+  Scale,
 } from "lucide-react";
 
 function formatMoney(n: number): string {
@@ -107,7 +114,10 @@ export function ReceivablesPage() {
   // Modales
   const [openCreateReceivable, setOpenCreateReceivable] = useState(false);
   const [openDirectPayment, setOpenDirectPayment] = useState(false);
+  const [openCustomerPayment, setOpenCustomerPayment] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<ReceivablePaymentItem | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [reconciling, setReconciling] = useState(false);
 
   const handleDeleteInitial = async (c: ReceivableSummaryItem) => {
     const confirmed = window.confirm(
@@ -129,6 +139,45 @@ export function ReceivablesPage() {
       alert(err?.message || "Error al eliminar saldo inicial");
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleDeletePayment = async (p: ReceivablePaymentItem) => {
+    const confirmed = window.confirm(
+      `¿Deseas eliminar / anular el abono "${p.receiptNumber}" de ${formatMoney(p.amount)}?\n\n` +
+      `Esta acción revertirá la amortización en las facturas y el saldo a favor generado.`
+    );
+    if (!confirmed || !token) return;
+
+    try {
+      await deleteReceivablePayment(token, p.id);
+      await loadCredits();
+      if (selectedCustId) void loadCustomerProfile(selectedCustId);
+      if (activeTab === "report") void loadReport();
+    } catch (err: any) {
+      alert(err?.message || "Error al eliminar el abono");
+    }
+  };
+
+  const handleReconcileCreditBalance = async () => {
+    if (!token || !selectedCustId || !custProfile) return;
+    const confirmed = window.confirm(
+      `¿Deseas cruzar el saldo a favor disponible (${formatMoney(custProfile.customer.creditBalance)}) contra la deuda pendiente del cliente?\n\n` +
+      `Se amortizarán automáticamente las facturas más antiguas hasta agotar el saldo a favor.`
+    );
+    if (!confirmed) return;
+
+    setReconciling(true);
+    try {
+      const targetWh = effectiveWarehouseId || warehouseId || (custProfile.receivables[0]?.warehouseId) || "";
+      await reconcileCustomerCreditBalance(token, selectedCustId, targetWh);
+      await loadCredits();
+      await loadCustomerProfile(selectedCustId);
+      if (activeTab === "report") void loadReport();
+    } catch (err: any) {
+      alert(err?.message || "Error al cruzar saldo a favor");
+    } finally {
+      setReconciling(false);
     }
   };
   const [activeReceivableForPayment, setActiveReceivableForPayment] = useState<ReceivableSummaryItem | null>(null);
@@ -741,13 +790,58 @@ export function ReceivablesPage() {
                 </div>
               </div>
 
+              {/* Banner de cruce de saldo a favor si tiene deuda y saldo a favor al tiempo */}
+              {custProfile.customer.creditBalance > 0 && custProfile.stats.totalCurrentDebt > 0 && (
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  background: "rgba(16, 185, 129, 0.12)",
+                  border: "1px solid rgba(16, 185, 129, 0.35)",
+                  borderRadius: 8,
+                  padding: "0.85rem 1.15rem",
+                  marginBottom: "1.25rem",
+                  gap: "1rem",
+                  flexWrap: "wrap",
+                }}>
+                  <div>
+                    <strong style={{ color: "#059669", fontSize: "0.95rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                      <Scale size={18} />
+                      El cliente tiene Deuda ({formatMoney(custProfile.stats.totalCurrentDebt)}) y Saldo a Favor ({formatMoney(custProfile.customer.creditBalance)})
+                    </strong>
+                    <span style={{ fontSize: "0.85rem", color: "#475569", marginTop: 2, display: "block" }}>
+                      Puedes cruzar este saldo a favor para amortizar de inmediato sus facturas pendientes más antiguas.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="fin-btn fin-btn--primary fin-btn--sm"
+                    style={{ background: "#059669", borderColor: "#059669", whiteSpace: "nowrap" }}
+                    onClick={handleReconcileCreditBalance}
+                    disabled={reconciling}
+                  >
+                    {reconciling ? "Cruzando…" : `Cruzar Saldo a Favor (${formatMoney(custProfile.customer.creditBalance)})`}
+                  </button>
+                </div>
+              )}
+
               {/* Facturas a crédito del cliente */}
               <div className="fin-table-card">
-                <div className="fin-table-header">
+                <div className="fin-table-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <h3 className="fin-table-title">
                     <Receipt size={18} color="var(--accent)" />
                     <span>Créditos del Cliente ({custProfile.receivables.length})</span>
                   </h3>
+                  {custProfile.stats.totalCurrentDebt > 0 && (
+                    <button
+                      type="button"
+                      className="fin-btn fin-btn--primary fin-btn--sm"
+                      onClick={() => setOpenCustomerPayment(true)}
+                    >
+                      <PlusCircle size={15} style={{ marginRight: 5 }} />
+                      Abonar a Cartera del Cliente
+                    </button>
+                  )}
                 </div>
 
                 <div className="fin-table-wrap">
@@ -844,6 +938,7 @@ export function ReceivablesPage() {
                           <th>Medio de Pago</th>
                           <th style={{ textAlign: "right" }}>Monto</th>
                           <th>Notas</th>
+                          <th style={{ textAlign: "right" }}>Acción</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -866,6 +961,27 @@ export function ReceivablesPage() {
                               )}
                             </td>
                             <td style={{ color: "#64748b" }}>{p.notes || "—"}</td>
+                            <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                              <button
+                                type="button"
+                                className="fin-btn fin-btn--ghost fin-btn--sm"
+                                style={{ padding: "3px 8px", marginRight: "0.25rem" }}
+                                onClick={() => setEditingPayment(p)}
+                                title="Editar valor y medio de pago de este abono"
+                              >
+                                <Edit3 size={13} style={{ marginRight: 3 }} />
+                                Editar
+                              </button>
+                              <button
+                                type="button"
+                                className="fin-btn fin-btn--ghost fin-btn--sm"
+                                style={{ padding: "3px 8px", color: "#ef4444" }}
+                                onClick={() => handleDeletePayment(p)}
+                                title="Eliminar / Anular abono"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1018,6 +1134,38 @@ export function ReceivablesPage() {
           defaultWarehouseId={effectiveWarehouseId || warehouseId || undefined}
           defaultCustomerId={selectedCustId || undefined}
           defaultCustomerName={custProfile?.customer.displayName || undefined}
+          onSuccess={() => {
+            void loadCredits();
+            if (selectedCustId) void loadCustomerProfile(selectedCustId);
+            if (activeTab === "report") void loadReport();
+          }}
+        />
+      )}
+
+      {/* Modal para Abono a Cartera del Cliente */}
+      {openCustomerPayment && custProfile && (
+        <AddCustomerPaymentModal
+          open={openCustomerPayment}
+          customerId={custProfile.customer.id}
+          customerName={custProfile.customer.displayName}
+          customerCreditBalance={custProfile.customer.creditBalance}
+          pendingReceivables={custProfile.receivables.filter((r) => r.balanceAmount > 0)}
+          defaultWarehouseId={effectiveWarehouseId || warehouseId || undefined}
+          onClose={() => setOpenCustomerPayment(false)}
+          onSuccess={() => {
+            void loadCredits();
+            if (selectedCustId) void loadCustomerProfile(selectedCustId);
+            if (activeTab === "report") void loadReport();
+          }}
+        />
+      )}
+
+      {/* Modal para Editar Abono */}
+      {editingPayment && (
+        <EditPaymentModal
+          open={Boolean(editingPayment)}
+          payment={editingPayment}
+          onClose={() => setEditingPayment(null)}
           onSuccess={() => {
             void loadCredits();
             if (selectedCustId) void loadCustomerProfile(selectedCustId);

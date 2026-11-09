@@ -939,8 +939,495 @@ export async function getReceivableDetail(
 }
 
 /**
+ * Helper interno para distribuir un abono en cascada a través de las cuentas por cobrar del cliente.
+ * Si se especifica primaryReceivableId, se cubre primero esa factura.
+ * El excedente no va a saldo a favor si el cliente tiene otras facturas pendientes; se amortiza en orden FIFO.
+ * Sólo el remanente después de saldar todas las deudas se agrega como saldo a favor.
+ */
+async function distributePaymentInCascade(
+  client: pg.PoolClient,
+  params: {
+    customerId: string;
+    warehouseId: string;
+    receiptNumber: string;
+    cleanMethod: string;
+    cleanAmount: number;
+    primaryReceivableId?: string | null;
+    notes?: string | null;
+    userId?: string | null;
+    primaryUrl?: string | null;
+    receiptFilename?: string | null;
+    jsonUrls: string;
+    existingPaymentIdToReuse?: string | null;
+  }
+): Promise<{
+  primaryPayment: ReceivablePaymentItem;
+  allPayments: ReceivablePaymentItem[];
+  totalAppliedToDebt: number;
+  excessToFavour: number;
+  customerCreditBalance: number;
+}> {
+  const {
+    customerId,
+    warehouseId,
+    receiptNumber,
+    cleanMethod,
+    cleanAmount,
+    primaryReceivableId,
+    notes,
+    userId,
+    primaryUrl,
+    receiptFilename,
+    jsonUrls,
+    existingPaymentIdToReuse,
+  } = params;
+
+  // Si paga con saldo a favor, debitar primero del saldo del cliente
+  if (cleanMethod === "saldo_a_favor") {
+    await debitCustomerWarehouseBalance(client, customerId, warehouseId, cleanAmount);
+  }
+
+  let remaining = cleanAmount;
+  let totalAppliedToDebt = 0;
+  const createdPayments: ReceivablePaymentItem[] = [];
+  let primaryPaymentItem: ReceivablePaymentItem | null = null;
+
+  // 1. Amortizar cuenta primaria si existe
+  if (primaryReceivableId) {
+    const { rows: arRows } = await client.query<{
+      id: string;
+      customer_id: string;
+      balance_amount: string;
+      paid_amount: string;
+      status: string;
+      invoice_number: string;
+    }>(
+      `
+      SELECT id::text, customer_id::text, balance_amount::text, paid_amount::text, status, invoice_number
+      FROM accounts_receivable
+      WHERE id = $1::uuid
+      FOR UPDATE
+      `,
+      [primaryReceivableId]
+    );
+
+    if (arRows.length > 0 && arRows[0]!.status !== "cancelled") {
+      const ar = arRows[0]!;
+      const currentBalance = Math.round(Number(ar.balance_amount) * 100) / 100;
+      const applied = Math.round(Math.min(remaining, currentBalance) * 100) / 100;
+
+      const newBalance = Math.max(0, Math.round((currentBalance - applied) * 100) / 100);
+      const newPaidAmount = Math.round((Number(ar.paid_amount) + applied) * 100) / 100;
+      const newStatus: ReceivableStatus = newBalance === 0 ? "paid" : "partial";
+      const paidAt = newBalance === 0 ? new Date() : null;
+
+      await client.query(
+        `
+        UPDATE accounts_receivable
+        SET balance_amount = $1,
+            paid_amount = $2,
+            status = $3,
+            paid_at = COALESCE($4, paid_at)
+        WHERE id = $5::uuid
+        `,
+        [newBalance, newPaidAmount, newStatus, paidAt, ar.id]
+      );
+
+      remaining = Math.max(0, Math.round((remaining - applied) * 100) / 100);
+      totalAppliedToDebt = Math.round((totalAppliedToDebt + applied) * 100) / 100;
+
+      // Si tenemos un ID existente a reusar (en edición)
+      if (existingPaymentIdToReuse) {
+        const { rows: pRows } = await client.query<ReceivablePaymentItem>(
+          `
+          UPDATE receivable_payments
+          SET receivable_id = $1::uuid,
+              customer_id = $2::uuid,
+              warehouse_id = $3::uuid,
+              payment_method = $4,
+              amount = $5,
+              applied_to_debt = $6,
+              excess_to_favour = 0,
+              notes = $7,
+              receipt_url = COALESCE($8, receipt_url),
+              receipt_filename = COALESCE($9, receipt_filename),
+              receipt_urls = COALESCE($10::jsonb, receipt_urls)
+          WHERE id = $11::uuid
+          RETURNING
+            id::text,
+            receivable_id::text AS "receivableId",
+            customer_id::text AS "customerId",
+            warehouse_id::text AS "warehouseId",
+            receipt_number AS "receiptNumber",
+            payment_method AS "paymentMethod",
+            amount::float,
+            applied_to_debt::float AS "appliedToDebt",
+            excess_to_favour::float AS "excessToFavour",
+            receipt_url AS "receiptUrl",
+            receipt_filename AS "receiptFilename",
+            receipt_urls AS "receiptUrls",
+            notes,
+            created_at AS "createdAt"
+          `,
+          [
+            ar.id,
+            customerId,
+            warehouseId,
+            cleanMethod,
+            applied,
+            applied,
+            notes?.trim() || null,
+            primaryUrl,
+            receiptFilename?.trim() || null,
+            jsonUrls,
+            existingPaymentIdToReuse,
+          ]
+        );
+        primaryPaymentItem = pRows[0]!;
+      } else {
+        const { rows: pRows } = await client.query<ReceivablePaymentItem>(
+          `
+          INSERT INTO receivable_payments (
+            receivable_id, customer_id, warehouse_id, receipt_number,
+            payment_method, amount, applied_to_debt, excess_to_favour,
+            notes, created_by, receipt_url, receipt_filename, receipt_urls
+          )
+          VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, 0, $8, $9::uuid, $10, $11, $12::jsonb)
+          RETURNING
+            id::text,
+            receivable_id::text AS "receivableId",
+            customer_id::text AS "customerId",
+            warehouse_id::text AS "warehouseId",
+            receipt_number AS "receiptNumber",
+            payment_method AS "paymentMethod",
+            amount::float,
+            applied_to_debt::float AS "appliedToDebt",
+            excess_to_favour::float AS "excessToFavour",
+            receipt_url AS "receiptUrl",
+            receipt_filename AS "receiptFilename",
+            receipt_urls AS "receiptUrls",
+            notes,
+            created_at AS "createdAt"
+          `,
+          [
+            ar.id,
+            customerId,
+            warehouseId,
+            receiptNumber,
+            cleanMethod,
+            applied,
+            applied,
+            notes?.trim() || null,
+            userId || null,
+            primaryUrl,
+            receiptFilename?.trim() || null,
+            jsonUrls,
+          ]
+        );
+        primaryPaymentItem = pRows[0]!;
+      }
+      createdPayments.push(primaryPaymentItem);
+    }
+  }
+
+  // 2. Amortizar en cascada a las demás cuentas pendientes del cliente (FIFO) si aún queda dinero
+  if (remaining > 0) {
+    const excludeClause = primaryReceivableId ? "AND id != $2::uuid" : "";
+    const queryParams: unknown[] = [customerId];
+    if (primaryReceivableId) queryParams.push(primaryReceivableId);
+
+    const { rows: otherArRows } = await client.query<{
+      id: string;
+      customer_id: string;
+      balance_amount: string;
+      paid_amount: string;
+      status: string;
+      invoice_number: string;
+    }>(
+      `
+      SELECT id::text, customer_id::text, balance_amount::text, paid_amount::text, status, invoice_number
+      FROM accounts_receivable
+      WHERE customer_id = $1::uuid
+        ${excludeClause}
+        AND status IN ('open', 'partial')
+        AND balance_amount > 0
+      ORDER BY (warehouse_id = '${warehouseId}') DESC, created_at ASC
+      FOR UPDATE
+      `,
+      queryParams
+    );
+
+    for (const ar of otherArRows) {
+      if (remaining <= 0) break;
+      const currentBalance = Math.round(Number(ar.balance_amount) * 100) / 100;
+      if (currentBalance <= 0) continue;
+
+      const applied = Math.round(Math.min(remaining, currentBalance) * 100) / 100;
+      const newBalance = Math.max(0, Math.round((currentBalance - applied) * 100) / 100);
+      const newPaidAmount = Math.round((Number(ar.paid_amount) + applied) * 100) / 100;
+      const newStatus: ReceivableStatus = newBalance === 0 ? "paid" : "partial";
+      const paidAt = newBalance === 0 ? new Date() : null;
+
+      await client.query(
+        `
+        UPDATE accounts_receivable
+        SET balance_amount = $1,
+            paid_amount = $2,
+            status = $3,
+            paid_at = COALESCE($4, paid_at)
+        WHERE id = $5::uuid
+        `,
+        [newBalance, newPaidAmount, newStatus, paidAt, ar.id]
+      );
+
+      remaining = Math.max(0, Math.round((remaining - applied) * 100) / 100);
+      totalAppliedToDebt = Math.round((totalAppliedToDebt + applied) * 100) / 100;
+
+      // Si aún no tenemos primaryPaymentItem y hay un ID a reusar:
+      if (!primaryPaymentItem && existingPaymentIdToReuse) {
+        const { rows: pRows } = await client.query<ReceivablePaymentItem>(
+          `
+          UPDATE receivable_payments
+          SET receivable_id = $1::uuid,
+              customer_id = $2::uuid,
+              warehouse_id = $3::uuid,
+              payment_method = $4,
+              amount = $5,
+              applied_to_debt = $6,
+              excess_to_favour = 0,
+              notes = $7,
+              receipt_url = COALESCE($8, receipt_url),
+              receipt_filename = COALESCE($9, receipt_filename),
+              receipt_urls = COALESCE($10::jsonb, receipt_urls)
+          WHERE id = $11::uuid
+          RETURNING
+            id::text,
+            receivable_id::text AS "receivableId",
+            customer_id::text AS "customerId",
+            warehouse_id::text AS "warehouseId",
+            receipt_number AS "receiptNumber",
+            payment_method AS "paymentMethod",
+            amount::float,
+            applied_to_debt::float AS "appliedToDebt",
+            excess_to_favour::float AS "excessToFavour",
+            receipt_url AS "receiptUrl",
+            receipt_filename AS "receiptFilename",
+            receipt_urls AS "receiptUrls",
+            notes,
+            created_at AS "createdAt"
+          `,
+          [
+            ar.id,
+            customerId,
+            warehouseId,
+            cleanMethod,
+            applied,
+            applied,
+            notes ? `${notes} (Aplicado a ${ar.invoice_number})` : `Abono aplicado en cascada a ${ar.invoice_number}`,
+            primaryUrl,
+            receiptFilename?.trim() || null,
+            jsonUrls,
+            existingPaymentIdToReuse,
+          ]
+        );
+        primaryPaymentItem = pRows[0]!;
+        createdPayments.push(primaryPaymentItem);
+      } else {
+        const cascadeNote = notes
+          ? `${notes} (Aplicado a ${ar.invoice_number})`
+          : `Abono aplicado en cascada a ${ar.invoice_number}`;
+
+        const { rows: pRows } = await client.query<ReceivablePaymentItem>(
+          `
+          INSERT INTO receivable_payments (
+            receivable_id, customer_id, warehouse_id, receipt_number,
+            payment_method, amount, applied_to_debt, excess_to_favour,
+            notes, created_by, receipt_url, receipt_filename, receipt_urls
+          )
+          VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, 0, $8, $9::uuid, $10, $11, $12::jsonb)
+          RETURNING
+            id::text,
+            receivable_id::text AS "receivableId",
+            customer_id::text AS "customerId",
+            warehouse_id::text AS "warehouseId",
+            receipt_number AS "receiptNumber",
+            payment_method AS "paymentMethod",
+            amount::float,
+            applied_to_debt::float AS "appliedToDebt",
+            excess_to_favour::float AS "excessToFavour",
+            receipt_url AS "receiptUrl",
+            receipt_filename AS "receiptFilename",
+            receipt_urls AS "receiptUrls",
+            notes,
+            created_at AS "createdAt"
+          `,
+          [
+            ar.id,
+            customerId,
+            warehouseId,
+            receiptNumber,
+            cleanMethod,
+            applied,
+            applied,
+            cascadeNote,
+            userId || null,
+            primaryUrl,
+            receiptFilename?.trim() || null,
+            jsonUrls,
+          ]
+        );
+        if (!primaryPaymentItem) primaryPaymentItem = pRows[0]!;
+        createdPayments.push(pRows[0]!);
+      }
+    }
+  }
+
+  // 3. Si aún queda dinero después de amortizar TODAS las deudas, va a saldo a favor
+  const finalExcess = remaining;
+  if (finalExcess > 0 && cleanMethod !== "saldo_a_favor") {
+    await creditCustomerWarehouseBalance(client, customerId, warehouseId, finalExcess);
+  }
+
+  // Si hubo exceso a favor, asignarlo al pago principal o crear fila de exceso
+  if (finalExcess > 0) {
+    if (primaryPaymentItem) {
+      // Sumar el exceso al monto de la fila principal
+      const newPrimaryAmount = Math.round((primaryPaymentItem.amount + finalExcess) * 100) / 100;
+      const { rows: updatedPrimary } = await client.query<ReceivablePaymentItem>(
+        `
+        UPDATE receivable_payments
+        SET amount = $1,
+            excess_to_favour = $2
+        WHERE id = $3::uuid
+        RETURNING
+          id::text,
+          receivable_id::text AS "receivableId",
+          customer_id::text AS "customerId",
+          warehouse_id::text AS "warehouseId",
+          receipt_number AS "receiptNumber",
+          payment_method AS "paymentMethod",
+          amount::float,
+          applied_to_debt::float AS "appliedToDebt",
+          excess_to_favour::float AS "excessToFavour",
+          receipt_url AS "receiptUrl",
+          receipt_filename AS "receiptFilename",
+          receipt_urls AS "receiptUrls",
+          notes,
+          created_at AS "createdAt"
+        `,
+        [newPrimaryAmount, finalExcess, primaryPaymentItem.id]
+      );
+      primaryPaymentItem = updatedPrimary[0]!;
+      // Actualizar en el array
+      const idx = createdPayments.findIndex((p) => p.id === primaryPaymentItem!.id);
+      if (idx !== -1) createdPayments[idx] = primaryPaymentItem;
+    } else {
+      // No hubo ninguna deuda: el abono completo es saldo a favor directo
+      if (existingPaymentIdToReuse) {
+        const { rows: pRows } = await client.query<ReceivablePaymentItem>(
+          `
+          UPDATE receivable_payments
+          SET receivable_id = NULL,
+              customer_id = $1::uuid,
+              warehouse_id = $2::uuid,
+              payment_method = $3,
+              amount = $4,
+              applied_to_debt = 0,
+              excess_to_favour = $4,
+              notes = $5,
+              receipt_url = COALESCE($6, receipt_url),
+              receipt_filename = COALESCE($7, receipt_filename),
+              receipt_urls = COALESCE($8::jsonb, receipt_urls)
+          WHERE id = $9::uuid
+          RETURNING
+            id::text,
+            receivable_id::text AS "receivableId",
+            customer_id::text AS "customerId",
+            warehouse_id::text AS "warehouseId",
+            receipt_number AS "receiptNumber",
+            payment_method AS "paymentMethod",
+            amount::float,
+            applied_to_debt::float AS "appliedToDebt",
+            excess_to_favour::float AS "excessToFavour",
+            receipt_url AS "receiptUrl",
+            receipt_filename AS "receiptFilename",
+            receipt_urls AS "receiptUrls",
+            notes,
+            created_at AS "createdAt"
+          `,
+          [
+            customerId,
+            warehouseId,
+            cleanMethod,
+            finalExcess,
+            notes?.trim() || null,
+            primaryUrl,
+            receiptFilename?.trim() || null,
+            jsonUrls,
+            existingPaymentIdToReuse,
+          ]
+        );
+        primaryPaymentItem = pRows[0]!;
+      } else {
+        const { rows: pRows } = await client.query<ReceivablePaymentItem>(
+          `
+          INSERT INTO receivable_payments (
+            receivable_id, customer_id, warehouse_id, receipt_number,
+            payment_method, amount, applied_to_debt, excess_to_favour,
+            notes, created_by, receipt_url, receipt_filename, receipt_urls
+          )
+          VALUES (NULL, $1::uuid, $2::uuid, $3, $4, $5, 0, $5, $6, $7::uuid, $8, $9, $10::jsonb)
+          RETURNING
+            id::text,
+            receivable_id::text AS "receivableId",
+            customer_id::text AS "customerId",
+            warehouse_id::text AS "warehouseId",
+            receipt_number AS "receiptNumber",
+            payment_method AS "paymentMethod",
+            amount::float,
+            applied_to_debt::float AS "appliedToDebt",
+            excess_to_favour::float AS "excessToFavour",
+            receipt_url AS "receiptUrl",
+            receipt_filename AS "receiptFilename",
+            receipt_urls AS "receiptUrls",
+            notes,
+            created_at AS "createdAt"
+          `,
+          [
+            customerId,
+            warehouseId,
+            receiptNumber,
+            cleanMethod,
+            finalExcess,
+            notes?.trim() || null,
+            userId || null,
+            primaryUrl,
+            receiptFilename?.trim() || null,
+            jsonUrls,
+          ]
+        );
+        primaryPaymentItem = pRows[0]!;
+      }
+      createdPayments.push(primaryPaymentItem);
+    }
+  }
+
+  const finalCreditBalance = await getCustomerWarehouseCreditBalance(client, customerId, warehouseId);
+
+  return {
+    primaryPayment: primaryPaymentItem!,
+    allPayments: createdPayments,
+    totalAppliedToDebt,
+    excessToFavour: finalExcess,
+    customerCreditBalance: finalCreditBalance,
+  };
+}
+
+/**
  * Registra un abono a un crédito.
- * Si el monto excede el saldo pendiente, el sobrante se asigna a saldo a favor del cliente.
+ * Si el monto excede el saldo pendiente de esa factura, el excedente amortiza en cascada
+ * las demás facturas pendientes del cliente. Solo si no queda ninguna deuda pendiente,
+ * el remanente se asigna a saldo a favor del cliente.
  */
 export async function addReceivablePayment(
   pool: pg.Pool,
@@ -1009,44 +1496,11 @@ export async function addReceivablePayment(
       throw Object.assign(new Error("receivable_is_cancelled"), { code: "receivable_is_cancelled" });
     }
 
-    const currentBalance = Math.round(Number(ar.balance_amount) * 100) / 100;
-    const cleanAmount = Math.round(Number(amount) * 100) / 100;
     const customerId = ar.customer_id;
+    const cleanAmount = Math.round(Number(amount) * 100) / 100;
     const cleanMethod = paymentMethod.trim().toLowerCase();
 
-    // Si paga con saldo a favor
-    if (cleanMethod === "saldo_a_favor") {
-      await debitCustomerWarehouseBalance(client, customerId, warehouseId, cleanAmount);
-    }
-
-    // Amortización vs Excedente
-    const appliedToDebt = Math.round(Math.min(cleanAmount, currentBalance) * 100) / 100;
-    const excessToFavour = Math.max(0, Math.round((cleanAmount - appliedToDebt) * 100) / 100);
-
-    const newBalance = Math.max(0, Math.round((currentBalance - appliedToDebt) * 100) / 100);
-    const newPaidAmount = Math.round((Number(ar.paid_amount) + appliedToDebt) * 100) / 100;
-    const newStatus: ReceivableStatus = newBalance === 0 ? "paid" : "partial";
-    const paidAt = newBalance === 0 ? new Date() : null;
-
-    // Actualizar cuenta por cobrar
-    await client.query(
-      `
-      UPDATE accounts_receivable
-      SET balance_amount = $1,
-          paid_amount = $2,
-          status = $3,
-          paid_at = COALESCE($4, paid_at)
-      WHERE id = $5::uuid
-      `,
-      [newBalance, newPaidAmount, newStatus, paidAt, receivableId]
-    );
-
-    // Si hubo excedente, sumarlo al saldo a favor del cliente en esta sede
-    if (excessToFavour > 0 && cleanMethod !== "saldo_a_favor") {
-      await creditCustomerWarehouseBalance(client, customerId, warehouseId, excessToFavour);
-    }
-
-    // Generar recibo de caja
+    // Generar consecutivo de recibo de caja
     const receiptNumber = await nextReceiptNumber(client, warehouseId);
 
     const finalUrls = (receiptUrls && receiptUrls.length > 0)
@@ -1055,59 +1509,39 @@ export async function addReceivablePayment(
     const primaryUrl = finalUrls[0] || receiptUrl || null;
     const jsonUrls = JSON.stringify(finalUrls);
 
-    const { rows: payRows } = await client.query<ReceivablePaymentItem>(
-      `
-      INSERT INTO receivable_payments (
-        receivable_id, customer_id, warehouse_id, receipt_number,
-        payment_method, amount, applied_to_debt, excess_to_favour,
-        notes, created_by, receipt_url, receipt_filename, receipt_urls
-      )
-      VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10::uuid, $11, $12, $13::jsonb)
-      RETURNING
-        id::text,
-        receivable_id::text AS "receivableId",
-        customer_id::text AS "customerId",
-        warehouse_id::text AS "warehouseId",
-        receipt_number AS "receiptNumber",
-        payment_method AS "paymentMethod",
-        amount::float,
-        applied_to_debt::float AS "appliedToDebt",
-        excess_to_favour::float AS "excessToFavour",
-        receipt_url AS "receiptUrl",
-        receipt_filename AS "receiptFilename",
-        receipt_urls AS "receiptUrls",
-        notes,
-        created_at AS "createdAt"
-      `,
-      [
-        receivableId,
-        customerId,
-        warehouseId,
-        receiptNumber,
-        cleanMethod,
-        cleanAmount,
-        appliedToDebt,
-        excessToFavour,
-        notes?.trim() || null,
-        userId || null,
-        primaryUrl,
-        receiptFilename?.trim() || null,
-        jsonUrls,
-      ]
-    );
+    // Distribuir en cascada (primero a esta factura, luego a las demás pendientes)
+    const result = await distributePaymentInCascade(client, {
+      customerId,
+      warehouseId,
+      receiptNumber,
+      cleanMethod,
+      cleanAmount,
+      primaryReceivableId: receivableId,
+      notes,
+      userId,
+      primaryUrl,
+      receiptFilename,
+      jsonUrls,
+    });
 
-    // Obtener nuevo saldo a favor del cliente en esta sede
-    const finalCreditBalance = await getCustomerWarehouseCreditBalance(client, customerId, warehouseId);
+    // Consultar el estado final de la cuenta primaria
+    const { rows: updatedAr } = await client.query<{
+      balance_amount: string;
+      status: ReceivableStatus;
+    }>(
+      `SELECT balance_amount::float AS "balance_amount", status FROM accounts_receivable WHERE id = $1::uuid`,
+      [receivableId]
+    );
 
     await client.query("COMMIT");
 
     return {
-      payment: payRows[0]!,
-      appliedToDebt,
-      excessToFavour,
-      newBalanceAmount: newBalance,
-      newStatus,
-      customerCreditBalance: finalCreditBalance,
+      payment: result.primaryPayment,
+      appliedToDebt: result.totalAppliedToDebt,
+      excessToFavour: result.excessToFavour,
+      newBalanceAmount: Number(updatedAr[0]?.balance_amount ?? 0),
+      newStatus: updatedAr[0]?.status ?? "partial",
+      customerCreditBalance: result.customerCreditBalance,
     };
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1116,6 +1550,517 @@ export async function addReceivablePayment(
     client.release();
   }
 }
+
+/**
+ * Registra un abono directo a la cartera global del cliente.
+ * Se distribuye en cascada entre todas las facturas pendientes (FIFO).
+ * Si salda todas las deudas y sobra dinero, el remanente se guarda como saldo a favor.
+ */
+export async function addCustomerPortfolioPayment(
+  pool: pg.Pool,
+  params: {
+    customerId: string;
+    warehouseId: string;
+    paymentMethod: string;
+    amount: number;
+    notes?: string | null;
+    userId?: string | null;
+    receiptUrl?: string | null;
+    receiptUrls?: string[] | null;
+    receiptFilename?: string | null;
+  }
+): Promise<{
+  payment: ReceivablePaymentItem;
+  allPayments: ReceivablePaymentItem[];
+  totalAppliedToDebt: number;
+  excessToFavour: number;
+  customerCreditBalance: number;
+}> {
+  const {
+    customerId,
+    warehouseId,
+    paymentMethod,
+    amount,
+    notes,
+    userId,
+    receiptUrl,
+    receiptUrls,
+    receiptFilename,
+  } = params;
+
+  const cleanAmount = Math.round(Number(amount) * 100) / 100;
+  if (!Number.isFinite(cleanAmount) || cleanAmount <= 0) {
+    throw Object.assign(new Error("invalid_payment_amount"), { code: "invalid_payment_amount" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Validar cliente
+    const { rows: custRows } = await client.query<{ id: string }>(
+      "SELECT id FROM customers WHERE id = $1::uuid FOR UPDATE",
+      [customerId]
+    );
+    if (custRows.length === 0) {
+      throw Object.assign(new Error("customer_not_found"), { code: "customer_not_found" });
+    }
+
+    const cleanMethod = paymentMethod.trim().toLowerCase();
+    const receiptNumber = await nextReceiptNumber(client, warehouseId);
+
+    const finalUrls = (receiptUrls && receiptUrls.length > 0)
+      ? receiptUrls
+      : (receiptUrl ? [receiptUrl] : []);
+    const primaryUrl = finalUrls[0] || receiptUrl || null;
+    const jsonUrls = JSON.stringify(finalUrls);
+
+    const result = await distributePaymentInCascade(client, {
+      customerId,
+      warehouseId,
+      receiptNumber,
+      cleanMethod,
+      cleanAmount,
+      primaryReceivableId: null,
+      notes,
+      userId,
+      primaryUrl,
+      receiptFilename,
+      jsonUrls,
+    });
+
+    await client.query("COMMIT");
+    return { payment: result.primaryPayment, allPayments: result.allPayments, totalAppliedToDebt: result.totalAppliedToDebt, excessToFavour: result.excessToFavour, customerCreditBalance: result.customerCreditBalance };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Cruza automáticamente el saldo a favor disponible de un cliente contra sus deudas pendientes en esa sede.
+ */
+export async function reconcileCustomerCreditBalanceWithDebts(
+  pool: pg.Pool,
+  params: {
+    customerId: string;
+    warehouseId: string;
+    userId?: string | null;
+  }
+): Promise<{
+  reconciledAmount: number;
+  remainingDebt: number;
+  remainingCreditBalance: number;
+}> {
+  const { customerId, warehouseId, userId } = params;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1. Obtener saldo a favor disponible
+    const currentBalance = await getCustomerWarehouseCreditBalance(client, customerId, warehouseId);
+    if (currentBalance <= 0) {
+      await client.query("ROLLBACK");
+      return { reconciledAmount: 0, remainingDebt: 0, remainingCreditBalance: 0 };
+    }
+
+    // 2. Obtener total adeudado en facturas abiertas
+    const { rows: debts } = await client.query<{
+      id: string;
+      balance_amount: string;
+      paid_amount: string;
+      invoice_number: string;
+    }>(
+      `
+      SELECT id::text, balance_amount::text, paid_amount::text, invoice_number
+      FROM accounts_receivable
+      WHERE customer_id = $1::uuid
+        AND warehouse_id = $2::uuid
+        AND status IN ('open', 'partial')
+        AND balance_amount > 0
+      ORDER BY created_at ASC
+      FOR UPDATE
+      `,
+      [customerId, warehouseId]
+    );
+
+    if (debts.length === 0) {
+      await client.query("ROLLBACK");
+      return { reconciledAmount: 0, remainingDebt: 0, remainingCreditBalance: currentBalance };
+    }
+
+    const totalDebt = debts.reduce((sum, d) => sum + Number(d.balance_amount), 0);
+    const amountToApply = Math.round(Math.min(currentBalance, totalDebt) * 100) / 100;
+
+    if (amountToApply <= 0) {
+      await client.query("ROLLBACK");
+      return { reconciledAmount: 0, remainingDebt: totalDebt, remainingCreditBalance: currentBalance };
+    }
+
+    const receiptNumber = await nextReceiptNumber(client, warehouseId);
+
+    await distributePaymentInCascade(client, {
+      customerId,
+      warehouseId,
+      receiptNumber,
+      cleanMethod: "saldo_a_favor",
+      cleanAmount: amountToApply,
+      notes: "Cruce automático de saldo a favor contra cartera pendiente",
+      userId,
+      jsonUrls: "[]",
+    });
+
+    const newCreditBalance = await getCustomerWarehouseCreditBalance(client, customerId, warehouseId);
+    const { rows: newDebts } = await client.query<{ total: string }>(
+      `SELECT COALESCE(SUM(balance_amount), 0)::text AS total FROM accounts_receivable WHERE customer_id = $1::uuid AND status IN ('open', 'partial')`,
+      [customerId]
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      reconciledAmount: amountToApply,
+      remainingDebt: Number(newDebts[0]?.total ?? 0),
+      remainingCreditBalance: newCreditBalance,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Modifica un abono de cartera recibido: cambia el valor y/o medio de pago y/o notas.
+ * Revierte atómicamente el impacto del abono anterior y re-aplica la cascada de amortización con los nuevos valores.
+ */
+export async function updateReceivablePayment(
+  pool: pg.Pool,
+  paymentId: string,
+  params: {
+    amount: number;
+    paymentMethod: string;
+    notes?: string | null;
+    userId?: string | null;
+  }
+): Promise<{
+  payment: ReceivablePaymentItem;
+  customerCreditBalance: number;
+}> {
+  const newAmount = Math.round((Number(params.amount) || 0) * 100) / 100;
+  if (!Number.isFinite(newAmount) || newAmount <= 0) {
+    throw Object.assign(new Error("invalid_payment_amount"), {
+      code: "invalid_payment_amount",
+      message: "El valor a abonar debe ser mayor a 0.",
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1. Obtener el registro del pago a editar
+    const { rows: payRows } = await client.query<{
+      id: string;
+      receivable_id: string | null;
+      customer_id: string;
+      warehouse_id: string;
+      receipt_number: string;
+      payment_method: string;
+      amount: string;
+      applied_to_debt: string;
+      excess_to_favour: string;
+      notes: string | null;
+      is_initial: boolean;
+      receipt_url: string | null;
+      receipt_filename: string | null;
+      receipt_urls: any;
+    }>(
+      `
+      SELECT id::text, receivable_id::text, customer_id::text, warehouse_id::text,
+             receipt_number, payment_method, amount::text, applied_to_debt::text,
+             excess_to_favour::text, notes, is_initial, receipt_url, receipt_filename, receipt_urls
+      FROM receivable_payments
+      WHERE id = $1::uuid
+      FOR UPDATE
+      `,
+      [paymentId]
+    );
+
+    if (payRows.length === 0) {
+      throw Object.assign(new Error("payment_not_found"), { code: "payment_not_found", statusCode: 404 });
+    }
+
+    const originalPay = payRows[0]!;
+    const customerId = originalPay.customer_id;
+    const warehouseId = originalPay.warehouse_id;
+    const receiptNumber = originalPay.receipt_number;
+    const newMethod = params.paymentMethod.trim().toLowerCase();
+
+    // 2. Obtener todos los pagos asociados a este mismo receipt_number (por si se distribuyó entre varias facturas)
+    const { rows: allRelatedPayments } = await client.query<{
+      id: string;
+      receivable_id: string | null;
+      amount: string;
+      applied_to_debt: string;
+      excess_to_favour: string;
+      payment_method: string;
+    }>(
+      `
+      SELECT id::text, receivable_id::text, amount::text, applied_to_debt::text, excess_to_favour::text, payment_method
+      FROM receivable_payments
+      WHERE receipt_number = $1
+      FOR UPDATE
+      `,
+      [receiptNumber]
+    );
+
+    // 3. PASO A: REVERTIR IMPACTO DEL ABONO VIEJO
+    for (const p of allRelatedPayments) {
+      const pApplied = Number(p.applied_to_debt || 0);
+      const pExcess = Number(p.excess_to_favour || 0);
+
+      // Si generó saldo a favor, descontarlo
+      if (pExcess > 0 && p.payment_method !== "saldo_a_favor") {
+        await client.query(
+          `
+          UPDATE customer_warehouse_credit_balances
+          SET credit_balance = GREATEST(0, ROUND((credit_balance - $3)::numeric, 2)), updated_at = now()
+          WHERE customer_id = $1::uuid AND warehouse_id = $2::uuid
+          `,
+          [customerId, warehouseId, pExcess]
+        );
+        await client.query(
+          `
+          UPDATE customers
+          SET credit_balance = (
+            SELECT COALESCE(SUM(credit_balance), 0)
+            FROM customer_warehouse_credit_balances
+            WHERE customer_id = $1::uuid
+          )
+          WHERE id = $1::uuid
+          `,
+          [customerId]
+        );
+      }
+
+      // Si pagó con saldo a favor, reponer el saldo a favor
+      if (p.payment_method === "saldo_a_favor") {
+        await creditCustomerWarehouseBalance(client, customerId, warehouseId, Number(p.amount));
+      }
+
+      // Si amortizó deuda en una cuenta por cobrar, revertirla
+      if (p.receivable_id && pApplied > 0) {
+        const { rows: arRows } = await client.query<{
+          id: string;
+          total_amount: string;
+          initial_payment: string;
+          paid_amount: string;
+          balance_amount: string;
+        }>(
+          `SELECT id::text, total_amount::text, initial_payment::text, paid_amount::text, balance_amount::text
+           FROM accounts_receivable
+           WHERE id = $1::uuid
+           FOR UPDATE`,
+          [p.receivable_id]
+        );
+
+        if (arRows.length > 0) {
+          const ar = arRows[0]!;
+          const currentBal = Number(ar.balance_amount);
+          const currentPaid = Number(ar.paid_amount);
+          const restoredBal = Math.round((currentBal + pApplied) * 100) / 100;
+          const restoredPaid = Math.max(0, Math.round((currentPaid - pApplied) * 100) / 100);
+          const restoredStatus: ReceivableStatus = restoredPaid <= Number(ar.initial_payment) ? "open" : "partial";
+
+          await client.query(
+            `
+            UPDATE accounts_receivable
+            SET balance_amount = $1,
+                paid_amount = $2,
+                status = $3,
+                paid_at = NULL
+            WHERE id = $4::uuid
+            `,
+            [restoredBal, restoredPaid, restoredStatus, ar.id]
+          );
+        }
+      }
+    }
+
+    // 4. Eliminar pagos secundarios de este receipt_number para dejar limpia la re-aplicación
+    const secondaryIds = allRelatedPayments
+      .map((p) => p.id)
+      .filter((id) => id !== originalPay.id);
+
+    if (secondaryIds.length > 0) {
+      await client.query(
+        `DELETE FROM receivable_payments WHERE id = ANY($1::uuid[])`,
+        [secondaryIds]
+      );
+    }
+
+    // 5. PASO B: RE-APLICAR CON EL NUEVO MONTO Y MEDIO DE PAGO
+    const jsonUrls = JSON.stringify(originalPay.receipt_urls ?? []);
+
+    const result = await distributePaymentInCascade(client, {
+      customerId,
+      warehouseId,
+      receiptNumber,
+      cleanMethod: newMethod,
+      cleanAmount: newAmount,
+      primaryReceivableId: originalPay.receivable_id,
+      notes: params.notes !== undefined ? params.notes : originalPay.notes,
+      userId: params.userId || null,
+      primaryUrl: originalPay.receipt_url,
+      receiptFilename: originalPay.receipt_filename,
+      jsonUrls,
+      existingPaymentIdToReuse: originalPay.id,
+    });
+
+    await client.query("COMMIT");
+
+    return {
+      payment: result.primaryPayment,
+      customerCreditBalance: result.customerCreditBalance,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Elimina o anula un abono de cartera.
+ * Revierte atómicamente la amortización en las facturas y el saldo a favor.
+ */
+export async function deleteReceivablePayment(
+  pool: pg.Pool,
+  paymentId: string
+): Promise<{ deletedId: string; receiptNumber: string }> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: payRows } = await client.query<{
+      id: string;
+      customer_id: string;
+      warehouse_id: string;
+      receipt_number: string;
+    }>(
+      `SELECT id::text, customer_id::text, warehouse_id::text, receipt_number
+       FROM receivable_payments
+       WHERE id = $1::uuid
+       FOR UPDATE`,
+      [paymentId]
+    );
+
+    if (payRows.length === 0) {
+      throw Object.assign(new Error("payment_not_found"), { code: "payment_not_found", statusCode: 404 });
+    }
+
+    const { customer_id: customerId, warehouse_id: warehouseId, receipt_number: receiptNumber } = payRows[0]!;
+
+    const { rows: allRelated } = await client.query<{
+      id: string;
+      receivable_id: string | null;
+      amount: string;
+      applied_to_debt: string;
+      excess_to_favour: string;
+      payment_method: string;
+    }>(
+      `SELECT id::text, receivable_id::text, amount::text, applied_to_debt::text, excess_to_favour::text, payment_method
+       FROM receivable_payments
+       WHERE receipt_number = $1
+       FOR UPDATE`,
+      [receiptNumber]
+    );
+
+    for (const p of allRelated) {
+      const pApplied = Number(p.applied_to_debt || 0);
+      const pExcess = Number(p.excess_to_favour || 0);
+
+      if (pExcess > 0 && p.payment_method !== "saldo_a_favor") {
+        await client.query(
+          `
+          UPDATE customer_warehouse_credit_balances
+          SET credit_balance = GREATEST(0, ROUND((credit_balance - $3)::numeric, 2)), updated_at = now()
+          WHERE customer_id = $1::uuid AND warehouse_id = $2::uuid
+          `,
+          [customerId, warehouseId, pExcess]
+        );
+        await client.query(
+          `
+          UPDATE customers
+          SET credit_balance = (
+            SELECT COALESCE(SUM(credit_balance), 0)
+            FROM customer_warehouse_credit_balances
+            WHERE customer_id = $1::uuid
+          )
+          WHERE id = $1::uuid
+          `,
+          [customerId]
+        );
+      }
+
+      if (p.payment_method === "saldo_a_favor") {
+        await creditCustomerWarehouseBalance(client, customerId, warehouseId, Number(p.amount));
+      }
+
+      if (p.receivable_id && pApplied > 0) {
+        const { rows: arRows } = await client.query<{
+          id: string;
+          initial_payment: string;
+          paid_amount: string;
+          balance_amount: string;
+        }>(
+          `SELECT id::text, initial_payment::text, paid_amount::text, balance_amount::text
+           FROM accounts_receivable
+           WHERE id = $1::uuid
+           FOR UPDATE`,
+          [p.receivable_id]
+        );
+
+        if (arRows.length > 0) {
+          const ar = arRows[0]!;
+          const currentBal = Number(ar.balance_amount);
+          const currentPaid = Number(ar.paid_amount);
+          const restoredBal = Math.round((currentBal + pApplied) * 100) / 100;
+          const restoredPaid = Math.max(0, Math.round((currentPaid - pApplied) * 100) / 100);
+          const restoredStatus: ReceivableStatus = restoredPaid <= Number(ar.initial_payment) ? "open" : "partial";
+
+          await client.query(
+            `
+            UPDATE accounts_receivable
+            SET balance_amount = $1,
+                paid_amount = $2,
+                status = $3,
+                paid_at = NULL
+            WHERE id = $4::uuid
+            `,
+            [restoredBal, restoredPaid, restoredStatus, ar.id]
+          );
+        }
+      }
+    }
+
+    await client.query(`DELETE FROM receivable_payments WHERE receipt_number = $1`, [receiptNumber]);
+    await client.query("COMMIT");
+
+    return { deletedId: paymentId, receiptNumber };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 
 /**
  * Verifica si un cliente ya tiene registrado un saldo inicial en una sede específica.

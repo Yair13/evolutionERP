@@ -6,6 +6,10 @@ import { isUuid } from "../lib/uuid.js";
 import { isAdminSessionRequest, rejectIfOutflowMethodNotAllowed } from "../lib/outflow-policy.js";
 import {
   addReceivablePayment,
+  addCustomerPortfolioPayment,
+  updateReceivablePayment,
+  deleteReceivablePayment,
+  reconcileCustomerCreditBalanceWithDebts,
   getCustomerCreditProfile,
   getPaymentsCashSummary,
   getReceivableDetail,
@@ -381,6 +385,196 @@ export function createFinanceRouter(): Router {
   /**
    * Registrar un abono a un crédito.
    */
+  /**
+   * Registrar un abono a la cartera global del cliente.
+   * Amortiza en cascada las facturas pendientes más antiguas.
+   */
+  r.post("/receivables/customer-payment", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const warehouseId =
+      typeof req.body?.warehouseId === "string" && isUuid(req.body.warehouseId)
+        ? req.body.warehouseId
+        : null;
+    if (!warehouseId) {
+      res.status(400).json({ error: "warehouse_id_required" });
+      return;
+    }
+
+    const customerId =
+      typeof req.body?.customerId === "string" && isUuid(req.body.customerId)
+        ? req.body.customerId
+        : null;
+    if (!customerId) {
+      res.status(400).json({ error: "customer_id_required" });
+      return;
+    }
+
+    const amount = Number(req.body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      res.status(400).json({ error: "invalid_amount", message: "El monto debe ser mayor a 0." });
+      return;
+    }
+
+    const paymentMethod =
+      typeof req.body?.paymentMethod === "string" && req.body.paymentMethod.trim()
+        ? req.body.paymentMethod.trim()
+        : "efectivo";
+
+    const notes = typeof req.body?.notes === "string" ? req.body.notes : null;
+    const receiptUrl = typeof req.body?.receiptUrl === "string" ? req.body.receiptUrl : null;
+    const receiptUrls = Array.isArray(req.body?.receiptUrls)
+      ? req.body.receiptUrls.filter((u: any) => typeof u === "string" && u.trim().length > 0)
+      : null;
+    const receiptFilename = typeof req.body?.receiptFilename === "string" ? req.body.receiptFilename : null;
+
+    try {
+      const result = await addCustomerPortfolioPayment(pool, {
+        customerId,
+        warehouseId,
+        paymentMethod,
+        amount,
+        notes,
+        userId: req.auth!.userId,
+        receiptUrl,
+        receiptUrls,
+        receiptFilename,
+      });
+      res.status(201).json(result);
+    } catch (err: any) {
+      if (err.code === "insufficient_credit_balance") {
+        res.status(400).json({
+          error: "insufficient_credit_balance",
+          message: "El cliente no tiene suficiente saldo a favor.",
+        });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  /**
+   * Modificar un abono de cartera recibido (cambiar valor, medio de pago o notas).
+   */
+  r.put("/receivables/payments/:id", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const id = String(req.params.id);
+    if (!isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+
+    const amount = Number(req.body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      res.status(400).json({ error: "invalid_amount", message: "El valor a abonar debe ser mayor a 0." });
+      return;
+    }
+
+    const paymentMethod =
+      typeof req.body?.paymentMethod === "string" && req.body.paymentMethod.trim()
+        ? req.body.paymentMethod.trim()
+        : "efectivo";
+
+    const notes = typeof req.body?.notes === "string" ? req.body.notes : null;
+
+    try {
+      const result = await updateReceivablePayment(pool, id, {
+        amount,
+        paymentMethod,
+        notes,
+        userId: req.auth!.userId,
+      });
+      res.json(result);
+    } catch (err: any) {
+      if (err.code === "payment_not_found") {
+        res.status(404).json({ error: "payment_not_found" });
+        return;
+      }
+      if (err.code === "insufficient_credit_balance") {
+        res.status(400).json({
+          error: "insufficient_credit_balance",
+          message: "El cliente no cuenta con suficiente saldo a favor.",
+        });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  /**
+   * Eliminar o anular un abono de cartera recibido.
+   */
+  r.delete("/receivables/payments/:id", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const id = String(req.params.id);
+    if (!isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+
+    try {
+      const result = await deleteReceivablePayment(pool, id);
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      if (err.code === "payment_not_found") {
+        res.status(404).json({ error: "payment_not_found" });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  /**
+   * Cruzar automáticamente saldo a favor contra deudas pendientes del cliente.
+   */
+  r.post("/customers/:customerId/reconcile-credit-balance", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const customerId = String(req.params.customerId);
+    if (!isUuid(customerId)) {
+      res.status(400).json({ error: "invalid_customer_id" });
+      return;
+    }
+
+    const warehouseId =
+      typeof req.body?.warehouseId === "string" && isUuid(req.body.warehouseId)
+        ? req.body.warehouseId
+        : null;
+    if (!warehouseId) {
+      res.status(400).json({ error: "warehouse_id_required" });
+      return;
+    }
+
+    try {
+      const result = await reconcileCustomerCreditBalanceWithDebts(pool, {
+        customerId,
+        warehouseId,
+        userId: req.auth!.userId,
+      });
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      next(err);
+    }
+  });
+
   r.post("/receivables/:id/payments", requireAuth, async (req, res, next) => {
     const pool = getPool();
     if (!pool) {
@@ -2735,7 +2929,7 @@ export function createFinanceRouter(): Router {
       const item = await getLastGeneralClosure(pool, warehouseId);
       const suggestedDateFrom = item ? addDaysYmd(item.dateTo, 1) : getFirstDayOfMonthBogotaYmd();
       res.json({ item, suggestedDateFrom, hasPreviousClosure: Boolean(item) });
-    } catch (err) {
+    } catch (err: any) {
       next(err);
     }
   });
