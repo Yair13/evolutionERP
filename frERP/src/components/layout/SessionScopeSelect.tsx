@@ -13,7 +13,6 @@ export function SessionScopeSelect() {
     isAllWarehouses,
     canViewAllWarehouses,
     loading,
-    setWarehouseId,
     error,
     sessionLabel,
   } = useWarehouse();
@@ -67,15 +66,10 @@ export function SessionScopeSelect() {
       <button
         type="button"
         className="topbar-wh__trigger"
-        title={isAllWarehouses ? "Cambiar de sede" : "Ir a Sede Administrativa"}
-        aria-label={isAllWarehouses ? "Cambiar de sede" : "Ir a Sede Administrativa"}
+        title="Cambiar sede"
+        aria-label="Cambiar sede"
         onClick={() => {
-          if (isAllWarehouses) {
-            navigate("/seleccionar-sede");
-          } else {
-            setWarehouseId(null);
-            navigate("/app");
-          }
+          navigate("/seleccionar-sede");
         }}
       >
         <span className="topbar-wh__lead" aria-hidden>
@@ -100,14 +94,8 @@ export function SessionScopeSelect() {
           </span>
         </span>
         <span className="topbar-wh__switch">
-          {isAllWarehouses ? (
-            <ArrowLeftRight size={13} strokeWidth={2.2} aria-hidden />
-          ) : (
-            <Building2 size={13} strokeWidth={2.2} aria-hidden />
-          )}
-          <span className="topbar-wh__switch-text">
-            {isAllWarehouses ? "Cambiar sede" : "Sede Administrativa"}
-          </span>
+          <ArrowLeftRight size={13} strokeWidth={2.2} aria-hidden />
+          <span className="topbar-wh__switch-text">Cambiar sede</span>
         </span>
       </button>
     </div>
