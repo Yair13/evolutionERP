@@ -144,6 +144,10 @@ export type InventoryDocumentLine = {
   quantity: number;
   unitSalePrice: number | null;
   unitCost: number | null;
+  lineNotes?: string | null;
+  expectedQuantity?: number | null;
+  countedQuantity?: number | null;
+  difference?: number | null;
 };
 
 export type InventoryDocumentDetail = {

@@ -4,11 +4,12 @@ const BarcodeScannerModal = lazy(() =>
   import("../../components/inventory/BarcodeScannerModal.js").then((m) => ({ default: m.BarcodeScannerModal }))
 );
 import { useResolveScan } from "../../hooks/useResolveScan.js";
-import { ArrowDownToLine, ArrowUpFromLine, Search, ScanLine } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Printer, Search, ScanLine } from "lucide-react";
 import { fetchCatalog } from "../../api/inventory.js";
 import { InvScopeBar } from "../../components/inventory/InvScopeBar.js";
 import { InventoryPageHeader } from "../../components/inventory/InventoryPageHeader.js";
 import { ProductCard } from "../../components/inventory/ProductCard.js";
+import { RealInventoryModal } from "../../components/inventory/RealInventoryModal.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import type { CatalogItem } from "./inventory.types.js";
@@ -23,6 +24,7 @@ export function CatalogPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [realInventoryOpen, setRealInventoryOpen] = useState(false);
   const navigate = useNavigate();
   const resolveScan = useResolveScan(token, warehouseId);
 
@@ -93,6 +95,14 @@ export function CatalogPage() {
             <Link to="/app/inventario/semaforo" className="inv-btn inv-btn--ghost">
               Alertas de stock
             </Link>
+            <button
+              type="button"
+              className="inv-btn inv-btn--primary"
+              onClick={() => setRealInventoryOpen(true)}
+            >
+              <Printer size={18} strokeWidth={2} aria-hidden />
+              <span>Inventario Real / Imprimir</span>
+            </button>
           </>
         }
         toolbar={
@@ -187,6 +197,12 @@ export function CatalogPage() {
           ))}
         </div>
       )}
+      {realInventoryOpen ? (
+        <RealInventoryModal
+          warehouseId={warehouseId}
+          onClose={() => setRealInventoryOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

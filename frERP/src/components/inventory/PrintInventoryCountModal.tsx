@@ -15,6 +15,7 @@ type Props = {
 export function PrintInventoryCountModal({ count, initialFormat = "half_letter", onClose }: Props) {
   const [portalReady, setPortalReady] = useState(false);
   const [format, setFormat] = useState<"half_letter" | "voucher">(initialFormat);
+  const [onlyDifferences, setOnlyDifferences] = useState(true);
 
   useEffect(() => {
     setPortalReady(true);
@@ -56,6 +57,8 @@ export function PrintInventoryCountModal({ count, initialFormat = "half_letter",
   const isInitial = count.countKind === "initial";
   const docTitle = isInitial ? "ACTA DE INVENTARIO INICIAL" : "ACTA DE CIERRE Y DESCUADRE DE INVENTARIO";
   const netDiff = count.countedTotal - count.expectedTotal;
+  const affectedLines = count.lines.filter((line) => line.difference !== 0);
+  const linesToRender = onlyDifferences ? affectedLines : count.lines;
 
   // ─── RENDER FORMATO BAUCHER / TIRILLA (POS 80mm) ───────────────────────────
   const renderVoucherContent = () => (
@@ -111,48 +114,55 @@ export function PrintInventoryCountModal({ count, initialFormat = "half_letter",
         <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 900, fontSize: "11px", marginTop: "3px" }}>
           <span>Diferencia Neta:</span>
           <span style={{ color: netDiff === 0 ? "#000" : netDiff > 0 ? "#166534" : "#991b1b" }}>
-            {netDiff > 0 ? `+${netDiff}` : netDiff} uds {netDiff === 0 ? "(CUADRADO)" : netDiff > 0 ? "(SOBRANTE)" : "(FALTANTE)"}
+            {netDiff > 0 ? `+${netDiff}` : netDiff} uds {netDiff === 0 ? "(CUADRADO)" : netDiff > 0 ? "(SOBRÓ)" : "(FALTÓ)"}
           </span>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: "8.5px", color: "#444", marginTop: "3px" }}>
           <span>Cuadran: {count.matchedCount}</span>
-          <span>Faltan: {count.shortCount}</span>
-          <span>Sobran: {count.overCount}</span>
+          <span>Faltó en: {count.shortCount}</span>
+          <span>Sobró en: {count.overCount}</span>
         </div>
       </div>
 
-      {/* Lista de referencias */}
+      {/* Lista de referencias con afectación / diferencias */}
       <div style={{ marginBottom: "6px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #000000", paddingBottom: "2px", fontWeight: 700, fontSize: "9px" }}>
-          <span>REF / PRODUCTO</span>
-          <span>SIS | FÍS | DIF</span>
+          <span>{onlyDifferences ? "REF CON DIFERENCIA" : "REF / PRODUCTO"}</span>
+          <span>SIS | FÍS | NOVEDAD</span>
         </div>
-        {count.lines.map((line: InventoryCountLine) => {
-          const diff = line.difference;
-          return (
-            <div
-              key={line.id}
-              style={{
-                borderBottom: "0.5px dotted #cccccc",
-                padding: "3px 0",
-                fontSize: "9px",
-              }}
-            >
-              <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {line.referenceCode} - {line.productName}
+        {linesToRender.length === 0 ? (
+          <div style={{ padding: "8px 4px", textAlign: "center", fontSize: "9px", fontWeight: 700 }}>
+            ✓ SIN DIFERENCIAS EN INVENTARIO. Todas las referencias cuadraron exactamente.
+          </div>
+        ) : (
+          linesToRender.map((line: InventoryCountLine) => {
+            const diff = line.difference;
+            const statusText = diff === 0 ? "CUADRA" : diff < 0 ? "FALTÓ" : "SOBRÓ";
+            return (
+              <div
+                key={line.id}
+                style={{
+                  borderBottom: "0.5px dotted #cccccc",
+                  padding: "3px 0",
+                  fontSize: "9px",
+                }}
+              >
+                <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {line.referenceCode} - {line.productName}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "8.5px", color: "#222", marginTop: "1px" }}>
+                  <span>{line.barcode ? `CB: ${line.barcode}` : ""}</span>
+                  <span>
+                    Sis: <strong>{line.expectedQuantity}</strong> | Fís: <strong>{line.countedQuantity}</strong> |{" "}
+                    <strong style={{ color: diff === 0 ? "#000" : diff > 0 ? "#166534" : "#991b1b" }}>
+                      {statusText} ({diff > 0 ? `+${diff}` : diff})
+                    </strong>
+                  </span>
+                </div>
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "8.5px", color: "#222", marginTop: "1px" }}>
-                <span>{line.barcode ? `CB: ${line.barcode}` : ""}</span>
-                <span>
-                  Sis: <strong>{line.expectedQuantity}</strong> | Fís: <strong>{line.countedQuantity}</strong> | Dif:{" "}
-                  <strong style={{ color: diff === 0 ? "#000" : diff > 0 ? "#166534" : "#991b1b" }}>
-                    {diff > 0 ? `+${diff}` : diff}
-                  </strong>
-                </span>
-              </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
 
       {/* Notas */}
@@ -274,7 +284,12 @@ export function PrintInventoryCountModal({ count, initialFormat = "half_letter",
         </div>
       </section>
 
-      {/* Tabla detallada de referencias */}
+      {/* Tabla detallada de referencias (por defecto solo con afectación / diferencias) */}
+      <div style={{ marginBottom: "6px", fontSize: "10.5px", fontWeight: 700, color: "#0f766e" }}>
+        {onlyDifferences
+          ? `Detalle de Productos con Afectación o Diferencia (${affectedLines.length} de ${count.lines.length} referencias)`
+          : `Detalle Completo del Conteo (${count.lines.length} referencias)`}
+      </div>
       <table
         style={{
           width: "100%",
@@ -290,59 +305,77 @@ export function PrintInventoryCountModal({ count, initialFormat = "half_letter",
             <th style={{ padding: "6px 8px", textAlign: "right", width: "70px" }}>Sistema</th>
             <th style={{ padding: "6px 8px", textAlign: "right", width: "70px" }}>Físico</th>
             <th style={{ padding: "6px 8px", textAlign: "right", width: "80px" }}>Diferencia</th>
-            <th style={{ padding: "6px 8px", textAlign: "center", width: "85px" }}>Estado</th>
+            <th style={{ padding: "6px 8px", textAlign: "center", width: "110px" }}>Novedad</th>
           </tr>
         </thead>
         <tbody>
-          {count.lines.map((line: InventoryCountLine, idx: number) => {
-            const diff = line.difference;
-            const isMatch = diff === 0;
-            const isShort = diff < 0;
-            return (
-              <tr
-                key={line.id}
+          {linesToRender.length === 0 ? (
+            <tr>
+              <td
+                colSpan={6}
                 style={{
-                  background: idx % 2 === 0 ? "#ffffff" : "#f8fafc",
-                  borderBottom: "1px solid #e2e8f0",
+                  padding: "14px 12px",
+                  textAlign: "center",
+                  background: "#f0fdf4",
+                  color: "#166534",
+                  fontWeight: 700,
+                  border: "1px solid #bbf7d0",
                 }}
               >
-                <td style={{ padding: "5px 8px", fontWeight: 700 }}>{line.referenceCode}</td>
-                <td style={{ padding: "5px 8px" }}>
-                  {line.productName}
-                  {line.barcode ? <span style={{ color: "#64748b", fontSize: "10px" }}> · {line.barcode}</span> : null}
-                </td>
-                <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: 600 }}>{line.expectedQuantity}</td>
-                <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: 700, color: "#0f766e" }}>
-                  {line.countedQuantity}
-                </td>
-                <td
+                ✓ Sin diferencias en el inventario: Todas las referencias auditadas ({count.matchedCount} productos) cuadraron exactamente entre el stock del sistema y el conteo físico.
+              </td>
+            </tr>
+          ) : (
+            linesToRender.map((line: InventoryCountLine, idx: number) => {
+              const diff = line.difference;
+              const isMatch = diff === 0;
+              const isShort = diff < 0;
+              return (
+                <tr
+                  key={line.id}
                   style={{
-                    padding: "5px 8px",
-                    textAlign: "right",
-                    fontWeight: 800,
-                    color: isMatch ? "#475569" : isShort ? "#b91c1c" : "#0284c7",
+                    background: idx % 2 === 0 ? "#ffffff" : "#f8fafc",
+                    borderBottom: "1px solid #e2e8f0",
                   }}
                 >
-                  {diff > 0 ? `+${diff}` : diff}
-                </td>
-                <td style={{ padding: "5px 8px", textAlign: "center" }}>
-                  {isMatch ? (
-                    <span style={{ fontSize: "10px", padding: "1px 6px", borderRadius: 4, background: "#dcfce7", color: "#166534", fontWeight: 700 }}>
-                      Cuadra
-                    </span>
-                  ) : isShort ? (
-                    <span style={{ fontSize: "10px", padding: "1px 6px", borderRadius: 4, background: "#fee2e2", color: "#991b1b", fontWeight: 700 }}>
-                      Faltante
-                    </span>
-                  ) : (
-                    <span style={{ fontSize: "10px", padding: "1px 6px", borderRadius: 4, background: "#e0f2fe", color: "#0369a1", fontWeight: 700 }}>
-                      Sobrante
-                    </span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
+                  <td style={{ padding: "5px 8px", fontWeight: 700 }}>{line.referenceCode}</td>
+                  <td style={{ padding: "5px 8px" }}>
+                    {line.productName}
+                    {line.barcode ? <span style={{ color: "#64748b", fontSize: "10px" }}> · {line.barcode}</span> : null}
+                  </td>
+                  <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: 600 }}>{line.expectedQuantity}</td>
+                  <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: 700, color: "#0f766e" }}>
+                    {line.countedQuantity}
+                  </td>
+                  <td
+                    style={{
+                      padding: "5px 8px",
+                      textAlign: "right",
+                      fontWeight: 800,
+                      color: isMatch ? "#475569" : isShort ? "#b91c1c" : "#0284c7",
+                    }}
+                  >
+                    {diff > 0 ? `+${diff}` : diff} uds
+                  </td>
+                  <td style={{ padding: "5px 8px", textAlign: "center" }}>
+                    {isMatch ? (
+                      <span style={{ fontSize: "10px", padding: "1px 6px", borderRadius: 4, background: "#dcfce7", color: "#166534", fontWeight: 700 }}>
+                        Cuadra
+                      </span>
+                    ) : isShort ? (
+                      <span style={{ fontSize: "10px", padding: "1px 6px", borderRadius: 4, background: "#fee2e2", color: "#991b1b", fontWeight: 700 }}>
+                        Faltó ({diff})
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: "10px", padding: "1px 6px", borderRadius: 4, background: "#e0f2fe", color: "#0369a1", fontWeight: 700 }}>
+                        Sobró (+{diff})
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })
+          )}
         </tbody>
       </table>
 
@@ -456,6 +489,45 @@ export function PrintInventoryCountModal({ count, initialFormat = "half_letter",
             >
               <Receipt size={15} />
               <span>Baucher / Tirilla POS</span>
+            </button>
+          </div>
+
+          {/* Selector de alcance: Solo con afectación / diferencias vs Todos */}
+          <div style={{ display: "inline-flex", background: "#f1f5f9", padding: "3px", borderRadius: "8px", border: "1px solid #cbd5e1" }}>
+            <button
+              type="button"
+              onClick={() => setOnlyDifferences(true)}
+              style={{
+                padding: "6px 12px",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                borderRadius: "6px",
+                border: "none",
+                background: onlyDifferences ? "#ffffff" : "transparent",
+                color: onlyDifferences ? "#0f766e" : "#475569",
+                boxShadow: onlyDifferences ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                cursor: "pointer",
+              }}
+              title="Evita gasto innecesario de papel imprimiendo solo productos con diferencia"
+            >
+              Solo con afectación / diferencias ({affectedLines.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setOnlyDifferences(false)}
+              style={{
+                padding: "6px 12px",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                borderRadius: "6px",
+                border: "none",
+                background: !onlyDifferences ? "#ffffff" : "transparent",
+                color: !onlyDifferences ? "#0f766e" : "#475569",
+                boxShadow: !onlyDifferences ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                cursor: "pointer",
+              }}
+            >
+              Todas las referencias ({count.lines.length})
             </button>
           </div>
 

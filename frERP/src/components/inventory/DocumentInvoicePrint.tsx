@@ -44,6 +44,42 @@ function eventLabel(status: string): string {
   return status;
 }
 
+function getAdjustmentLineInfo(line: InventoryDocumentDetail["lines"][number]): {
+  diff: number | null;
+  expected: number | null;
+  counted: number | null;
+  isShort: boolean;
+  isOver: boolean;
+} {
+  let expected = line.expectedQuantity != null ? Number(line.expectedQuantity) : null;
+  let counted = line.countedQuantity != null ? Number(line.countedQuantity) : null;
+  let diff = line.difference != null ? Number(line.difference) : null;
+
+  if (line.lineNotes) {
+    const mSys = line.lineNotes.match(/Sistema\s+(\d+(?:\.\d+)?)\s*→\s*Contado\s+(\d+(?:\.\d+)?)/i);
+    if (mSys) {
+      if (expected == null) expected = Number(mSys[1]);
+      if (counted == null) counted = Number(mSys[2]);
+    }
+    const mDelta = line.lineNotes.match(/Δ\s*([+-]?\d+(?:\.\d+)?)/);
+    if (mDelta && diff == null) {
+      diff = Number(mDelta[1]);
+    }
+  }
+
+  if (diff == null && expected != null && counted != null) {
+    diff = counted - expected;
+  }
+
+  return {
+    diff,
+    expected,
+    counted,
+    isShort: diff != null && diff < 0,
+    isOver: diff != null && diff > 0,
+  };
+}
+
 type Props = {
   document: InventoryDocumentDetail;
   initialFormat?: "half_letter" | "voucher";
@@ -277,18 +313,23 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
       {/* Lista de Artículos */}
       <div className="sale-voucher-items">
         <div className="sale-voucher-items-head">
-          <span>DESCRIPCIÓN / CANT</span>
-          {showValues && <span>TOTAL</span>}
+          <span>{isAdjustment ? "DESCRIPCIÓN / AJUSTE" : "DESCRIPCIÓN / CANT"}</span>
+          {showValues ? <span>TOTAL</span> : isAdjustment ? <span>ESTADO</span> : null}
         </div>
         {doc.lines.map((line) => {
           const unit = line.unitSalePrice ?? 0;
           const isReturnLine = line.quantity < 0;
           const sub = unit * line.quantity;
+          const adj = isAdjustment ? getAdjustmentLineInfo(line) : null;
           return (
             <div key={line.id} className="sale-voucher-item">
               <div className="sale-voucher-item-main">
                 <span className="sale-voucher-item-qty">
-                  {isReturnLine ? `+${Math.abs(line.quantity)}x` : `${line.quantity}x`}
+                  {isAdjustment && adj?.diff != null
+                    ? `${adj.diff > 0 ? `+${adj.diff}` : adj.diff}x`
+                    : isReturnLine
+                      ? `+${Math.abs(line.quantity)}x`
+                      : `${line.quantity}x`}
                 </span>
                 <span className="sale-voucher-item-name">
                   {line.productName}
@@ -296,7 +337,26 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                 </span>
               </div>
               <div className="sale-voucher-item-sub">
-                <span className="sale-voucher-item-ref">Ref: {line.referenceCode}</span>
+                <span className="sale-voucher-item-ref">
+                  Ref: {line.referenceCode}
+                  {isAdjustment && adj?.expected != null && adj?.counted != null
+                    ? ` · Sis: ${adj.expected} → Fís: ${adj.counted}`
+                    : ""}
+                </span>
+                {isAdjustment && adj && (
+                  <strong
+                    style={{
+                      color: adj.isShort ? "#991b1b" : adj.isOver ? "#166534" : "#334155",
+                      fontSize: "9.5px",
+                    }}
+                  >
+                    {adj.isShort
+                      ? `FALTÓ (${adj.diff} uds)`
+                      : adj.isOver
+                        ? `SOBRÓ (+${adj.diff} uds)`
+                        : `${line.quantity} uds`}
+                  </strong>
+                )}
                 {showValues && (
                   <span className="sale-voucher-item-prices">
                     {Math.abs(line.quantity) > 1 ? `(${formatMoney(unit)}) ` : ""}
@@ -690,7 +750,9 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                 <tr>
                   <th>Referencia</th>
                   <th>Producto</th>
-                  <th>Cant.</th>
+                  {isAdjustment ? <th>Sistema → Físico</th> : null}
+                  <th>{isAdjustment ? "Diferencia" : "Cant."}</th>
+                  {isAdjustment ? <th>Estado (Novedad)</th> : null}
                   {showValues ? (
                     <>
                       <th>P. unit.</th>
@@ -704,6 +766,7 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                   const unit = line.unitSalePrice ?? 0;
                   const isReturnLine = line.quantity < 0;
                   const sub = unit * line.quantity;
+                  const adj = isAdjustment ? getAdjustmentLineInfo(line) : null;
                   return (
                     <tr key={line.id} className={isReturnLine ? "is-return-row" : undefined}>
                       <td>{line.referenceCode}</td>
@@ -711,7 +774,64 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                         {line.productName}
                         {isReturnLine ? " (Retorno / Entrada almacén)" : ""}
                       </td>
-                      <td>{isReturnLine ? `+${Math.abs(line.quantity)}` : line.quantity}</td>
+                      {isAdjustment ? (
+                        <td>
+                          {adj?.expected != null && adj?.counted != null
+                            ? `${adj.expected} → ${adj.counted} uds`
+                            : line.lineNotes ?? "—"}
+                        </td>
+                      ) : null}
+                      <td
+                        style={
+                          isAdjustment && adj
+                            ? {
+                                fontWeight: 800,
+                                color: adj.isShort ? "#b91c1c" : adj.isOver ? "#0284c7" : undefined,
+                              }
+                            : undefined
+                        }
+                      >
+                        {isAdjustment && adj?.diff != null
+                          ? `${adj.diff > 0 ? `+${adj.diff}` : adj.diff} uds`
+                          : isReturnLine
+                            ? `+${Math.abs(line.quantity)}`
+                            : line.quantity}
+                      </td>
+                      {isAdjustment ? (
+                        <td>
+                          {adj?.isShort ? (
+                            <span
+                              style={{
+                                display: "inline-block",
+                                padding: "2px 8px",
+                                borderRadius: 4,
+                                background: "#fee2e2",
+                                color: "#991b1b",
+                                fontWeight: 800,
+                                fontSize: "11px",
+                              }}
+                            >
+                              Faltó mercancía ({adj.diff} uds)
+                            </span>
+                          ) : adj?.isOver ? (
+                            <span
+                              style={{
+                                display: "inline-block",
+                                padding: "2px 8px",
+                                borderRadius: 4,
+                                background: "#e0f2fe",
+                                color: "#0369a1",
+                                fontWeight: 800,
+                                fontSize: "11px",
+                              }}
+                            >
+                              Sobró mercancía (+{adj.diff} uds)
+                            </span>
+                          ) : (
+                            <span>Ajustado ({line.quantity} uds)</span>
+                          )}
+                        </td>
+                      ) : null}
                       {showValues ? (
                         <>
                           <td>{formatMoney(unit)}</td>
@@ -725,8 +845,8 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
               <tfoot>
                 {!showValues ? (
                   <tr>
-                    <td colSpan={2}>Total</td>
-                    <td>
+                    <td colSpan={isAdjustment ? 3 : 2}>Total unidades ajustadas / movidas</td>
+                    <td colSpan={isAdjustment ? 2 : 1}>
                       <strong>{doc.totalQuantity} uds</strong>
                     </td>
                   </tr>

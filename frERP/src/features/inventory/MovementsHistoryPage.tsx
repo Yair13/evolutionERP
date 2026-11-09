@@ -28,6 +28,7 @@ import {
   type EditInventoryDocumentPayload,
   fetchDocument,
   fetchDocuments,
+  fetchInventoryCount,
   unlockInventoryDocument,
   cancelInventoryDocument,
 } from "../../api/inventory.js";
@@ -314,6 +315,35 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
     try {
       const wh = doc.warehouseId ?? effectiveWh ?? undefined;
       const { item } = await fetchDocument(token, doc.id, wh);
+      if (
+        item.docType === "adjustment" &&
+        item.metadata?.countId &&
+        (wh || item.warehouseId) &&
+        item.lines.some((l) => l.difference == null)
+      ) {
+        try {
+          const countRes = await fetchInventoryCount(
+            token,
+            (item.warehouseId ?? wh)!,
+            String(item.metadata.countId)
+          );
+          const mapByProd = new Map(
+            countRes.item.lines.map((cl) => [cl.productId, cl])
+          );
+          item.lines = item.lines.map((l) => {
+            const cl = mapByProd.get(l.productId);
+            if (!cl) return l;
+            return {
+              ...l,
+              expectedQuantity: cl.expectedQuantity,
+              countedQuantity: cl.countedQuantity,
+              difference: cl.difference,
+            };
+          });
+        } catch {
+          /* ignore fallback error */
+        }
+      }
       setDetail(item);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo cargar el documento");

@@ -129,6 +129,10 @@ export type DocumentLineView = {
   quantity: number;
   unitSalePrice: number | null;
   unitCost: number | null;
+  lineNotes?: string | null;
+  expectedQuantity?: number | null;
+  countedQuantity?: number | null;
+  difference?: number | null;
 };
 
 export type InventoryDocumentDetail = InventoryDocumentSummary & {
@@ -1751,6 +1755,11 @@ export async function getDocument(
 
   const meta = head.metadata ?? {};
 
+  const countIdUuid =
+    typeof meta.countId === "string" && /^[0-9a-f-]{36}$/i.test(meta.countId)
+      ? meta.countId
+      : null;
+
   const { rows: lineRows } = await pool.query<{
     id: string;
     product_id: string;
@@ -1761,6 +1770,10 @@ export async function getDocument(
     quantity: string;
     unit_sale_price: string | null;
     unit_cost: string | null;
+    line_notes: string | null;
+    expected_quantity: string | null;
+    counted_quantity: string | null;
+    movement_delta: string | null;
   }>(
     `
     SELECT
@@ -1783,13 +1796,26 @@ export async function getDocument(
       ) AS image_url,
       l.quantity::text,
       l.unit_sale_price::text,
-      l.unit_cost::text
+      l.unit_cost::text,
+      l.line_notes,
+      icl.expected_quantity::text AS expected_quantity,
+      icl.counted_quantity::text AS counted_quantity,
+      (
+        SELECT sm.quantity::text
+        FROM stock_movements sm
+        WHERE sm.batch_id = l.document_id AND sm.product_id = l.product_id
+        LIMIT 1
+      ) AS movement_delta
     FROM inventory_document_lines l
     JOIN products p ON p.id = l.product_id
+    LEFT JOIN inventory_count_lines icl
+      ON $2::uuid IS NOT NULL
+     AND icl.count_id = $2::uuid
+     AND icl.product_id = l.product_id
     WHERE l.document_id = $1::uuid
     ORDER BY p.name
     `,
-    [documentId]
+    [documentId, countIdUuid]
   );
 
   return {
@@ -1829,17 +1855,36 @@ export async function getDocument(
     lastUnlockObservation: head.last_unlock_observation,
     editingUnlocked: head.editing_unlocked,
     metadata: meta,
-    lines: lineRows.map((l) => ({
-      id: l.id,
-      productId: l.product_id,
-      productName: l.product_name,
-      referenceCode: l.reference_code,
-      barcode: l.barcode,
-      imageUrl: l.image_url,
-      quantity: Number(l.quantity),
-      unitSalePrice: l.unit_sale_price != null ? Number(l.unit_sale_price) : null,
-      unitCost: l.unit_cost != null ? Number(l.unit_cost) : null,
-    })),
+    lines: lineRows.map((l) => {
+      const expectedQuantity =
+        l.expected_quantity != null ? Number(l.expected_quantity) : null;
+      const countedQuantity =
+        l.counted_quantity != null ? Number(l.counted_quantity) : null;
+      let difference: number | null = null;
+      if (expectedQuantity != null && countedQuantity != null) {
+        difference = countedQuantity - expectedQuantity;
+      } else if (l.movement_delta != null) {
+        difference = Number(l.movement_delta);
+      } else if (l.line_notes) {
+        const m = l.line_notes.match(/Δ\s*([+-]?\d+(?:\.\d+)?)/);
+        if (m) difference = Number(m[1]);
+      }
+      return {
+        id: l.id,
+        productId: l.product_id,
+        productName: l.product_name,
+        referenceCode: l.reference_code,
+        barcode: l.barcode,
+        imageUrl: l.image_url,
+        quantity: Number(l.quantity),
+        unitSalePrice: l.unit_sale_price != null ? Number(l.unit_sale_price) : null,
+        unitCost: l.unit_cost != null ? Number(l.unit_cost) : null,
+        lineNotes: l.line_notes ?? null,
+        expectedQuantity,
+        countedQuantity,
+        difference,
+      };
+    }),
     events: await listDocumentEvents(pool, documentId),
     customerTotalWarehouseDebt: await (async () => {
       if (!head.customer_id || !head.warehouse_id) return 0;

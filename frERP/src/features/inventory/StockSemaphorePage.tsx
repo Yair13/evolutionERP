@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ArrowDownToLine } from "lucide-react";
+import { ArrowDownToLine, Printer } from "lucide-react";
 import { fetchStockSemaphore, fetchStockSemaphoreSummary } from "../../api/inventory.js";
 import { InvScopeBar } from "../../components/inventory/InvScopeBar.js";
 import { InventoryPageHeader } from "../../components/inventory/InventoryPageHeader.js";
 import { ProductCard } from "../../components/inventory/ProductCard.js";
+import { RealInventoryModal } from "../../components/inventory/RealInventoryModal.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import type { CatalogItem, StockSemaphoreSummary, StockSignal } from "./inventory.types.js";
@@ -35,6 +36,7 @@ export function StockSemaphorePage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [realInventoryOpen, setRealInventoryOpen] = useState(false);
 
   const sedeName = warehouses.find((w) => w.id === warehouseId)?.name;
   const activeFilter = FILTERS.find((f) => f.key === filter) ?? FILTERS[0]!;
@@ -108,10 +110,20 @@ export function StockSemaphorePage() {
         }
         scope={<InvScopeBar focus="stock" allowAllWarehouses />}
         actions={
-          <Link to="/app/inventario/entrada" className="inv-btn inv-btn--primary">
-            <ArrowDownToLine size={18} strokeWidth={2} aria-hidden />
-            Entrada de stock
-          </Link>
+          <>
+            <button
+              type="button"
+              className="inv-btn inv-btn--ghost"
+              onClick={() => setRealInventoryOpen(true)}
+            >
+              <Printer size={18} strokeWidth={2} aria-hidden />
+              <span>Inventario Real / Imprimir</span>
+            </button>
+            <Link to="/app/inventario/entrada" className="inv-btn inv-btn--primary">
+              <ArrowDownToLine size={18} strokeWidth={2} aria-hidden />
+              Entrada de stock
+            </Link>
+          </>
         }
       />
 
@@ -212,6 +224,12 @@ export function StockSemaphorePage() {
           </div>
         </>
       )}
+      {realInventoryOpen ? (
+        <RealInventoryModal
+          warehouseId={warehouseId}
+          onClose={() => setRealInventoryOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Factory,
+  History,
   Minus,
   Package,
   Printer,
@@ -27,6 +28,8 @@ import {
 import {
   cancelInventoryCount,
   confirmInventoryCount,
+  fetchInventoryCount,
+  fetchInventoryCounts,
   fetchOpenInventoryCount,
   openInventoryCount,
   resetInventoryCountCounted,
@@ -39,11 +42,13 @@ const BarcodeScannerModal = lazy(() =>
   }))
 );
 import { PrintInventoryCountModal } from "../../components/inventory/PrintInventoryCountModal.js";
+import { RealInventoryModal } from "../../components/inventory/RealInventoryModal.js";
 import { InventoryPageHeader } from "../../components/inventory/InventoryPageHeader.js";
 import { InvScopeBar } from "../../components/inventory/InvScopeBar.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
 import { useResolveScan } from "../../hooks/useResolveScan.js";
+import { formatBogotaDateTime } from "../../lib/dateUtils.js";
 import { resolveLightMediaUrl } from "../../lib/mediaUrl.js";
 import { clearScanCache } from "../../lib/scanCache.js";
 import type { ScanMatchable } from "../../lib/scanMatch.js";
@@ -51,6 +56,7 @@ import type {
   CountKind,
   InventoryCountDetail,
   InventoryCountLine,
+  InventoryCountSummary,
 } from "./inventory.types.js";
 
 const MIN_SCAN_LENGTH = 2;
@@ -176,6 +182,10 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [notes, setNotes] = useState("");
   const [printCountModalData, setPrintCountModalData] = useState<InventoryCountDetail | null>(null);
+  const [historyCounts, setHistoryCounts] = useState<InventoryCountSummary[]>([]);
+  const [loadingHistoryCounts, setLoadingHistoryCounts] = useState(false);
+  const [loadingReprintId, setLoadingReprintId] = useState<string | null>(null);
+  const [realInventoryModalOpen, setRealInventoryModalOpen] = useState(false);
 
   const pistolInputRef = useRef<HTMLInputElement>(null);
   const pistolDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -232,9 +242,47 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
     }
   }, [token, activeWarehouseId, isInitialMode, isAllWarehouses]);
 
+  const loadHistoryCounts = useCallback(async () => {
+    if (!token || !activeWarehouseId || (!isInitialMode && isAllWarehouses)) {
+      setHistoryCounts([]);
+      return;
+    }
+    setLoadingHistoryCounts(true);
+    try {
+      const res = await fetchInventoryCounts(token, activeWarehouseId, {
+        status: "completed",
+        limit: 30,
+      });
+      setHistoryCounts(res.items || []);
+    } catch {
+      setHistoryCounts([]);
+    } finally {
+      setLoadingHistoryCounts(false);
+    }
+  }, [token, activeWarehouseId, isInitialMode, isAllWarehouses]);
+
+  const handleReprintCount = useCallback(
+    async (countSummary: InventoryCountSummary) => {
+      const whId = countSummary.warehouseId || activeWarehouseId;
+      if (!token || !whId) return;
+      setLoadingReprintId(countSummary.id);
+      setError(null);
+      try {
+        const { item } = await fetchInventoryCount(token, whId, countSummary.id);
+        setPrintCountModalData(item);
+      } catch (err) {
+        setError(countErrorMessage(err instanceof Error ? err.message : "Error al cargar acta"));
+      } finally {
+        setLoadingReprintId(null);
+      }
+    },
+    [token, activeWarehouseId]
+  );
+
   useEffect(() => {
     void loadOpen();
-  }, [loadOpen]);
+    void loadHistoryCounts();
+  }, [loadOpen, loadHistoryCounts]);
 
   const getLocalScanItems = useCallback((): ScanMatchable[] => {
     if (!count) return [];
@@ -454,6 +502,7 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
       setConfirmOpen(false);
       setNotes("");
       setPrintCountModalData(item);
+      void loadHistoryCounts();
       setSuccess(
         diffs > 0
           ? item.countKind === "initial"
@@ -557,6 +606,17 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
           ) : (
             <InvScopeBar focus="stock" requireSingleWarehouse lockWarehouse />
           )
+        }
+        actions={
+          <button
+            type="button"
+            className="inv-btn inv-btn--ghost"
+            onClick={() => setRealInventoryModalOpen(true)}
+            title="Consultar el inventario real actual de la sede y permitir imprimirlo"
+          >
+            <Printer size={18} strokeWidth={2} aria-hidden />
+            <span>Consultar / Imprimir Inventario Real</span>
+          </button>
         }
         alerts={
           <>
@@ -953,6 +1013,150 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
         </>
       )}
 
+      {!needsWarehouse && (
+        <section
+          aria-label="Historial de actas de cierre de inventario"
+          style={{
+            marginTop: "24px",
+            background: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: "14px",
+            padding: "16px 20px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "10px",
+              marginBottom: "12px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <History size={20} color="#0f766e" />
+              <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 800, color: "#0f172a" }}>
+                Historial de Actas de Cierre de Inventario
+              </h2>
+            </div>
+            <button
+              type="button"
+              className="inv-btn inv-btn--ghost inv-btn--sm"
+              disabled={loadingHistoryCounts}
+              onClick={() => void loadHistoryCounts()}
+            >
+              <RefreshCw size={14} className={loadingHistoryCounts ? "spin" : ""} aria-hidden />
+              <span>Actualizar historial</span>
+            </button>
+          </div>
+
+          {loadingHistoryCounts ? (
+            <p style={{ margin: 0, fontSize: "0.9rem", color: "#64748b" }}>Cargando historial de actas…</p>
+          ) : historyCounts.length === 0 ? (
+            <p style={{ margin: 0, fontSize: "0.9rem", color: "#64748b" }}>
+              Aún no hay actas de cierre de inventario confirmadas en esta sede.
+            </p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "0.86rem",
+                }}
+              >
+                <thead>
+                  <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left", color: "#475569" }}>
+                    <th style={{ padding: "8px 10px" }}>Acta Nº</th>
+                    <th style={{ padding: "8px 10px" }}>Tipo</th>
+                    <th style={{ padding: "8px 10px" }}>Fecha de Cierre</th>
+                    <th style={{ padding: "8px 10px" }}>Responsable</th>
+                    <th style={{ padding: "8px 10px", textAlign: "right" }}>Sistema</th>
+                    <th style={{ padding: "8px 10px", textAlign: "right" }}>Contado</th>
+                    <th style={{ padding: "8px 10px", textAlign: "center" }}>Novedades</th>
+                    <th style={{ padding: "8px 10px", textAlign: "center" }}>Acción</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyCounts.map((hc) => {
+                    const net = hc.countedTotal - hc.expectedTotal;
+                    const isBusy = loadingReprintId === hc.id;
+                    return (
+                      <tr key={hc.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "9px 10px", fontWeight: 800, color: "#0f766e" }}>
+                          {hc.invoiceNumber ?? hc.id.slice(0, 8)}
+                        </td>
+                        <td style={{ padding: "9px 10px" }}>
+                          {hc.countKind === "initial" ? "Inventario inicial" : "Cierre / Descuadre"}
+                        </td>
+                        <td style={{ padding: "9px 10px", whiteSpace: "nowrap", color: "#334155" }}>
+                          {formatBogotaDateTime(hc.completedAt ?? hc.createdAt)}
+                        </td>
+                        <td style={{ padding: "9px 10px", color: "#475569" }}>
+                          {hc.createdByName || "Administrador"}
+                        </td>
+                        <td style={{ padding: "9px 10px", textAlign: "right", fontWeight: 600 }}>
+                          {hc.expectedTotal} uds
+                        </td>
+                        <td style={{ padding: "9px 10px", textAlign: "right", fontWeight: 700, color: "#0f766e" }}>
+                          {hc.countedTotal} uds
+                        </td>
+                        <td style={{ padding: "9px 10px", textAlign: "center" }}>
+                          {hc.shortCount === 0 && hc.overCount === 0 ? (
+                            <span
+                              style={{
+                                padding: "2px 8px",
+                                borderRadius: 6,
+                                background: "#dcfce7",
+                                color: "#166534",
+                                fontWeight: 700,
+                                fontSize: "0.78rem",
+                              }}
+                            >
+                              ✓ Exacto ({net})
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>
+                              {hc.shortCount > 0 ? (
+                                <span style={{ color: "#b91c1c", marginRight: 6 }}>
+                                  Faltó en {hc.shortCount}
+                                </span>
+                              ) : null}
+                              {hc.overCount > 0 ? (
+                                <span style={{ color: "#0284c7" }}>Sobró en {hc.overCount}</span>
+                              ) : null}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: "9px 10px", textAlign: "center" }}>
+                          <button
+                            type="button"
+                            className="inv-btn inv-btn--ghost inv-btn--sm"
+                            disabled={isBusy}
+                            onClick={() => void handleReprintCount(hc)}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "5px",
+                              fontWeight: 700,
+                              color: "#0f766e",
+                            }}
+                          >
+                            <Printer size={14} />
+                            <span>{isBusy ? "Cargando…" : "Ver / Imprimir Acta"}</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
       {confirmOpen && count ? (
         <div className="inv-modal-backdrop" role="presentation" onClick={() => setConfirmOpen(false)}>
           <div
@@ -1003,6 +1207,13 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
         <PrintInventoryCountModal
           count={printCountModalData}
           onClose={() => setPrintCountModalData(null)}
+        />
+      ) : null}
+
+      {realInventoryModalOpen ? (
+        <RealInventoryModal
+          warehouseId={activeWarehouseId}
+          onClose={() => setRealInventoryModalOpen(false)}
         />
       ) : null}
 
