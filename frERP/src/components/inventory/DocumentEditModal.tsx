@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { Plus, Save, Search, X } from "lucide-react";
+import { Plus, Save, Search, X, Factory } from "lucide-react";
 import { fetchCatalog } from "../../api/inventory.js";
 import { cartHasInvalidSalePrices, clampUnitSalePrice, isUnitSalePriceValid } from "../../lib/salePrice.js";
 import { VisualCart } from "./VisualCart.js";
 import { EXIT_KIND_OPTIONS } from "../../features/inventory/exit-labels.js";
+import { useWarehouse } from "../../context/WarehouseContext.js";
 import type {
   CartLine,
   CatalogItem,
@@ -44,6 +45,13 @@ type Props = {
 };
 
 function initialMovementKind(doc: InventoryDocumentDetail): MovementKind {
+  if (
+    doc.entryType === "production_order" ||
+    Boolean(doc.productionOrderCode) ||
+    (doc.invoiceNumber?.startsWith("OP-") ?? false)
+  ) {
+    return "production_order";
+  }
   if (doc.docType === "entry") return "entry";
   if (doc.exitKind && EXIT_KIND_OPTIONS.some((o) => o.value === doc.exitKind)) {
     return doc.exitKind;
@@ -76,6 +84,14 @@ export function DocumentEditModal({
   onClose,
   onSave,
 }: Props) {
+  const { warehouses } = useWarehouse();
+  const docWarehouse = warehouses.find((w) => w.id === (doc.warehouseId || warehouseId));
+  const isFactory = docWarehouse?.is_factory === true;
+  const isOriginalPo =
+    doc.entryType === "production_order" ||
+    Boolean(doc.productionOrderCode) ||
+    (doc.invoiceNumber?.startsWith("OP-") ?? false);
+
   const [movementKind, setMovementKind] = useState<MovementKind>(() => initialMovementKind(doc));
   const [cart, setCart] = useState<CartLine[]>(() => linesToCart(doc));
   const [notes, setNotes] = useState(doc.notes ?? "");
@@ -87,7 +103,7 @@ export function DocumentEditModal({
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const isEntry = movementKind === "entry";
+  const isEntry = movementKind === "entry" || movementKind === "production_order";
   const isExit = !isEntry;
   const exitKind = isExit ? (movementKind as ExitKind) : null;
   const cartMode = isEntry || exitKind === "return" ? "entry" : "exit";
@@ -258,6 +274,20 @@ export function DocumentEditModal({
               />
               <span>Entrada</span>
             </label>
+            {(isFactory || isOriginalPo) && (
+              <label className="inv-edit-doc-kind" style={{ borderColor: movementKind === "production_order" ? "var(--color-primary, #3b82f6)" : undefined }}>
+                <input
+                  type="radio"
+                  name="movementKind"
+                  checked={movementKind === "production_order"}
+                  onChange={() => setMovementKind("production_order")}
+                />
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
+                  <Factory size={14} />
+                  Orden de producción
+                </span>
+              </label>
+            )}
             {EXIT_KIND_OPTIONS.map((opt) => (
               <label key={opt.value} className="inv-edit-doc-kind">
                 <input
@@ -271,6 +301,27 @@ export function DocumentEditModal({
             ))}
           </div>
         </fieldset>
+
+        {movementKind === "production_order" && (
+          <div style={{
+            padding: "0.5rem 0.75rem",
+            borderRadius: 6,
+            background: "rgba(59, 130, 246, 0.08)",
+            border: "1px solid rgba(59, 130, 246, 0.25)",
+            color: "#1d4ed8",
+            fontSize: "0.85rem",
+            marginBottom: "0.5rem",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+          }}>
+            <Factory size={16} />
+            <span>
+              <strong>Orden de producción de Fábrica:</strong> Ingreso de productos terminados
+              {doc.productionOrderCode ? ` (${doc.productionOrderCode})` : (doc.invoiceNumber?.startsWith("OP-") ? ` (${doc.invoiceNumber})` : "")}.
+            </span>
+          </div>
+        )}
 
         {exitKind === "sale" || exitKind === "credit" ? (
           <label className="inv-edit-doc-field">

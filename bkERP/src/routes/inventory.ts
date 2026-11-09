@@ -415,6 +415,7 @@ export function createInventoryRouter(): Router {
     }
     const validKinds = [
       "entry",
+      "production_order",
       "exit",
       "sale",
       "return",

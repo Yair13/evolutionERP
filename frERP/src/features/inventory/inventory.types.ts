@@ -52,7 +52,7 @@ export type DocType = "entry" | "exit";
 
 export type ExitKind = "sale" | "return" | "credit" | "warranty" | "distribution" | "transfer" | "return_to_factory" | "exchange";
 
-export type MovementKind = "entry" | ExitKind;
+export type MovementKind = "entry" | "production_order" | ExitKind;
 
 export type CartLine = {
   productId: string;

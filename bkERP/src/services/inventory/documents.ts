@@ -152,7 +152,7 @@ export type UnlockDocumentEditingInput = {
   observation: string;
 };
 
-export type MovementKind = "entry" | "exit" | ExitKind;
+export type MovementKind = "entry" | "production_order" | "exit" | ExitKind;
 
 export type EditCompletedDocumentInput = {
   movementKind: MovementKind;
@@ -166,11 +166,12 @@ function parseMovementKind(kind: MovementKind): {
   docType: InventoryDocumentSummary["docType"];
   exitKind: ExitKind | null;
   isEntry: boolean;
+  isProductionOrder?: boolean;
 } {
   if (kind === "entry") {
     return { docType: "entry", exitKind: null, isEntry: true };
   }
-  const effectiveExitKind: ExitKind = kind === "exit" ? "sale" : kind;
+  const effectiveExitKind: ExitKind = kind === "exit" ? "sale" : (kind as ExitKind);
   return { docType: docTypeForExitKind(effectiveExitKind), exitKind: effectiveExitKind, isEntry: false };
 }
 
@@ -1404,6 +1405,7 @@ export async function editCompletedDocument(
       is_today: boolean;
       editing_unlocked: boolean;
       invoice_number: string | null;
+      metadata: any;
     }>(
       `
       SELECT
@@ -1418,7 +1420,8 @@ export async function editCompletedDocument(
           = (now() AT TIME ZONE $2)::date
         ) AS is_today,
         (editing_unlocked_at IS NOT NULL) AS editing_unlocked,
-        invoice_number
+        invoice_number,
+        metadata
       FROM inventory_documents
       WHERE id = $1::uuid
       `,
@@ -1440,8 +1443,30 @@ export async function editCompletedDocument(
       ? movementTypeFor("entry")
       : movementTypeForExitKind(exitKind!);
 
+    const prevMetadata = (doc.metadata && typeof doc.metadata === "object") ? (doc.metadata as any) : {};
+    const isProductionOrder = parsed.isProductionOrder || (isEntry && prevMetadata.entryType === "production_order");
+
+    let productionOrderCode = prevMetadata.productionOrderCode ?? null;
+    let productionOrderId = prevMetadata.productionOrderId ?? null;
+
+    if (isProductionOrder && !productionOrderCode) {
+      productionOrderCode = await nextProductionOrderCode(client, warehouseId);
+      const { rows: poRows } = await client.query<{ id: string }>(
+        `INSERT INTO production_orders (order_code, warehouse_id, status, notes, created_by)
+         VALUES ($1, $2::uuid, 'open', $3, $4::uuid)
+         RETURNING id::text`,
+        [productionOrderCode, warehouseId, notes?.trim() || null, auth.userId]
+      );
+      productionOrderId = poRows[0]?.id ?? null;
+    }
+
     const metadata = isEntry
-      ? {}
+      ? {
+          ...prevMetadata,
+          entryType: isProductionOrder ? "production_order" : (prevMetadata.entryType || "distribution"),
+          productionOrderCode: isProductionOrder ? productionOrderCode : (prevMetadata.productionOrderCode ?? null),
+          productionOrderId: isProductionOrder ? productionOrderId : (prevMetadata.productionOrderId ?? null),
+        }
       : {
           exitKind: exitKind!,
           customerName: customerName?.trim() || null,
@@ -1478,7 +1503,7 @@ export async function editCompletedDocument(
         notes?.trim() || null,
         JSON.stringify(metadata),
         customerId,
-        isEntry ? null : exitKindLabel(exitKind!),
+        isEntry ? (isProductionOrder && productionOrderCode ? `Orden de producción ${productionOrderCode}` : null) : exitKindLabel(exitKind!),
       ]
     );
 
