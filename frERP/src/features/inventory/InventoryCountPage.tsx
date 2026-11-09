@@ -157,6 +157,7 @@ function LineQtyInput({ value, disabled, onChange, productName }: LineQtyInputPr
 
 export function InventoryCountPage({ mode }: InventoryCountPageProps) {
   const { token, user } = useAuth();
+  const isSuperAdmin = user?.roles.includes("super_admin") ?? false;
   const { warehouseId, setWarehouseId, isAllWarehouses, canViewAllWarehouses, warehouses } =
     useWarehouse();
 
@@ -849,7 +850,7 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
               const pct = progressPct(line.countedQuantity, line.expectedQuantity);
               const img = resolveLightMediaUrl(line.imageUrl, "xs");
               const flash = flashProductId === line.productId;
-              const pistolOnly = !isInitial && Boolean(line.barcode);
+              const pistolOnly = !isInitial && !isSuperAdmin && Boolean(line.barcode);
               return (
                 <li
                   key={line.productId}
@@ -878,7 +879,7 @@ export function InventoryCountPage({ mode }: InventoryCountPageProps) {
                       <span className="inv-count-line__manual inv-count-line__manual--pistol">
                         Solo pistola
                       </span>
-                    ) : isInitial ? (
+                    ) : isInitial || isSuperAdmin ? (
                       <span className="inv-count-line__manual inv-count-line__manual--pistol">
                         {line.barcode ? "Manual o pistola" : "Sin código · ingreso manual"}
                       </span>
