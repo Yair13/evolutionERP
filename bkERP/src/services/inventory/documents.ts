@@ -1131,7 +1131,7 @@ export async function listDocuments(
     offset?: number;
   }
 ): Promise<{ items: InventoryDocumentSummary[]; total: number }> {
-  const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 100);
+  const limit = Math.min(Math.max(opts?.limit ?? 1000, 1), 5000);
   const offset = Math.max(opts?.offset ?? 0, 0);
   const params: unknown[] = [];
   const whFilter = warehouseScopeSql(auth, opts?.warehouseId, "d", params);

@@ -334,19 +334,64 @@ export async function fetchDocuments(
   token: string,
   warehouseId?: string | null,
   docType?: "entry" | "exit" | "adjustment",
-  dates?: { from?: string; to?: string }
+  dates?: { from?: string; to?: string; limit?: number }
 ) {
-  const q = new URLSearchParams();
-  if (warehouseId) q.set("warehouseId", warehouseId);
-  if (docType) q.set("docType", docType);
-  if (dates?.from) q.set("dateFrom", dates.from);
-  if (dates?.to) q.set("dateTo", dates.to);
-  const qs = q.toString();
-  return inventoryFetch<{ items: import("../features/inventory/inventory.types.js").InventoryDocumentSummary[]; total: number }>(
-    `/inventory/documents${qs ? `?${qs}` : ""}`,
-    token,
-    warehouseId ?? null
+  const buildQs = (limit: number, offset: number) => {
+    const q = new URLSearchParams();
+    if (warehouseId) q.set("warehouseId", warehouseId);
+    if (docType) q.set("docType", docType);
+    if (dates?.from) q.set("dateFrom", dates.from);
+    if (dates?.to) q.set("dateTo", dates.to);
+    q.set("limit", String(limit));
+    if (offset > 0) q.set("offset", String(offset));
+    return q.toString();
+  };
+
+  const requestedLimit = dates?.limit ?? 2000;
+  const firstPage = await inventoryFetch<{
+    items: import("../features/inventory/inventory.types.js").InventoryDocumentSummary[];
+    total: number;
+  }>(`/inventory/documents?${buildQs(requestedLimit, 0)}`, token, warehouseId ?? null);
+
+  const pageSize = firstPage.items.length;
+  if (pageSize === 0 || firstPage.total <= pageSize) {
+    return firstPage;
+  }
+
+  // Si el servidor pagina (por ejemplo en bloques de 100), traer automáticamente las páginas restantes
+  const maxTotalToFetch = Math.min(firstPage.total, 5000);
+  const offsets: number[] = [];
+  for (let off = pageSize; off < maxTotalToFetch; off += pageSize) {
+    offsets.push(off);
+  }
+
+  const extraPages = await Promise.all(
+    offsets.map((off) =>
+      inventoryFetch<{
+        items: import("../features/inventory/inventory.types.js").InventoryDocumentSummary[];
+        total: number;
+      }>(`/inventory/documents?${buildQs(pageSize, off)}`, token, warehouseId ?? null).catch(() => ({
+        items: [],
+        total: firstPage.total,
+      }))
+    )
   );
+
+  const seenIds = new Set(firstPage.items.map((i) => i.id));
+  const merged = [...firstPage.items];
+  for (const page of extraPages) {
+    for (const item of page.items) {
+      if (!seenIds.has(item.id)) {
+        seenIds.add(item.id);
+        merged.push(item);
+      }
+    }
+  }
+
+  return {
+    items: merged,
+    total: firstPage.total,
+  };
 }
 
 export async function fetchDocument(

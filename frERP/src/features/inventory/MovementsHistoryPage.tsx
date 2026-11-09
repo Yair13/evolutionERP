@@ -546,6 +546,7 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
   const isPresetYesterday = filterDateFrom === yesterdayYmd && filterDateTo === yesterdayYmd;
   const isPreset7Days = filterDateFrom === sevenDaysYmd && filterDateTo === todayYmd;
   const isPresetMonth = filterDateFrom === monthStartYmd && filterDateTo === todayYmd;
+  const isPresetAllHistory = filterDateFrom === "" && filterDateTo === "";
   const hasCustomFilters =
     Boolean(selectedSedeId) ||
     Boolean(searchQuery.trim()) ||
@@ -739,6 +740,17 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
                 >
                   Este mes
                 </button>
+                <button
+                  type="button"
+                  className={`inv-pill-filter${isPresetAllHistory ? " is-active" : ""}`}
+                  onClick={() => {
+                    setFilterDateFrom("");
+                    setFilterDateTo("");
+                  }}
+                  title="Mostrar todas las facturas y movimientos históricos sin límite de fecha"
+                >
+                  Todo el historial
+                </button>
               </div>
             </div>
           </div>
@@ -915,12 +927,29 @@ export function MovementsHistoryPage({ fixedType }: MovementsHistoryPageProps = 
                 ? "No hay ventas ni salidas registradas en este rango de fechas."
                 : "No hay movimientos que coincidan con los filtros seleccionados."}
           </p>
-          {hasCustomFilters ? (
-            <button type="button" className="inv-btn inv-btn--ghost" onClick={resetAllFilters}>
-              <RotateCcw size={16} strokeWidth={2} aria-hidden />
-              Restablecer filtros
-            </button>
-          ) : null}
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
+            {!isPresetAllHistory ? (
+              <button
+                type="button"
+                className="inv-btn inv-btn--primary"
+                onClick={() => {
+                  setFilterDateFrom("");
+                  setFilterDateTo("");
+                }}
+              >
+                <History size={16} strokeWidth={2} aria-hidden />
+                {searchQuery.trim()
+                  ? `Buscar «${searchQuery.trim()}» en Todo el Historial`
+                  : "Ver Todo el Historial de Facturas"}
+              </button>
+            ) : null}
+            {hasCustomFilters ? (
+              <button type="button" className="inv-btn inv-btn--ghost" onClick={resetAllFilters}>
+                <RotateCcw size={16} strokeWidth={2} aria-hidden />
+                Restablecer filtros
+              </button>
+            ) : null}
+          </div>
           {fixedType === "exit" ? (
             <Link to="/app/inventario/salida" className="inv-btn inv-btn--primary">
               <ArrowUpFromLine size={18} strokeWidth={2} aria-hidden />
