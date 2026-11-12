@@ -70,7 +70,10 @@ export async function nextOutflowVoucherNumber(
   const prefix = (wh[0]?.code ?? "BOD").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6) || "BOD";
   const { rows: seq } = await client.query<{ n: string }>(
     `
-    SELECT COUNT(*)::text AS n
+    SELECT GREATEST(
+      COUNT(*),
+      COALESCE(MAX(SUBSTRING(voucher_number FROM '-([0-9]+)$')::int), 0)
+    )::text AS n
     FROM cash_outflows
     WHERE warehouse_id = $1::uuid
     `,
@@ -467,6 +470,213 @@ export async function getCashOutflowDetail(
   );
 
   return rows[0] || null;
+}
+
+/**
+ * Elimina un comprobante de egreso y revierte atómicamente todos los efectos
+ * que produjo su creación (deuda en cuenta por pagar, saldo a favor de proveedor,
+ * pagos asociados en payable_payments y cierres de caja emitidos).
+ */
+export async function deleteCashOutflow(
+  pool: pg.Pool,
+  id: string
+): Promise<{
+  deletedId: string;
+  voucherNumber: string;
+  amount: number;
+  revertedPayableId: string | null;
+}> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: outflowRows } = await client.query<{
+      id: string;
+      voucher_number: string;
+      warehouse_id: string;
+      amount: string;
+      payment_method: string;
+      supplier_id: string | null;
+      payable_id: string | null;
+      created_at: string;
+    }>(
+      `
+      SELECT
+        id::text,
+        voucher_number,
+        warehouse_id::text,
+        amount::text,
+        payment_method,
+        supplier_id::text,
+        payable_id::text,
+        created_at::text
+      FROM cash_outflows
+      WHERE id = $1::uuid
+      FOR UPDATE
+      `,
+      [id]
+    );
+
+    if (outflowRows.length === 0) {
+      throw Object.assign(new Error("outflow_not_found"), {
+        code: "outflow_not_found",
+        statusCode: 404,
+      });
+    }
+
+    const outflow = outflowRows[0]!;
+    const amount = Number(outflow.amount || 0);
+    let revertedPayableId: string | null = outflow.payable_id;
+
+    // 1. Si el egreso afectó una cuenta por pagar / registró abono en payable_payments, revertirlo
+    const { rows: relatedPayments } = await client.query<{
+      id: string;
+      payable_id: string | null;
+      supplier_id: string | null;
+      amount: string;
+      applied_to_debt: string;
+      excess_to_favour: string;
+    }>(
+      `
+      SELECT
+        id::text,
+        payable_id::text,
+        supplier_id::text,
+        amount::text,
+        applied_to_debt::text,
+        excess_to_favour::text
+      FROM payable_payments
+      WHERE warehouse_id = $1::uuid
+        AND receipt_number = $2
+      FOR UPDATE
+      `,
+      [outflow.warehouse_id, outflow.voucher_number]
+    );
+
+    for (const pp of relatedPayments) {
+      const appliedToDebt = Number(pp.applied_to_debt || 0);
+      const excessToFavour = Number(pp.excess_to_favour || 0);
+
+      if (excessToFavour > 0 && pp.supplier_id) {
+        await client.query(
+          `
+          UPDATE suppliers
+          SET credit_balance = GREATEST(0, ROUND((credit_balance - $1)::numeric, 2)),
+              updated_at = now()
+          WHERE id = $2::uuid
+          `,
+          [excessToFavour, pp.supplier_id]
+        );
+      }
+
+      if (pp.payable_id && appliedToDebt > 0) {
+        revertedPayableId = pp.payable_id;
+        const { rows: apRows } = await client.query<{
+          id: string;
+          total_amount: string;
+          paid_amount: string;
+          balance_amount: string;
+        }>(
+          `
+          SELECT id::text, total_amount::text, paid_amount::text, balance_amount::text
+          FROM accounts_payable
+          WHERE id = $1::uuid
+          FOR UPDATE
+          `,
+          [pp.payable_id]
+        );
+
+        if (apRows[0]) {
+          const ap = apRows[0];
+          const totalAmount = Number(ap.total_amount || 0);
+          const currentPaid = Number(ap.paid_amount || 0);
+          const currentBalance = Number(ap.balance_amount || 0);
+
+          const restoredBalance = Math.min(
+            totalAmount,
+            Math.round((currentBalance + appliedToDebt) * 100) / 100
+          );
+          const restoredPaid = Math.max(
+            0,
+            Math.round((currentPaid - appliedToDebt) * 100) / 100
+          );
+          const restoredStatus =
+            restoredBalance <= 0 ? "paid" : restoredPaid > 0 ? "partial" : "open";
+
+          await client.query(
+            `
+            UPDATE accounts_payable
+            SET balance_amount = $1,
+                paid_amount = $2,
+                status = $3,
+                paid_at = CASE WHEN $3 = 'paid' THEN paid_at ELSE NULL END
+            WHERE id = $4::uuid
+            `,
+            [restoredBalance, restoredPaid, restoredStatus, ap.id]
+          );
+        }
+      }
+
+      await client.query(`DELETE FROM payable_payments WHERE id = $1::uuid`, [pp.id]);
+    }
+
+    // 2. Si el egreso fue en efectivo y cayó dentro de un cierre diario ya emitido, ajustar el cierre diario
+    const isCash = outflow.payment_method.trim().toLowerCase() === "efectivo";
+    if (isCash && amount > 0) {
+      await client.query(
+        `
+        UPDATE daily_closures
+        SET cash_outflows = GREATEST(0, ROUND((cash_outflows - $1)::numeric, 2)),
+            expected_cash = ROUND((expected_cash + $1)::numeric, 2),
+            cash_difference = ROUND((counted_cash - (expected_cash + $1))::numeric, 2)
+        WHERE warehouse_id = $2::uuid
+          AND status <> 'voided'
+          AND (started_at IS NULL OR started_at < $3::timestamptz)
+          AND COALESCE(closed_at, created_at) >= $3::timestamptz
+        `,
+        [amount, outflow.warehouse_id, outflow.created_at]
+      );
+    }
+
+    // 3. Si cayó dentro de un cierre contable general ya guardado, actualizar sus totales
+    if (amount > 0) {
+      await client.query(
+        `
+        UPDATE global_closures
+        SET total_outflows = GREATEST(0, ROUND((total_outflows - $1)::numeric, 2)),
+            total_net_cash = CASE
+              WHEN $4::boolean THEN ROUND((total_net_cash + $1)::numeric, 2)
+              ELSE total_net_cash
+            END,
+            cash_to_withdraw = CASE
+              WHEN $4::boolean THEN GREATEST(0, ROUND(((COALESCE(opening_cash, 0) + total_net_cash + $1) - cash_to_keep)::numeric, 2))
+              ELSE cash_to_withdraw
+            END
+        WHERE (warehouse_id = $2::uuid OR warehouse_id IS NULL)
+          AND ($3::timestamptz AT TIME ZONE 'America/Bogota')::date BETWEEN date_from AND date_to
+          AND COALESCE(closed_at, created_at) >= $3::timestamptz
+        `,
+        [amount, outflow.warehouse_id, outflow.created_at, isCash]
+      );
+    }
+
+    // 4. Eliminar el comprobante de egreso
+    await client.query(`DELETE FROM cash_outflows WHERE id = $1::uuid`, [id]);
+
+    await client.query("COMMIT");
+
+    return {
+      deletedId: id,
+      voucherNumber: outflow.voucher_number,
+      amount,
+      revertedPayableId,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── Traslados de Dinero entre Sedes ─────────────────────────────────────────

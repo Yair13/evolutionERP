@@ -1060,6 +1060,16 @@ export async function fetchCashOutflowDetail(token: string, id: string) {
   return apiGet<{ item: CashOutflowItem }>(`/finance/outflows/${id}`, token);
 }
 
+export async function deleteCashOutflow(token: string, id: string) {
+  return apiDelete<{
+    ok: boolean;
+    deletedId: string;
+    voucherNumber: string;
+    amount: number;
+    revertedPayableId: string | null;
+  }>(`/finance/outflows/${id}`, token);
+}
+
 // ─── Recibos de Caja / Otros Ingresos ────────────────────────────────────────
 
 export type CashIncomeCategory =

@@ -46,6 +46,7 @@ import {
   createCashOutflow,
   listCashOutflows,
   getCashOutflowDetail,
+  deleteCashOutflow,
   createCashTransfer,
   approveCashTransfer,
   rejectCashTransfer,
@@ -1914,6 +1915,46 @@ export function createFinanceRouter(): Router {
     } catch (err: any) {
       if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
         res.status(err.statusCode || 400).json({ error: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  // ─── Eliminar Comprobante de Egreso (Solo Super Administrador) ────────────
+  r.delete("/outflows/:id", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const auth = req.auth!;
+    const isSuperAdmin = auth.roles.includes("super_admin") || auth.warehouseIds === null;
+
+    if (!isSuperAdmin) {
+      res.status(403).json({
+        error: "super_admin_required",
+        message: "Solo el Super Administrador tiene autorización para eliminar comprobantes de egreso.",
+      });
+      return;
+    }
+
+    const id = String(req.params.id);
+    if (!isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+
+    try {
+      const result = await deleteCashOutflow(pool, id);
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      if (err.code === "outflow_not_found") {
+        res.status(404).json({
+          error: "outflow_not_found",
+          message: "El comprobante de egreso no existe o ya fue eliminado.",
+        });
         return;
       }
       next(err);

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   fetchCashOutflows,
+  deleteCashOutflow,
   fetchCashTransfers,
   approveCashTransfer,
   rejectCashTransfer,
@@ -23,6 +24,7 @@ import {
   PlusCircle,
   Search,
   Printer,
+  Trash2,
   CheckCircle2,
   Clock,
   Building2,
@@ -49,8 +51,9 @@ function formatDate(iso: string | null): string {
 }
 
 export function CashOutflowsPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { warehouses, warehouseId, isAllWarehouses } = useWarehouse();
+  const isSuperAdmin = Boolean(user?.roles?.includes("super_admin"));
 
   const [activeTab, setActiveTab] = useState<"outflows" | "transfers">("outflows");
 
@@ -95,6 +98,7 @@ export function CashOutflowsPage() {
   } | null>(null);
   const [viewingPhotos, setViewingPhotos] = useState<{ title: string; urls: string[] } | null>(null);
   const [uploadingAuditItem, setUploadingAuditItem] = useState<ReceiptAuditItem | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Cargar Egresos
   const loadOutflows = useCallback(async () => {
@@ -187,6 +191,42 @@ export function CashOutflowsPage() {
       window.setTimeout(() => setActionSuccess(null), 5000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al rechazar traslado.");
+    }
+  }
+
+  // Eliminar comprobante de egreso (exclusivo Super Administrador)
+  async function handleDeleteOutflow(item: CashOutflowItem) {
+    if (!token || !isSuperAdmin) return;
+
+    const payableNote = item.payableId
+      ? `\n• Cuenta por pagar asociada${item.billNumber ? ` (Factura ${item.billNumber})` : ""}: se revertirá el abono y se restaurará el saldo pendiente al proveedor.`
+      : "";
+
+    const confirmed = window.confirm(
+      `¿Deseas eliminar el comprobante de egreso "${item.voucherNumber}"?\n\n` +
+      `• Sede: ${item.warehouseName}\n` +
+      `• Beneficiario: ${item.beneficiaryName}\n` +
+      `• Concepto: ${item.concept}\n` +
+      `• Medio: ${item.paymentMethod}\n` +
+      `• Valor Salida: ${formatMoney(item.amount)}` +
+      payableNote +
+      `\n\nEsta acción reintegrará el valor en caja/totales y revertirá los movimientos asociados.`
+    );
+    if (!confirmed) return;
+
+    setDeletingId(item.id);
+    setError(null);
+    try {
+      await deleteCashOutflow(token, item.id);
+      setActionSuccess(
+        `Comprobante ${item.voucherNumber} (${formatMoney(item.amount)}) eliminado correctamente y sus efectos contables fueron revertidos.`
+      );
+      await loadOutflows();
+      window.setTimeout(() => setActionSuccess(null), 5000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al eliminar el comprobante de egreso.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -671,15 +711,30 @@ export function CashOutflowsPage() {
                           {item.createdByName || "—"}
                         </td>
                         <td style={{ textAlign: "right" }}>
-                          <button
-                            type="button"
-                            className="fin-btn fin-btn--ghost fin-btn--sm"
-                            onClick={() => setVoucherToPrint(item)}
-                            title="Imprimir Voucher de Egreso"
-                          >
-                            <Printer size={14} />
-                            <span>Voucher</span>
-                          </button>
+                          <div style={{ display: "inline-flex", gap: "0.35rem", alignItems: "center", justifyContent: "flex-end" }}>
+                            <button
+                              type="button"
+                              className="fin-btn fin-btn--ghost fin-btn--sm"
+                              onClick={() => setVoucherToPrint(item)}
+                              title="Imprimir Voucher de Egreso"
+                            >
+                              <Printer size={14} />
+                              <span>Voucher</span>
+                            </button>
+                            {isSuperAdmin && (
+                              <button
+                                type="button"
+                                className="fin-btn fin-btn--ghost fin-btn--sm"
+                                style={{ color: "#dc2626" }}
+                                disabled={deletingId === item.id}
+                                onClick={() => void handleDeleteOutflow(item)}
+                                title="Eliminar comprobante de egreso y revertir sus efectos (Exclusivo Super Administrador)"
+                              >
+                                <Trash2 size={14} />
+                                <span>{deletingId === item.id ? "Eliminando…" : "Eliminar"}</span>
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
