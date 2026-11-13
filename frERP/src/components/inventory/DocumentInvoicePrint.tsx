@@ -210,7 +210,7 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
   const showValues = !isEntry && !isAdjustment && !internalExit;
   const lineCount = doc.lines.length;
   const density =
-    lineCount <= 5 ? "sparse" : lineCount <= 11 ? "cozy" : lineCount <= 18 ? "dense" : "packed";
+    lineCount <= 3 ? "sparse" : lineCount <= 8 ? "cozy" : lineCount <= 15 ? "dense" : "packed";
 
   const paymentBreakdown: { method: string; amount: number }[] = Array.isArray(
     doc.metadata?.paymentBreakdown
@@ -1093,7 +1093,20 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
           ) : null}
 
           <footer className="inv-invoice__foot">
-            <p>Evolution ERP · Documento interno · Media hoja carta</p>
+            <div className="inv-invoice__foot-info">
+              <strong>Evolution · Colchones S.A.S</strong>
+              <p>
+                {showValues
+                  ? "¡Gracias por su compra! Conserve este comprobante para trámites de soporte o garantía."
+                  : "Control interno de inventario · Documento de soporte de bodega."}
+              </p>
+            </div>
+            <div className="inv-invoice__foot-sign">
+              <span className="inv-invoice__foot-sign-line" />
+              <span className="inv-invoice__foot-sign-label">
+                {showValues ? "Firma cliente / Recibí conforme" : "Recibido por / Responsable"}
+              </span>
+            </div>
           </footer>
         </article>
         )}

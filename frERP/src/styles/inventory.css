@@ -5991,7 +5991,98 @@ button.inv-pos__pick-media--expand:focus-visible {
   gap: 4px 12px;
 }
 
-/* Adaptación en pantalla según cantidad de productos */
+/* Adaptación dinámica en pantalla según cantidad de productos */
+.inv-invoice--density-sparse {
+  display: flex;
+  flex-direction: column;
+  min-height: 410px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__banner {
+  padding: 10px 14px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__logo {
+  width: 38px;
+  height: 38px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__brand {
+  font-size: 14px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__brand-sub {
+  font-size: 11px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__head {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 10px 14px 8px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__title {
+  font-size: 17px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__meta-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px 12px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__meta-item {
+  display: block;
+}
+
+.inv-invoice--density-sparse .inv-invoice__meta-item span {
+  display: block;
+  font-size: 10px;
+  margin-bottom: 1px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__meta-item span::after {
+  content: "";
+}
+
+.inv-invoice--density-sparse .inv-invoice__meta-item strong {
+  display: block;
+  font-size: 12px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__party {
+  padding: 8px 14px 0;
+}
+
+.inv-invoice--density-sparse .inv-invoice__party-card {
+  padding: 8px 11px;
+  gap: 4px 18px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__party p {
+  font-size: 12px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__table-wrap {
+  padding: 8px 14px 10px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__table {
+  font-size: 13px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__table th,
+.inv-invoice--density-sparse .inv-invoice__table td {
+  padding: 9px 11px;
+}
+
+.inv-invoice--density-sparse .inv-invoice__table tfoot td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+  font-size: 14px;
+}
+
 .inv-invoice--density-cozy .inv-invoice__table {
   font-size: 11.5px;
 }
@@ -6141,19 +6232,62 @@ button.inv-pos__pick-media--expand:focus-visible {
 }
 
 .inv-invoice__foot {
-  margin: 0;
-  padding: 14px 20px 16px;
-  border-top: 2px solid #e2e8f0;
-  text-align: center;
-  font-size: 12px;
-  font-weight: 600;
+  margin: auto 0 0;
+  padding: 10px 14px 12px;
+  border-top: 1px solid #cbd5e1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px 20px;
+  font-size: 11px;
+  font-weight: 500;
   color: #475569;
   background: #f8fafc;
+}
+
+.inv-invoice__foot-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+
+.inv-invoice__foot-info strong {
+  font-size: 11px;
+  font-weight: 800;
+  color: #0f172a;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .inv-invoice__foot p {
   margin: 0 !important;
   color: #475569 !important;
+  font-size: 10.5px;
+}
+
+.inv-invoice__foot-sign {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 180px;
+  padding-top: 14px;
+}
+
+.inv-invoice__foot-sign-line {
+  display: block;
+  width: 100%;
+  border-bottom: 1px solid #475569;
+  margin-bottom: 3px;
+}
+
+.inv-invoice__foot-sign-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #334155;
 }
 
 .inv-invoice .inv-btn.sm {
@@ -7030,80 +7164,133 @@ button.inv-pos__pick-media--expand:focus-visible {
     display: none !important;
   }
 
-  /* 1–5 productos (sparse): equilibrado y compacto en Media Carta */
+  /* 1–3 productos (sparse): más aire + altura mínima de Media Carta con pie de firma/garantía para que 1 solo producto no se vea vacío */
+  body.inv-print-invoice #inv-invoice-print.inv-invoice--density-sparse {
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 4.25in !important;
+  }
+
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__banner {
-    padding: 6px 12px !important;
+    padding: 9px 14px !important;
   }
 
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__logo {
-    width: 30px !important;
-    height: 30px !important;
+    width: 38px !important;
+    height: 38px !important;
   }
 
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__brand {
-    font-size: 11.5px !important;
+    font-size: 13px !important;
   }
 
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__brand-sub {
-    font-size: 9px !important;
-  }
-
-  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__head {
-    padding: 5px 12px !important;
-    gap: 4px 12px !important;
-  }
-
-  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__title {
-    font-size: 13.5px !important;
-  }
-
-  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__meta-item span {
-    font-size: 8.5px !important;
-  }
-
-  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__meta-item strong {
-    font-size: 10.5px !important;
-  }
-
-  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__party {
-    padding: 5px 12px 0 !important;
-  }
-
-  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__party-card {
-    padding: 5px 9px !important;
-  }
-
-  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__party p {
     font-size: 10px !important;
   }
 
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__head {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    padding: 9px 14px 8px !important;
+    gap: 6px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__title {
+    font-size: 16px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__meta-row {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)) !important;
+    gap: 4px 12px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__meta-item {
+    display: block !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__meta-item span {
+    display: block !important;
+    font-size: 9px !important;
+    margin-bottom: 1px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__meta-item span::after {
+    content: "" !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__meta-item strong {
+    display: block !important;
+    font-size: 11.5px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__party {
+    padding: 8px 14px 0 !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__party-card {
+    padding: 8px 11px !important;
+    gap: 4px 16px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__party p {
+    font-size: 11px !important;
+  }
+
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__table-wrap {
-    padding: 5px 12px 7px !important;
+    padding: 8px 14px 10px !important;
   }
 
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__table {
-    font-size: 10.5px !important;
+    font-size: 11.5px !important;
   }
 
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__table th,
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__table td {
-    padding: 4px 7px !important;
+    padding: 7px 9px !important;
   }
 
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__table th {
-    font-size: 9px !important;
+    font-size: 9.5px !important;
   }
 
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__table tfoot td {
-    font-size: 10.5px !important;
-    padding-top: 5px !important;
-    padding-bottom: 5px !important;
+    font-size: 11.5px !important;
+    padding-top: 8px !important;
+    padding-bottom: 8px !important;
   }
 
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__notes {
-    margin: 0 12px 7px !important;
-    padding: 4px 8px !important;
+    margin: 0 14px 8px !important;
+    padding: 6px 10px !important;
+    font-size: 10.5px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__foot {
+    display: flex !important;
+    margin-top: auto !important;
+    padding: 8px 14px 10px !important;
+    border-top: 1px solid #cbd5e1 !important;
+    background: #f8fafc !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__foot-info strong {
     font-size: 9.5px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__foot p {
+    font-size: 9px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__foot-sign {
+    min-width: 150px !important;
+    padding-top: 12px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__foot-sign-label {
+    font-size: 8.5px !important;
   }
 
   /* 12–18 productos (dense): compacto para caber en una sola Media Carta */
