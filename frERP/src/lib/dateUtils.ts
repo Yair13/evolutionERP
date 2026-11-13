@@ -69,10 +69,14 @@ function parseIsoToDate(iso: string): Date {
     // Crear fecha a mediodía local de Colombia para evitar desplazamientos por medianoche
     return new Date(y, m - 1, d, 12, 0, 0);
   }
-  // Si es un string de postgres con espacio "2026-10-19 19:43:00+00" o "2026-10-19 19:43:00"
+  // Si es un string de postgres con espacio "2026-10-19 19:43:00+00" o "2026-11-12 14:01:49.548804-05"
   let sanitized = iso.trim();
   if (/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}/.test(sanitized)) {
     sanitized = sanitized.replace(" ", "T");
+  }
+  // Normalizar offset corto de Postgres al final (ej: "-05" o "+00" -> "-05:00" / "+00:00")
+  if (/[+-]\d{2}$/.test(sanitized)) {
+    sanitized = `${sanitized}:00`;
   }
   return new Date(sanitized);
 }

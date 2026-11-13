@@ -99,16 +99,38 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
   }, []);
 
   useEffect(() => {
+    function applyPrintFormat() {
+      document.body.classList.remove("inv-print-barcode-label");
+      let pageStyle = document.getElementById("inv-print-page-size");
+      if (!pageStyle) {
+        pageStyle = document.createElement("style");
+        pageStyle.id = "inv-print-page-size";
+        document.head.appendChild(pageStyle);
+      }
+
+      if (format === "voucher") {
+        document.body.classList.remove("inv-print-invoice");
+        document.body.classList.add("inv-print-voucher");
+        pageStyle.textContent = "@page { size: auto; margin: 0mm; }";
+      } else {
+        document.body.classList.remove("inv-print-voucher");
+        document.body.classList.add("inv-print-invoice");
+        pageStyle.textContent = "@page { size: letter portrait; margin: 0.2in; }";
+      }
+    }
+
     function clearPrintClass() {
       document.body.classList.remove("inv-print-invoice", "inv-print-voucher");
       document.getElementById("inv-print-page-size")?.remove();
     }
-    window.addEventListener("afterprint", clearPrintClass);
+
+    applyPrintFormat();
+    window.addEventListener("beforeprint", applyPrintFormat);
     return () => {
-      window.removeEventListener("afterprint", clearPrintClass);
+      window.removeEventListener("beforeprint", applyPrintFormat);
       clearPrintClass();
     };
-  }, []);
+  }, [format]);
 
   function print() {
     document.body.classList.remove("inv-print-barcode-label");
@@ -188,7 +210,7 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
   const showValues = !isEntry && !isAdjustment && !internalExit;
   const lineCount = doc.lines.length;
   const density =
-    lineCount <= 3 ? "sparse" : lineCount <= 8 ? "cozy" : lineCount <= 16 ? "dense" : "packed";
+    lineCount <= 5 ? "sparse" : lineCount <= 11 ? "cozy" : lineCount <= 18 ? "dense" : "packed";
 
   const paymentBreakdown: { method: string; amount: number }[] = Array.isArray(
     doc.metadata?.paymentBreakdown
@@ -700,14 +722,9 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
               ) : null}
               {isCredit ? (
                 <div className="inv-invoice__payments">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "4px" }}>
-                    <span className="inv-invoice__payments-label">
-                      Abono inicial / Medios de pago
-                    </span>
-                    <span style={{ fontSize: "11px", fontWeight: 700, color: "#059669" }}>
-                      Total abonado: {formatMoney(initialPaymentTotal)}
-                    </span>
-                  </div>
+                  <span className="inv-invoice__payments-label">
+                    Abono inicial / Medios de pago
+                  </span>
                   {paymentBreakdown.length > 0 ? (
                     <ul className="inv-invoice__payments-list">
                       {paymentBreakdown.map((payment, index) => (
@@ -718,10 +735,13 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                       ))}
                     </ul>
                   ) : (
-                    <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#64748b" }}>
+                    <p style={{ margin: 0, fontSize: "11px", color: "#64748b" }}>
                       Sin abono inicial ($ 0) · Crédito por el 100% del valor
                     </p>
                   )}
+                  <span style={{ marginLeft: "auto", fontSize: "10.5px", fontWeight: 700, color: "#059669" }}>
+                    Total abonado: {formatMoney(initialPaymentTotal)}
+                  </span>
                 </div>
               ) : paymentBreakdown.length > 0 ? (
                 <div className="inv-invoice__payments">
