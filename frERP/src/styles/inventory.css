@@ -5628,6 +5628,12 @@ button.inv-pos__pick-media--expand:focus-visible {
   border-bottom: 1px solid #e2e8f0;
 }
 
+.inv-invoice-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .inv-invoice {
   padding: 0;
   border: 1px solid #94a3b8;
@@ -5935,6 +5941,12 @@ button.inv-pos__pick-media--expand:focus-visible {
   color: #0f172a;
 }
 
+.inv-invoice__table tbody tr.inv-invoice__filler-row td {
+  border-bottom: 1px dashed #e2e8f0;
+  color: transparent;
+  user-select: none;
+}
+
 .inv-invoice__table tfoot td {
   border-bottom: 0;
   padding-top: 6px;
@@ -6016,14 +6028,13 @@ button.inv-pos__pick-media--expand:focus-visible {
 }
 
 .inv-invoice--density-sparse .inv-invoice__head {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-  padding: 10px 14px 8px;
+  display: block;
+  padding: 9px 14px 8px;
 }
 
 .inv-invoice--density-sparse .inv-invoice__title {
   font-size: 17px;
+  margin-bottom: 6px;
 }
 
 .inv-invoice--density-sparse .inv-invoice__meta-row {
@@ -6905,12 +6916,38 @@ button.inv-pos__pick-media--expand:focus-visible {
     max-height: none !important;
     margin: 0 !important;
     padding: 0 !important;
-    border: 1px solid #94a3b8 !important;
+    border: 0 !important;
     border-radius: 0 !important;
     box-shadow: none !important;
     overflow: visible !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+  }
+
+  body.inv-print-invoice .inv-invoice-page {
+    display: block !important;
+    position: relative !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 1px solid #94a3b8 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.inv-print-invoice .inv-invoice-page.inv-invoice-page--break {
+    page-break-after: always !important;
+    break-after: page !important;
   }
 
   body.inv-print-invoice #inv-invoice-print.inv-invoice--density-sparse,
@@ -7109,21 +7146,8 @@ button.inv-pos__pick-media--expand:focus-visible {
     print-color-adjust: exact;
   }
 
+  /* En impresión, los totales de crédito ya están en el tfoot de la tabla: ocultamos la tarjeta duplicada inferior para no repetir los 4 valores */
   body.inv-print-invoice .inv-invoice__credit-card {
-    margin: 0 10px 5px !important;
-    padding: 3px 8px !important;
-    border-radius: 5px !important;
-    break-inside: avoid;
-    page-break-inside: avoid;
-    background: #f8fafc !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-
-  /* En 6+ productos a crédito, los totales ya están en el tfoot de la tabla: ocultamos la tarjeta duplicada para ganar espacio de 4-5 productos extra */
-  body.inv-print-invoice .inv-invoice--density-cozy .inv-invoice__credit-card,
-  body.inv-print-invoice .inv-invoice--density-dense .inv-invoice__credit-card,
-  body.inv-print-invoice .inv-invoice--density-packed .inv-invoice__credit-card {
     display: none !important;
   }
 
@@ -7160,7 +7184,39 @@ button.inv-pos__pick-media--expand:focus-visible {
     color: #78350f !important;
   }
 
+  body.inv-print-invoice .inv-invoice__table tbody tr.inv-invoice__filler-row td {
+    border-bottom: 1px dashed #e2e8f0 !important;
+    color: transparent !important;
+  }
+
   body.inv-print-invoice .inv-invoice__foot {
+    display: flex !important;
+    padding: 6px 10px 8px !important;
+    border-top: 1px solid #cbd5e1 !important;
+    background: #f8fafc !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.inv-print-invoice .inv-invoice__foot-info strong {
+    font-size: 9px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice__foot p {
+    font-size: 8.5px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice__foot-sign {
+    min-width: 140px !important;
+    padding-top: 10px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice__foot-sign-label {
+    font-size: 8px !important;
+  }
+
+  body.inv-print-invoice .inv-invoice--density-dense .inv-invoice__foot,
+  body.inv-print-invoice .inv-invoice--density-packed .inv-invoice__foot {
     display: none !important;
   }
 
@@ -7168,7 +7224,7 @@ button.inv-pos__pick-media--expand:focus-visible {
   body.inv-print-invoice #inv-invoice-print.inv-invoice--density-sparse {
     display: flex !important;
     flex-direction: column !important;
-    min-height: 4.25in !important;
+    min-height: 3.9in !important;
   }
 
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__banner {
@@ -7189,14 +7245,13 @@ button.inv-pos__pick-media--expand:focus-visible {
   }
 
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__head {
-    flex-direction: column !important;
-    align-items: stretch !important;
-    padding: 9px 14px 8px !important;
-    gap: 6px !important;
+    display: block !important;
+    padding: 8px 14px 7px !important;
   }
 
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__title {
     font-size: 16px !important;
+    margin-bottom: 5px !important;
   }
 
   body.inv-print-invoice .inv-invoice--density-sparse .inv-invoice__meta-row {

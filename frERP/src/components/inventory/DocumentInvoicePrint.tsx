@@ -209,8 +209,6 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
   const accent = isOp || isPurchase ? "op" : isEntry || isAdjustment ? "entry" : "exit";
   const showValues = !isEntry && !isAdjustment && !internalExit;
   const lineCount = doc.lines.length;
-  const density =
-    lineCount <= 3 ? "sparse" : lineCount <= 8 ? "cozy" : lineCount <= 15 ? "dense" : "packed";
 
   const paymentBreakdown: { method: string; amount: number }[] = Array.isArray(
     doc.metadata?.paymentBreakdown
@@ -250,6 +248,57 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
         : Math.max(0, totalSaleAmount - initialPaymentTotal);
 
   const isFullyPaid = isCredit && balancePending <= 0.01;
+
+  // Cálculo de filas ocupadas por totales/descuentos/crédito/notas para rellenar siempre cada hoja Media Carta cortada al mismo tamaño
+  const footerRowCount =
+    1 +
+    (showValues && discountAmount > 0 ? 2 : 0) +
+    (showValues && isCredit ? 2 : 0) +
+    (showValues && isCredit && doc.customerTotalWarehouseDebt != null && doc.customerTotalWarehouseDebt > 0 ? 1 : 0) +
+    (showValues && doc.customerCreditBalance != null && doc.customerCreditBalance > 0 ? 1 : 0) +
+    (doc.notes ? 1 : 0) +
+    (paymentBreakdown.length > 2 ? 1 : 0);
+
+  const TARGET_HALF_LETTER_ROWS = 9;
+  const maxProductsPerIntermediatePage = TARGET_HALF_LETTER_ROWS - 1; // 8 productos + 1 fila "Continúa en la página siguiente" = 9 filas
+  const maxProductsOnLastPage = Math.max(2, TARGET_HALF_LETTER_ROWS - footerRowCount);
+
+  // Dividir los productos en páginas de Media Carta exactas para hojas ya cortadas
+  const halfLetterPages: {
+    lines: InventoryDocumentDetail["lines"];
+    fillerRows: number;
+    isLastPage: boolean;
+  }[] = [];
+
+  if (lineCount <= maxProductsOnLastPage) {
+    halfLetterPages.push({
+      lines: doc.lines,
+      fillerRows: Math.max(0, TARGET_HALF_LETTER_ROWS - lineCount - footerRowCount),
+      isLastPage: true,
+    });
+  } else {
+    const remaining = [...doc.lines];
+    while (remaining.length > maxProductsOnLastPage) {
+      const takeCount =
+        remaining.length <= maxProductsPerIntermediatePage
+          ? Math.max(1, remaining.length - 1)
+          : maxProductsPerIntermediatePage;
+      const chunk = remaining.splice(0, takeCount);
+      halfLetterPages.push({
+        lines: chunk,
+        fillerRows: Math.max(0, maxProductsPerIntermediatePage - chunk.length),
+        isLastPage: false,
+      });
+    }
+    halfLetterPages.push({
+      lines: remaining,
+      fillerRows: Math.max(0, TARGET_HALF_LETTER_ROWS - remaining.length - footerRowCount),
+      isLastPage: true,
+    });
+  }
+
+  const totalHalfLetterPages = halfLetterPages.length;
+  const density = "cozy";
 
   const renderVoucherContent = () => (
     <div className="sale-voucher-body">
@@ -616,65 +665,77 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
             {renderVoucherContent()}
           </div>
         ) : (
-          <article
-            className={`inv-invoice inv-invoice--${accent} inv-invoice--density-${density}`}
-            id="inv-invoice-print"
-            data-lines={lineCount}
-          >
-          {doc.status === "cancelled" ? (
-            <div className="inv-invoice__cancelled">COMPROBANTE ANULADO / INACTIVO</div>
-          ) : null}
+          <div id="inv-invoice-print" className="inv-invoice-pages" data-lines={lineCount}>
+            {halfLetterPages.map((page, pageIndex) => (
+              <article
+                key={`page-${pageIndex}`}
+                className={`inv-invoice inv-invoice-page inv-invoice--${accent} inv-invoice--density-${density} ${
+                  !page.isLastPage ? "inv-invoice-page--break" : ""
+                }`}
+                data-lines={lineCount}
+              >
+                {doc.status === "cancelled" ? (
+                  <div className="inv-invoice__cancelled">COMPROBANTE ANULADO / INACTIVO</div>
+                ) : null}
 
-          <header className="inv-invoice__banner">
-            <div className="inv-invoice__brand-row">
-              <img src={LOGO_SRC} alt="Evolution" className="inv-invoice__logo" width={40} height={40} />
-              <div>
-                <p className="inv-invoice__brand">Evolution · Colchones S.A.S</p>
-                <p className="inv-invoice__brand-sub">Documento interno · {kind}</p>
-              </div>
-            </div>
-          </header>
+                <header className="inv-invoice__banner">
+                  <div className="inv-invoice__brand-row">
+                    <img src={LOGO_SRC} alt="Evolution" className="inv-invoice__logo" width={40} height={40} />
+                    <div>
+                      <p className="inv-invoice__brand">Evolution · Colchones S.A.S</p>
+                      <p className="inv-invoice__brand-sub">Documento interno · {kind}</p>
+                    </div>
+                  </div>
+                </header>
 
-          <div className="inv-invoice__head">
-            <h1 id="invoice-title" className="inv-invoice__title">
-              {title}
-            </h1>
-            <div className="inv-invoice__meta-row">
-              <div className="inv-invoice__meta-item">
-                <span>{internalExit ? "Código" : "Nº comprobante"}</span>
-                <strong style={internalExit ? { fontSize: "1.35em", letterSpacing: "0.04em" } : undefined}>
-                  {doc.invoiceNumber ?? "—"}
-                </strong>
-              </div>
-              <div className="inv-invoice__meta-item">
-                <span>Fecha</span>
-                <strong>{formatDate(doc.completedAt ?? doc.createdAt)}</strong>
-              </div>
-              {isCredit ? (
-                <div className="inv-invoice__meta-item">
-                  <span>Modalidad</span>
-                  <strong style={{ color: "#d97706" }}>Crédito</strong>
+                <div className="inv-invoice__head">
+                  <h1 id={pageIndex === 0 ? "invoice-title" : undefined} className="inv-invoice__title">
+                    {title}
+                  </h1>
+                  <div className="inv-invoice__meta-row">
+                    <div className="inv-invoice__meta-item">
+                      <span>{internalExit ? "Código" : "Nº comprobante"}</span>
+                      <strong style={internalExit ? { fontSize: "1.35em", letterSpacing: "0.04em" } : undefined}>
+                        {doc.invoiceNumber ?? "—"}
+                      </strong>
+                    </div>
+                    <div className="inv-invoice__meta-item">
+                      <span>Fecha</span>
+                      <strong>{formatDate(doc.completedAt ?? doc.createdAt)}</strong>
+                    </div>
+                    {isCredit ? (
+                      <div className="inv-invoice__meta-item">
+                        <span>Modalidad</span>
+                        <strong style={{ color: "#d97706" }}>Crédito</strong>
+                      </div>
+                    ) : null}
+                    {doc.productionOrderCode && doc.productionOrderCode !== doc.invoiceNumber ? (
+                      <div className="inv-invoice__meta-item">
+                        <span>Orden Prod.</span>
+                        <strong>{doc.productionOrderCode}</strong>
+                      </div>
+                    ) : null}
+                    {doc.purchaseOrderCode && doc.purchaseOrderCode !== doc.invoiceNumber ? (
+                      <div className="inv-invoice__meta-item">
+                        <span>Orden Compra</span>
+                        <strong>{doc.purchaseOrderCode}</strong>
+                      </div>
+                    ) : null}
+                    {totalHalfLetterPages > 1 ? (
+                      <div className="inv-invoice__meta-item">
+                        <span>Página</span>
+                        <strong>
+                          {pageIndex + 1} de {totalHalfLetterPages}
+                        </strong>
+                      </div>
+                    ) : null}
+                  </div>
+                  {internalExit ? (
+                    <p className="inv-invoice__code-hint" style={{ margin: "6px 0 0", fontSize: "11px", color: "#475569" }}>
+                      Código de recepción · una sola vez · solo en la sede de destino
+                    </p>
+                  ) : null}
                 </div>
-              ) : null}
-              {doc.productionOrderCode && doc.productionOrderCode !== doc.invoiceNumber ? (
-                <div className="inv-invoice__meta-item">
-                  <span>Orden Prod.</span>
-                  <strong>{doc.productionOrderCode}</strong>
-                </div>
-              ) : null}
-              {doc.purchaseOrderCode && doc.purchaseOrderCode !== doc.invoiceNumber ? (
-                <div className="inv-invoice__meta-item">
-                  <span>Orden Compra</span>
-                  <strong>{doc.purchaseOrderCode}</strong>
-                </div>
-              ) : null}
-            </div>
-            {internalExit ? (
-              <p className="inv-invoice__code-hint" style={{ margin: "6px 0 0", fontSize: "11px", color: "#475569" }}>
-                Código de recepción · una sola vez · solo en la sede de destino
-              </p>
-            ) : null}
-          </div>
 
           <section className="inv-invoice__party">
             <div className="inv-invoice__party-card">
@@ -782,7 +843,7 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                 </tr>
               </thead>
               <tbody>
-                {doc.lines.map((line) => {
+                {page.lines.map((line) => {
                   const unit = line.unitSalePrice ?? 0;
                   const isReturnLine = line.quantity < 0;
                   const sub = unit * line.quantity;
@@ -861,9 +922,30 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                     </tr>
                   );
                 })}
+                {Array.from({ length: page.fillerRows }).map((_, idx) => (
+                  <tr key={`filler-${pageIndex}-${idx}`} className="inv-invoice__filler-row" aria-hidden="true">
+                    <td>{"\u00A0"}</td>
+                    <td>{"\u00A0"}</td>
+                    {isAdjustment ? <td>{"\u00A0"}</td> : null}
+                    <td>{"\u00A0"}</td>
+                    {isAdjustment ? <td>{"\u00A0"}</td> : null}
+                    {showValues ? (
+                      <>
+                        <td>{"\u00A0"}</td>
+                        <td>{"\u00A0"}</td>
+                      </>
+                    ) : null}
+                  </tr>
+                ))}
               </tbody>
               <tfoot>
-                {!showValues ? (
+                {!page.isLastPage ? (
+                  <tr className="inv-invoice__row-continue">
+                    <td colSpan={isAdjustment ? 5 : showValues ? 5 : 3} style={{ textAlign: "right", fontStyle: "italic" }}>
+                      Continúa en la página {pageIndex + 2} de {totalHalfLetterPages} →
+                    </td>
+                  </tr>
+                ) : !showValues ? (
                   <tr>
                     <td colSpan={isAdjustment ? 3 : 2}>Total unidades ajustadas / movidas</td>
                     <td colSpan={isAdjustment ? 2 : 1}>
@@ -921,8 +1003,13 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                     <tr className="inv-invoice__row-credit-balance">
                       <td colSpan={4}>
                         <span style={{ textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 800 }}>
-                          SALDO PENDIENTE (ESTA FACTURA)
+                          {isFullyPaid ? "SALDO PENDIENTE (CRÉDITO CANCELADO)" : "SALDO PENDIENTE (ESTA FACTURA)"}
                         </span>
+                        {doc.receivable?.dueDate ? (
+                          <span style={{ fontSize: "10.5px", fontWeight: 600, marginLeft: "8px", color: "#7f1d1d" }}>
+                            · Fecha límite: {doc.receivable.dueDate}
+                          </span>
+                        ) : null}
                       </td>
                       <td>
                         <strong
@@ -1018,60 +1105,14 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
             </table>
           </div>
 
-          {isCredit ? (
-            <section className="inv-invoice__credit-card" aria-label="Resumen de crédito">
-              <div className="inv-invoice__credit-title-row">
-                <span className="inv-invoice__credit-title">Resumen de cuenta por cobrar</span>
-                <span className={`inv-invoice__credit-badge ${isFullyPaid ? "is-paid" : "is-pending"}`}>
-                  {isFullyPaid ? "Crédito cancelado (Pagado)" : "Saldo pendiente de cobro"}
-                </span>
-              </div>
-              <div className="inv-invoice__credit-stats">
-                <div className="inv-invoice__credit-stat">
-                  <span>Total venta</span>
-                  <strong>{formatMoney(totalSaleAmount)}</strong>
-                </div>
-                <div className="inv-invoice__credit-stat">
-                  <span>Abono inicial</span>
-                  <strong className="is-paid-amount">{formatMoney(initialPaymentTotal)}</strong>
-                </div>
-                {doc.receivable && doc.receivable.paidAmount > initialPaymentTotal ? (
-                  <div className="inv-invoice__credit-stat">
-                    <span>Abonos acumulados</span>
-                    <strong className="is-paid-amount">{formatMoney(totalPaidToDate)}</strong>
-                  </div>
-                ) : null}
-                <div className="inv-invoice__credit-stat">
-                  <span>Saldo esta factura</span>
-                  <strong className={balancePending > 0 ? "is-balance" : "is-paid-amount"}>
-                    {formatMoney(balancePending)}
-                  </strong>
-                </div>
-                {doc.customerTotalWarehouseDebt != null && doc.customerTotalWarehouseDebt > 0 && (
-                  <div className="inv-invoice__credit-stat" style={{ borderLeft: "2px solid #e11d48", paddingLeft: "8px" }}>
-                    <span style={{ color: "#991b1b" }}>Cartera total en sede</span>
-                    <strong style={{ color: "#b91c1c" }}>
-                      {formatMoney(doc.customerTotalWarehouseDebt)}
-                    </strong>
-                  </div>
-                )}
-                {doc.receivable?.dueDate ? (
-                  <div className="inv-invoice__credit-stat">
-                    <span>Fecha límite</span>
-                    <strong>{doc.receivable.dueDate}</strong>
-                  </div>
-                ) : null}
-              </div>
-            </section>
-          ) : null}
-
-          {doc.notes ? (
+          {page.isLastPage && doc.notes ? (
             <p className="inv-invoice__notes">
               <span>Notas:</span> {doc.notes}
             </p>
           ) : null}
 
-          {doc.events &&
+          {page.isLastPage &&
+          doc.events &&
           doc.events.some((e) => e.status === "edited" || e.status === "edit_unlocked") ? (
             <section className="inv-invoice__history no-print" aria-label="Auditoría de ediciones">
               <h2>Registro de auditoría</h2>
@@ -1109,6 +1150,8 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
             </div>
           </footer>
         </article>
+            ))}
+          </div>
         )}
       </div>
     </div>
