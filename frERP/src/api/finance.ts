@@ -530,6 +530,7 @@ export interface LayawaySummaryItem {
   customerName: string;
   customerTaxId: string | null;
   customerPhone: string | null;
+  customerCreditBalance?: number;
   targetAmount: number;
   paidAmount: number;
   remainingAmount: number;
@@ -554,6 +555,8 @@ export interface LayawayPaymentItem {
   receiptNumber: string;
   paymentMethod: string;
   amount: number;
+  status?: "active" | "cancelled";
+  cancelledAt?: string | null;
   receiptUrl?: string | null;
   receiptUrls?: string[];
   receiptFilename?: string | null;
@@ -658,6 +661,7 @@ export async function cancelLayaway(
   return apiPost<{
     success: boolean;
     refundedAmount: number;
+    voidedAmount?: number;
   }>(`/finance/layaways/${id}/cancel`, data || {}, token);
 }
 

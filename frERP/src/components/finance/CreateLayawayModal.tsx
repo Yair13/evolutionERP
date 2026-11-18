@@ -105,7 +105,7 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
     const t = window.setTimeout(async () => {
       setSearching(true);
       try {
-        const data = await fetchCustomers(token, searchQuery.trim());
+        const data = await fetchCustomers(token, searchQuery.trim(), selectedWarehouseId);
         setCustomerList(data.items || []);
       } catch (err) {
         console.error(err);

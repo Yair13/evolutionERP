@@ -1,6 +1,12 @@
 import type pg from "pg";
+import {
+  creditCustomerWarehouseBalance,
+  debitCustomerWarehouseBalance,
+  getCustomerWarehouseCreditBalance,
+} from "./receivables.js";
 
 export type LayawayStatus = "active" | "completed" | "cancelled";
+export type LayawayPaymentStatus = "active" | "cancelled";
 
 export interface LayawayItem {
   productId?: string;
@@ -20,6 +26,7 @@ export interface LayawaySummaryItem {
   customerName: string;
   customerTaxId: string | null;
   customerPhone: string | null;
+  customerCreditBalance?: number;
   targetAmount: number;
   paidAmount: number;
   remainingAmount: number;
@@ -43,6 +50,8 @@ export interface LayawayPaymentItem {
   receiptNumber: string;
   paymentMethod: string;
   amount: number;
+  status?: LayawayPaymentStatus;
+  cancelledAt?: string | null;
   receiptUrl?: string | null;
   receiptUrls?: string[];
   receiptFilename?: string | null;
@@ -149,22 +158,7 @@ export async function createLayaway(
     // Si el abono inicial usa saldo_a_favor
     const cleanMethod = (paymentMethod || "efectivo").trim().toLowerCase();
     if (initialPaid > 0 && cleanMethod === "saldo_a_favor") {
-      const { rows: custRows } = await client.query<{ credit_balance: string }>(
-        `SELECT credit_balance::text FROM customers WHERE id = $1::uuid FOR UPDATE`,
-        [customerId]
-      );
-      const curBal = Number(custRows[0]?.credit_balance ?? 0);
-      if (curBal < initialPaid) {
-        throw Object.assign(new Error("insufficient_credit_balance"), {
-          code: "insufficient_credit_balance",
-          available: curBal,
-          requested: initialPaid,
-        });
-      }
-      await client.query(
-        `UPDATE customers SET credit_balance = credit_balance - $1 WHERE id = $2::uuid`,
-        [initialPaid, customerId]
-      );
+      await debitCustomerWarehouseBalance(client, customerId, warehouseId, initialPaid);
     }
 
     const { rows: layRows } = await client.query<{ id: string }>(
@@ -347,9 +341,14 @@ export async function listLayaways(
       c.display_name AS "customerName",
       c.tax_id AS "customerTaxId",
       c.phone AS "customerPhone",
+      COALESCE(
+        (SELECT cw.credit_balance FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = c.id AND cw.warehouse_id = l.warehouse_id),
+        c.credit_balance,
+        0
+      )::float AS "customerCreditBalance",
       l.target_amount::float AS "targetAmount",
-      l.paid_amount::float AS "paidAmount",
-      GREATEST(0, (l.target_amount - l.paid_amount))::float AS "remainingAmount",
+      CASE WHEN l.status = 'cancelled' THEN 0 ELSE l.paid_amount END::float AS "paidAmount",
+      CASE WHEN l.status = 'cancelled' THEN l.target_amount ELSE GREATEST(0, (l.target_amount - l.paid_amount)) END::float AS "remainingAmount",
       l.status,
       l.items,
       l.expiry_date::text AS "expiryDate",
@@ -400,10 +399,14 @@ export async function getLayawayDetail(
       c.display_name AS "customerName",
       c.tax_id AS "customerTaxId",
       c.phone AS "customerPhone",
-      COALESCE(c.credit_balance, 0)::float AS "customerCreditBalance",
+      COALESCE(
+        (SELECT cw.credit_balance FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = c.id AND cw.warehouse_id = l.warehouse_id),
+        c.credit_balance,
+        0
+      )::float AS "customerCreditBalance",
       l.target_amount::float AS "targetAmount",
-      l.paid_amount::float AS "paidAmount",
-      GREATEST(0, (l.target_amount - l.paid_amount))::float AS "remainingAmount",
+      CASE WHEN l.status = 'cancelled' THEN 0 ELSE l.paid_amount END::float AS "paidAmount",
+      CASE WHEN l.status = 'cancelled' THEN l.target_amount ELSE GREATEST(0, (l.target_amount - l.paid_amount)) END::float AS "remainingAmount",
       l.status,
       l.items,
       l.expiry_date::text AS "expiryDate",
@@ -436,6 +439,8 @@ export async function getLayawayDetail(
       lp.receipt_number AS "receiptNumber",
       lp.payment_method AS "paymentMethod",
       lp.amount::float,
+      COALESCE(lp.status, 'active') AS status,
+      lp.cancelled_at AS "cancelledAt",
       lp.receipt_url AS "receiptUrl",
       lp.receipt_filename AS "receiptFilename",
       COALESCE(lp.receipt_urls, '[]'::jsonb) AS "receiptUrls",
@@ -527,22 +532,7 @@ export async function addLayawayPayment(
 
     // Si usa saldo a favor
     if (cleanMethod === "saldo_a_favor") {
-      const { rows: cRows } = await client.query<{ credit_balance: string }>(
-        `SELECT credit_balance::text FROM customers WHERE id = $1::uuid FOR UPDATE`,
-        [customerId]
-      );
-      const custBal = Number(cRows[0]?.credit_balance ?? 0);
-      if (custBal + 0.001 < cleanAmount) {
-        throw Object.assign(new Error("insufficient_credit_balance"), {
-          code: "insufficient_credit_balance",
-          available: custBal,
-          requested: cleanAmount,
-        });
-      }
-      await client.query(
-        `UPDATE customers SET credit_balance = GREATEST(0, ROUND((credit_balance - $1)::numeric, 2)) WHERE id = $2::uuid`,
-        [cleanAmount, customerId]
-      );
+      await debitCustomerWarehouseBalance(client, customerId, warehouseId, cleanAmount);
     }
 
     const newPaid = Math.round((Number(layaway.paid_amount) + cleanAmount) * 100) / 100;
@@ -612,6 +602,8 @@ export async function addLayawayPayment(
         lp.receipt_number AS "receiptNumber",
         lp.payment_method AS "paymentMethod",
         lp.amount::float,
+        COALESCE(lp.status, 'active') AS status,
+        lp.cancelled_at AS "cancelledAt",
         lp.receipt_url AS "receiptUrl",
         lp.receipt_filename AS "receiptFilename",
         COALESCE(lp.receipt_urls, '[]'::jsonb) AS "receiptUrls",
@@ -626,10 +618,7 @@ export async function addLayawayPayment(
       [paymentId]
     );
 
-    const { rows: custFinal } = await client.query<{ credit_balance: string }>(
-      `SELECT credit_balance::text FROM customers WHERE id = $1::uuid`,
-      [customerId]
-    );
+    const finalCreditBalance = await getCustomerWarehouseCreditBalance(client, customerId, warehouseId);
 
     await client.query("COMMIT");
 
@@ -637,7 +626,7 @@ export async function addLayawayPayment(
       payment: fullPayRows[0] ?? payRows[0]!,
       newPaidAmount: newPaid,
       newRemainingAmount: newRemaining,
-      customerCreditBalance: Number(custFinal[0]?.credit_balance ?? 0),
+      customerCreditBalance: finalCreditBalance,
     };
   } catch (err) {
     await client.query("ROLLBACK");
@@ -666,9 +655,14 @@ export async function getActiveLayawayForCustomer(
       c.display_name AS "customerName",
       c.tax_id AS "customerTaxId",
       c.phone AS "customerPhone",
+      COALESCE(
+        (SELECT cw.credit_balance FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = c.id AND cw.warehouse_id = l.warehouse_id),
+        c.credit_balance,
+        0
+      )::float AS "customerCreditBalance",
       l.target_amount::float AS "targetAmount",
-      l.paid_amount::float AS "paidAmount",
-      GREATEST(0, (l.target_amount - l.paid_amount))::float AS "remainingAmount",
+      CASE WHEN l.status = 'cancelled' THEN 0 ELSE l.paid_amount END::float AS "paidAmount",
+      CASE WHEN l.status = 'cancelled' THEN l.target_amount ELSE GREATEST(0, (l.target_amount - l.paid_amount)) END::float AS "remainingAmount",
       l.status,
       l.items,
       l.expiry_date::text AS "expiryDate",
@@ -708,8 +702,8 @@ export async function redeemLayawayInSale(
 ): Promise<{ usedFromLayaway: number; excessToFavour: number }> {
   const { layawayId, documentId, saleTotal, customerId } = params;
 
-  const { rows: lRows } = await client.query<{ paid_amount: string; status: string }>(
-    `SELECT paid_amount::text, status FROM layaways WHERE id = $1::uuid FOR UPDATE`,
+  const { rows: lRows } = await client.query<{ paid_amount: string; status: string; warehouse_id: string }>(
+    `SELECT paid_amount::text, status, warehouse_id::text FROM layaways WHERE id = $1::uuid FOR UPDATE`,
     [layawayId]
   );
 
@@ -738,56 +732,104 @@ export async function redeemLayawayInSale(
     [documentId, layawayId]
   );
 
-  // Si sobró dinero, acreditar al saldo a favor del cliente
+  // Si sobró dinero, acreditar al saldo a favor del cliente en esa sede
   if (excessToFavour > 0) {
-    await client.query(
-      `UPDATE customers SET credit_balance = credit_balance + $1 WHERE id = $2::uuid`,
-      [excessToFavour, customerId]
-    );
+    await creditCustomerWarehouseBalance(client, customerId, layaway.warehouse_id, excessToFavour);
   }
 
   return { usedFromLayaway, excessToFavour };
 }
 
 /**
- * Cancelar un apartado (permite retornar el dinero a saldo a favor o anularlo).
+ * Cancelar / anular un apartado por completo:
+ * - Marca todos los abonos del apartado como 'cancelled' para conservar trazabilidad pero excluirlos de caja, bancos, recaudo y cierres contables.
+ * - Si algún abono había usado 'saldo_a_favor', restituye ese saldo a favor al cliente en su sede.
+ * - Nunca acredita los pagos en efectivo/bancos como saldo a favor, ya que se anulan contablemente.
  */
 export async function cancelLayaway(
   pool: pg.Pool,
   id: string,
-  opts?: { refundToCreditBalance?: boolean; notes?: string }
-): Promise<{ success: boolean; refundedAmount: number }> {
+  opts?: { refundToCreditBalance?: boolean; notes?: string; userId?: string | null }
+): Promise<{ success: boolean; refundedAmount: number; voidedAmount: number }> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
-    const { rows } = await client.query<{ customer_id: string; paid_amount: string; status: string }>(
-      `SELECT customer_id::text, paid_amount::text, status FROM layaways WHERE id = $1::uuid FOR UPDATE`,
+    const { rows } = await client.query<{
+      customer_id: string;
+      warehouse_id: string;
+      paid_amount: string;
+      status: string;
+      notes: string | null;
+    }>(
+      `SELECT customer_id::text, warehouse_id::text, paid_amount::text, status, notes
+       FROM layaways WHERE id = $1::uuid FOR UPDATE`,
       [id]
     );
 
-    if (rows.length === 0) throw new Error("layaway_not_found");
+    if (rows.length === 0) {
+      throw Object.assign(new Error("layaway_not_found"), { code: "layaway_not_found" });
+    }
     const l = rows[0]!;
-    if (l.status !== "active") throw new Error("layaway_not_active");
-
-    const paid = Number(l.paid_amount);
-    let refunded = 0;
-
-    if (opts?.refundToCreditBalance && paid > 0) {
-      await client.query(
-        `UPDATE customers SET credit_balance = credit_balance + $1 WHERE id = $2::uuid`,
-        [paid, l.customer_id]
-      );
-      refunded = paid;
+    if (l.status !== "active") {
+      throw Object.assign(new Error("layaway_not_active"), { code: "layaway_not_active" });
     }
 
-    await client.query(
-      `UPDATE layaways SET status = 'cancelled', notes = COALESCE(notes, '') || ' [Cancelado]' WHERE id = $1::uuid`,
+    // Consultar todos los abonos activos de este apartado
+    const { rows: payRows } = await client.query<{
+      id: string;
+      warehouse_id: string;
+      payment_method: string;
+      amount: string;
+    }>(
+      `SELECT id::text, warehouse_id::text, payment_method, amount::text
+       FROM layaway_payments
+       WHERE layaway_id = $1::uuid AND COALESCE(status, 'active') = 'active'
+       FOR UPDATE`,
       [id]
+    );
+
+    let restoredCreditBalance = 0;
+    let totalVoided = 0;
+
+    for (const p of payRows) {
+      const amt = Math.round((Number(p.amount) || 0) * 100) / 100;
+      totalVoided = Math.round((totalVoided + amt) * 100) / 100;
+      if (p.payment_method.trim().toLowerCase() === "saldo_a_favor" && amt > 0) {
+        await creditCustomerWarehouseBalance(client, l.customer_id, p.warehouse_id || l.warehouse_id, amt);
+        restoredCreditBalance = Math.round((restoredCreditBalance + amt) * 100) / 100;
+      }
+    }
+
+    const cancelNoteSuffix = opts?.notes?.trim()
+      ? ` [Anulado: ${opts.notes.trim()}]`
+      : " [Anulado]";
+
+    // Marcar los abonos como anulados (status = 'cancelled') conservándolos en el historial del apartado
+    await client.query(
+      `UPDATE layaway_payments
+       SET status = 'cancelled',
+           cancelled_at = now(),
+           cancelled_by = $2::uuid
+       WHERE layaway_id = $1::uuid AND COALESCE(status, 'active') = 'active'`,
+      [id, opts?.userId || null]
+    );
+
+    // Marcar el apartado como cancelado/anulado
+    await client.query(
+      `UPDATE layaways
+       SET status = 'cancelled',
+           notes = COALESCE(notes, '') || $2
+       WHERE id = $1::uuid`,
+      [id, cancelNoteSuffix]
     );
 
     await client.query("COMMIT");
-    return { success: true, refundedAmount: refunded };
+    return {
+      success: true,
+      refundedAmount: restoredCreditBalance,
+      voidedAmount: totalVoided,
+    };
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;

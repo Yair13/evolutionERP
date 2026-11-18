@@ -14,7 +14,7 @@ type Props = {
   open: boolean;
   layawayId: string | null;
   onClose: () => void;
-  onAbonar: (layaway: LayawaySummaryItem) => void;
+  onAbonar: (layaway: LayawaySummaryItem, customerCreditBalance?: number) => void;
   onRefresh: () => void;
 };
 
@@ -47,7 +47,6 @@ export function LayawayDetailModal({
 
   // Modal confirmación de cancelación
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
-  const [refundToBalance, setRefundToBalance] = useState(true);
   const [cancelNotes, setCancelNotes] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [viewingUrls, setViewingUrls] = useState<string[] | null>(null);
@@ -86,14 +85,14 @@ export function LayawayDetailModal({
     setCancelling(true);
     try {
       await cancelLayaway(token, layawayId, {
-        refundToCreditBalance: refundToBalance,
+        refundToCreditBalance: false,
         notes: cancelNotes.trim() || undefined,
       });
       setShowCancelPrompt(false);
       onRefresh();
-      onClose();
+      await loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al cancelar apartado.");
+      setError(err instanceof Error ? err.message : "Error al anular apartado.");
     } finally {
       setCancelling(false);
     }
@@ -191,7 +190,7 @@ export function LayawayDetailModal({
                     )}
                     {detail.status === "cancelled" && (
                       <span className="badge badge--neutral" style={{ background: "rgba(239, 68, 68, 0.2)", color: "#ef4444" }}>
-                        Cancelado
+                        Anulado / Cancelado
                       </span>
                     )}
                   </div>
@@ -262,6 +261,7 @@ export function LayawayDetailModal({
                           <th>Fecha</th>
                           <th>Medio</th>
                           <th>Monto</th>
+                          <th style={{ textAlign: "center" }}>Estado</th>
                           <th style={{ textAlign: "center" }}>Soporte</th>
                           <th>Registrado por</th>
                           <th>Notas</th>
@@ -274,17 +274,62 @@ export function LayawayDetailModal({
                             ? p.receiptUrls
                             : (p.receiptUrl ? [p.receiptUrl] : []);
                           const hasReceipt = urls.length > 0;
-                          const isBank = p.paymentMethod.toLowerCase() !== "efectivo" && p.paymentMethod.toLowerCase() !== "saldo_a_favor";
+                          const isCancelledPay = p.status === "cancelled" || detail.status === "cancelled";
+                          const isBank = !isCancelledPay && p.paymentMethod.toLowerCase() !== "efectivo" && p.paymentMethod.toLowerCase() !== "saldo_a_favor";
 
                           return (
-                            <tr key={p.id}>
+                            <tr
+                              key={p.id}
+                              style={isCancelledPay ? { opacity: 0.72, background: "rgba(239, 68, 68, 0.04)" } : undefined}
+                            >
                               <td>
-                                <strong>{p.receiptNumber}</strong>
+                                <strong style={isCancelledPay ? { textDecoration: "line-through", color: "#ef4444" } : undefined}>
+                                  {p.receiptNumber}
+                                </strong>
                               </td>
                               <td>{formatDate(p.createdAt)}</td>
                               <td style={{ textTransform: "capitalize" }}>{p.paymentMethod}</td>
-                              <td style={{ fontWeight: 700, color: "#10b981" }}>
+                              <td
+                                style={{
+                                  fontWeight: 700,
+                                  color: isCancelledPay ? "#ef4444" : "#10b981",
+                                  textDecoration: isCancelledPay ? "line-through" : "none",
+                                }}
+                              >
                                 {formatMoney(p.amount)}
+                              </td>
+                              <td style={{ textAlign: "center" }}>
+                                {isCancelledPay ? (
+                                  <span
+                                    style={{
+                                      display: "inline-block",
+                                      fontSize: "0.7rem",
+                                      fontWeight: 700,
+                                      padding: "2px 6px",
+                                      borderRadius: 4,
+                                      background: "rgba(239, 68, 68, 0.15)",
+                                      color: "#ef4444",
+                                      textTransform: "uppercase",
+                                    }}
+                                  >
+                                    Anulado
+                                  </span>
+                                ) : (
+                                  <span
+                                    style={{
+                                      display: "inline-block",
+                                      fontSize: "0.7rem",
+                                      fontWeight: 700,
+                                      padding: "2px 6px",
+                                      borderRadius: 4,
+                                      background: "rgba(16, 185, 129, 0.15)",
+                                      color: "#10b981",
+                                      textTransform: "uppercase",
+                                    }}
+                                  >
+                                    Vigente
+                                  </span>
+                                )}
                               </td>
                               <td style={{ textAlign: "center" }}>
                                 {hasReceipt ? (
@@ -403,7 +448,7 @@ export function LayawayDetailModal({
                 )}
               </div>
 
-              {/* Confirmación de Cancelación */}
+              {/* Confirmación de Cancelación / Anulación */}
               {showCancelPrompt ? (
                 <div
                   style={{
@@ -418,22 +463,26 @@ export function LayawayDetailModal({
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "#ef4444" }}>
                     <AlertCircle size={20} />
-                    <strong>¿Deseas cancelar este apartado?</strong>
+                    <strong>¿Deseas anular / cancelar este apartado?</strong>
                   </div>
-                  {detail.paidAmount > 0 && (
-                    <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.88rem", cursor: "pointer" }}>
-                      <input
-                        type="checkbox"
-                        checked={refundToBalance}
-                        onChange={(e) => setRefundToBalance(e.target.checked)}
-                      />
-                      <span>
-                        Reembolsar los <strong>{formatMoney(detail.paidAmount)}</strong> abonados como <strong>Saldo a Favor</strong> del cliente
-                      </span>
-                    </label>
-                  )}
+                  <div style={{ fontSize: "0.86rem", color: "var(--inv-text)", lineHeight: 1.4 }}>
+                    Al anular el apartado:
+                    <ul style={{ margin: "0.35rem 0 0 1.2rem", padding: 0 }}>
+                      <li>
+                        Los recibos de abono (por <strong>{formatMoney(detail.paidAmount)}</strong>) quedarán registrados como <strong>Anulados</strong> en este historial.
+                      </li>
+                      <li>
+                        El dinero <strong>no sumará</strong> en Caja, Bancos, Cierre Diario ni Cierre Contable General, y no quedará como Saldo a Favor.
+                      </li>
+                      {detail.payments.some((p) => p.paymentMethod.toLowerCase() === "saldo_a_favor" && p.status !== "cancelled") && (
+                        <li>
+                          El saldo a favor previo que se hubiera utilizado para abonar a este apartado será restituido al cliente.
+                        </li>
+                      )}
+                    </ul>
+                  </div>
                   <input
-                    placeholder="Motivo de cancelación (opcional)..."
+                    placeholder="Motivo de anulación (opcional)..."
                     value={cancelNotes}
                     onChange={(e) => setCancelNotes(e.target.value)}
                     style={{ padding: "6px 10px", borderRadius: 4, border: "1px solid var(--inv-border)", background: "var(--inv-bg-field)" }}
@@ -454,7 +503,7 @@ export function LayawayDetailModal({
                       onClick={handleCancelLayaway}
                       disabled={cancelling}
                     >
-                      {cancelling ? "Cancelando..." : "Confirmar Cancelación"}
+                      {cancelling ? "Anulando..." : "Confirmar Anulación"}
                     </button>
                   </div>
                 </div>
@@ -471,7 +520,7 @@ export function LayawayDetailModal({
                       onClick={() => setShowCancelPrompt(true)}
                     >
                       <Ban size={15} style={{ marginRight: 4 }} />
-                      Cancelar Apartado
+                      Anular / Cancelar Apartado
                     </button>
                   )}
                 </div>
@@ -485,7 +534,7 @@ export function LayawayDetailModal({
                       type="button"
                       className="inv-btn inv-btn--primary"
                       onClick={() => {
-                        onAbonar(detail);
+                        onAbonar(detail, detail.customerCreditBalance);
                       }}
                     >
                       <Wallet size={16} style={{ marginRight: 4 }} />

@@ -277,6 +277,8 @@ async function getReceiptAuditItemsBetween(
     JOIN layaways l ON l.id = lp.layaway_id
     LEFT JOIN customers c ON c.id = l.customer_id
     WHERE lp.warehouse_id = $1::uuid
+      AND COALESCE(lp.status, 'active') = 'active'
+      AND l.status <> 'cancelled'
       ${fromTime ? `AND lp.created_at > '${fromTime}'::timestamptz` : ""}
       AND lp.created_at <= '${toTime}'::timestamptz
       AND LOWER(TRIM(lp.payment_method)) NOT IN ('efectivo', 'saldo_a_favor')
@@ -701,12 +703,15 @@ async function calculateMovementsBetween(
   // 3. Abonos de apartados en efectivo
   const { rows: layawayPayRows } = await pool.query<{ amount: string }>(
     `
-    SELECT COALESCE(SUM(amount), 0)::text AS amount
-    FROM layaway_payments
-    WHERE warehouse_id = $1::uuid
-      ${fromTime ? `AND created_at > '${fromTime}'::timestamptz` : ""}
-      AND created_at <= '${toTime}'::timestamptz
-      AND LOWER(TRIM(payment_method)) = 'efectivo'
+    SELECT COALESCE(SUM(lp.amount), 0)::text AS amount
+    FROM layaway_payments lp
+    JOIN layaways l ON l.id = lp.layaway_id
+    WHERE lp.warehouse_id = $1::uuid
+      AND COALESCE(lp.status, 'active') = 'active'
+      AND l.status <> 'cancelled'
+      ${fromTime ? `AND lp.created_at > '${fromTime}'::timestamptz` : ""}
+      AND lp.created_at <= '${toTime}'::timestamptz
+      AND LOWER(TRIM(lp.payment_method)) = 'efectivo'
     `,
     [warehouseId]
   );
@@ -854,15 +859,18 @@ async function calculateMovementsBetween(
   const { rows: bankLayRows } = await pool.query<{ method: string; amount: string; count: number }>(
     `
     SELECT
-      LOWER(TRIM(payment_method)) AS method,
-      COALESCE(SUM(amount), 0)::text AS amount,
+      LOWER(TRIM(lp.payment_method)) AS method,
+      COALESCE(SUM(lp.amount), 0)::text AS amount,
       COUNT(*)::int AS count
-    FROM layaway_payments
-    WHERE warehouse_id = $1::uuid
-      ${fromTime ? `AND created_at > '${fromTime}'::timestamptz` : ""}
-      AND created_at <= '${toTime}'::timestamptz
-      AND LOWER(TRIM(payment_method)) NOT IN ('efectivo', 'saldo_a_favor')
-    GROUP BY LOWER(TRIM(payment_method))
+    FROM layaway_payments lp
+    JOIN layaways l ON l.id = lp.layaway_id
+    WHERE lp.warehouse_id = $1::uuid
+      AND COALESCE(lp.status, 'active') = 'active'
+      AND l.status <> 'cancelled'
+      ${fromTime ? `AND lp.created_at > '${fromTime}'::timestamptz` : ""}
+      AND lp.created_at <= '${toTime}'::timestamptz
+      AND LOWER(TRIM(lp.payment_method)) NOT IN ('efectivo', 'saldo_a_favor')
+    GROUP BY LOWER(TRIM(lp.payment_method))
     `,
     [warehouseId]
   );

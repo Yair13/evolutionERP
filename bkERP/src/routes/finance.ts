@@ -1220,13 +1220,24 @@ export function createFinanceRouter(): Router {
       return;
     }
 
-    const refundToCreditBalance = req.body?.refundToCreditBalance === true;
     const notes = typeof req.body?.notes === "string" ? req.body.notes : undefined;
 
     try {
-      const result = await cancelLayaway(pool, id, { refundToCreditBalance, notes });
+      const result = await cancelLayaway(pool, id, {
+        refundToCreditBalance: false,
+        notes,
+        userId: req.auth?.userId || null,
+      });
       res.json(result);
     } catch (err: any) {
+      if (err?.code === "layaway_not_found") {
+        res.status(404).json({ error: "layaway_not_found" });
+        return;
+      }
+      if (err?.code === "layaway_not_active") {
+        res.status(400).json({ error: "layaway_not_active", message: "El apartado ya no se encuentra activo." });
+        return;
+      }
       if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
         res.status(err.statusCode || 400).json({ error: err.message });
         return;

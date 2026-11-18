@@ -516,6 +516,7 @@ export function LayawaysPage() {
         <AddLayawayPaymentModal
           open={Boolean(selectedForPayment)}
           layaway={selectedForPayment}
+          customerCreditBalance={(selectedForPayment as any).customerCreditBalance ?? 0}
           onClose={() => setSelectedForPayment(null)}
           onSuccess={() => {
             void loadData();
@@ -529,9 +530,9 @@ export function LayawaysPage() {
           open={Boolean(selectedDetailId)}
           layawayId={selectedDetailId}
           onClose={() => setSelectedDetailId(null)}
-          onAbonar={(layaway) => {
+          onAbonar={(layaway, creditBal) => {
             setSelectedDetailId(null);
-            setSelectedForPayment(layaway);
+            setSelectedForPayment({ ...layaway, customerCreditBalance: creditBal } as any);
           }}
           onRefresh={() => void loadData()}
         />

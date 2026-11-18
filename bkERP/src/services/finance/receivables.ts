@@ -285,7 +285,7 @@ export async function debitCustomerWarehouseBalance(
   const rounded = Math.round(Number(amount) * 100) / 100;
   if (rounded <= 0) return getCustomerWarehouseCreditBalance(client, customerId, warehouseId);
 
-  const { rows } = await client.query<{ credit_balance: string }>(
+  let { rows } = await client.query<{ credit_balance: string }>(
     `
     SELECT credit_balance::text
     FROM customer_warehouse_credit_balances
@@ -294,6 +294,35 @@ export async function debitCustomerWarehouseBalance(
     `,
     [customerId, warehouseId]
   );
+
+  // Fallback seguro en caso de que el cliente tuviera saldo heredado solo en customers.credit_balance sin fila en customer_warehouse_credit_balances
+  if (rows.length === 0) {
+    const { rows: custRows } = await client.query<{ credit_balance: string; sum_wh: string }>(
+      `
+      SELECT
+        COALESCE(c.credit_balance, 0)::text AS credit_balance,
+        COALESCE((SELECT SUM(cw.credit_balance) FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = c.id), 0)::text AS sum_wh
+      FROM customers c
+      WHERE c.id = $1::uuid
+      FOR UPDATE
+      `,
+      [customerId]
+    );
+    const unallocated = Math.max(0, Number(custRows[0]?.credit_balance ?? 0) - Number(custRows[0]?.sum_wh ?? 0));
+    if (unallocated > 0) {
+      const { rows: insRows } = await client.query<{ credit_balance: string }>(
+        `
+        INSERT INTO customer_warehouse_credit_balances (customer_id, warehouse_id, credit_balance, updated_at)
+        VALUES ($1::uuid, $2::uuid, $3, now())
+        ON CONFLICT (customer_id, warehouse_id)
+        DO UPDATE SET credit_balance = ROUND((customer_warehouse_credit_balances.credit_balance + $3)::numeric, 2), updated_at = now()
+        RETURNING credit_balance::text
+        `,
+        [customerId, warehouseId, unallocated]
+      );
+      rows = insRows;
+    }
+  }
 
   const available = Number(rows[0]?.credit_balance ?? 0);
   if (available + 0.001 < rounded) {
@@ -3262,7 +3291,9 @@ export async function getPaymentsCashSummary(
       COALESCE(SUM(lp.amount), 0)::text AS amount,
       COUNT(*)::int AS count
     FROM layaway_payments lp
-    WHERE 1=1
+    JOIN layaways l ON l.id = lp.layaway_id
+    WHERE COALESCE(lp.status, 'active') = 'active'
+      AND l.status <> 'cancelled'
       ${whRpFilter.replace(/rp\./g, "lp.")}
       ${dateRpFilter.replace(/rp\./g, "lp.")}
     GROUP BY LOWER(TRIM(lp.payment_method))
@@ -3420,10 +3451,11 @@ export async function getPaymentsCashSummary(
       COALESCE(lp.receipt_urls, '[]'::jsonb) AS "receiptUrls"
     FROM layaway_payments lp
     JOIN warehouses w ON w.id = lp.warehouse_id
-    LEFT JOIN layaways l ON l.id = lp.layaway_id
+    JOIN layaways l ON l.id = lp.layaway_id
     LEFT JOIN customers c ON c.id = COALESCE(lp.customer_id, l.customer_id)
     LEFT JOIN users u ON u.id = lp.created_by
-    WHERE 1=1
+    WHERE COALESCE(lp.status, 'active') = 'active'
+      AND l.status <> 'cancelled'
       ${whRpFilter.replace(/rp\./g, "lp.")}
       ${dateRpFilter.replace(/rp\./g, "lp.")}
   `;
@@ -4149,7 +4181,7 @@ export async function deleteCustomer(
     const { rows: layawayRows } = await client.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count 
        FROM layaways 
-       WHERE customer_id = $1::uuid AND status IN ('open', 'partial')`,
+       WHERE customer_id = $1::uuid AND status = 'active'`,
       [customerId]
     );
     const pendingLayaways = Number(layawayRows[0]?.count || 0);

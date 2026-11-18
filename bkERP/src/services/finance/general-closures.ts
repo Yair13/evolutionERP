@@ -341,7 +341,9 @@ export async function getGeneralClosureData(
       COALESCE(SUM(lp.amount), 0)::text AS amount,
       COUNT(*)::int AS count
     FROM layaway_payments lp
-    WHERE 1=1
+    JOIN layaways l ON l.id = lp.layaway_id
+    WHERE COALESCE(lp.status, 'active') = 'active'
+      AND l.status <> 'cancelled'
       ${whFilterLp}
       ${timeFilterLp}
     GROUP BY LOWER(TRIM(lp.payment_method))
