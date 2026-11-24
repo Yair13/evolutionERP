@@ -286,6 +286,7 @@ export type ConfirmExitPayload = {
   receiptFilename?: string | null;
   discountAmount?: number;
   discountReason?: string | null;
+  exchangeSurplusHandling?: "favour_balance" | "cash_refund" | null;
 };
 
 export async function confirmMovement(

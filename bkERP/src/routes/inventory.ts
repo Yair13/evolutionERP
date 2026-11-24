@@ -794,6 +794,11 @@ export function createInventoryRouter(): Router {
             : 0,
         discountReason:
           typeof req.body?.discountReason === "string" ? req.body.discountReason.trim() || null : null,
+        exchangeSurplusHandling:
+          req.body?.exchangeSurplusHandling === "cash_refund" ||
+          req.body?.exchangeSurplusHandling === "favour_balance"
+            ? req.body.exchangeSurplusHandling
+            : null,
       });
       res.status(201).json({ item });
     } catch (err: unknown) {

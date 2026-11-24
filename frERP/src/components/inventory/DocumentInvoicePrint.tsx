@@ -467,9 +467,29 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
         {showValues && (
           <div className="sale-voucher-total-box">
             <span className="sale-voucher-total-label">
-              {isExchange ? "TOTAL EXCEDENTE:" : discountAmount > 0 ? "TOTAL NETO:" : "TOTAL VENTA:"}
+              {isExchange && Number(doc.metadata?.exchangeSurplusAmount) > 0
+                ? "SALDO A FAVOR CLIENTE:"
+                : isExchange
+                  ? "TOTAL EXCEDENTE:"
+                  : discountAmount > 0
+                    ? "TOTAL NETO:"
+                    : "TOTAL VENTA:"}
             </span>
-            <span className="sale-voucher-total-amount">{formatMoney(totalSaleAmount)}</span>
+            <span className="sale-voucher-total-amount">
+              {isExchange && Number(doc.metadata?.exchangeSurplusAmount) > 0
+                ? formatMoney(Number(doc.metadata.exchangeSurplusAmount))
+                : formatMoney(totalSaleAmount)}
+            </span>
+          </div>
+        )}
+        {showValues && isExchange && Number(doc.metadata?.exchangeSurplusAmount) > 0 && (
+          <div className="sale-voucher-row" style={{ marginTop: "4px", fontSize: "10.5px" }}>
+            <span>Liquidación diferencia:</span>
+            <strong>
+              {doc.metadata?.exchangeSurplusHandling === "cash_refund"
+                ? `Devuelto en efectivo${doc.metadata?.exchangeRefundVoucherNumber ? ` (${doc.metadata.exchangeRefundVoucherNumber})` : ""}`
+                : "Abonado a Saldo a Favor"}
+            </strong>
           </div>
         )}
       </div>
@@ -1080,9 +1100,21 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                       </>
                     )}
                     <tr>
-                      <td colSpan={4}>Total {discountAmount > 0 ? "neto " : ""}({doc.totalQuantity} uds)</td>
+                      <td colSpan={4}>
+                        {isExchange && Number(doc.metadata?.exchangeSurplusAmount) > 0
+                          ? `Diferencia a favor del cliente (${
+                              doc.metadata?.exchangeSurplusHandling === "cash_refund"
+                                ? `Devuelto en efectivo${doc.metadata?.exchangeRefundVoucherNumber ? ` · ${doc.metadata.exchangeRefundVoucherNumber}` : ""}`
+                                : "Abonado a Saldo a Favor"
+                            })`
+                          : `Total ${discountAmount > 0 ? "neto " : ""}(${doc.totalQuantity} uds)`}
+                      </td>
                       <td>
-                        <strong>{formatMoney(doc.totalAmount ?? 0)}</strong>
+                        <strong>
+                          {isExchange && Number(doc.metadata?.exchangeSurplusAmount) > 0
+                            ? formatMoney(Number(doc.metadata.exchangeSurplusAmount))
+                            : formatMoney(doc.totalAmount ?? 0)}
+                        </strong>
                       </td>
                     </tr>
                     {doc.customerCreditBalance != null && doc.customerCreditBalance > 0 && (

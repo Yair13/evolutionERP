@@ -7,11 +7,13 @@ import {
   MOVEMENT_EDIT_TZ,
 } from "./movement-edit-settings.js";
 import { recordCreditFromExitDocument, debitCustomerWarehouseBalance, creditCustomerWarehouseBalance } from "../finance/receivables.js";
+import { nextOutflowVoucherNumber } from "../finance/transfers-egress.js";
 import { getTodayBogotaYmd } from "../../lib/date-utils.js";
 import { redeemLayawayInSale } from "../finance/layaways.js";
 
 export type DocType = "entry" | "exit";
 export type ExitKind = "sale" | "return" | "credit" | "warranty" | "distribution" | "transfer" | "return_to_factory" | "exchange";
+export type ExchangeSurplusHandling = "favour_balance" | "cash_refund";
 
 export type ConfirmExitInput = {
   exitKind: ExitKind;
@@ -30,6 +32,7 @@ export type ConfirmExitInput = {
   receiptFilename?: string | null;
   discountAmount?: number;
   discountReason?: string | null;
+  exchangeSurplusHandling?: ExchangeSurplusHandling | null;
 };
 
 export type ConfirmLineInput = {
@@ -866,7 +869,7 @@ export async function confirmExitDocument(
       (sum, line) => sum + (line.isReturn ? -line.quantity : line.quantity) * (Number(line.unitSalePrice) || 0),
       0
     );
-    const maxDiscount = Math.round(subtotal * 0.10);
+    const maxDiscount = Math.max(0, Math.round(subtotal * 0.10));
     const discountAmount = Math.max(0, Math.round(Number(input.discountAmount) || 0));
     if (discountAmount > maxDiscount) {
       throw Object.assign(new Error("discount_exceeds_max_percent"), {
@@ -878,10 +881,26 @@ export async function confirmExitDocument(
     }
     const discountReason = input.discountReason?.trim() || null;
     const finalNetSaleTotal = Math.max(0, subtotal - discountAmount);
+    const exchangeSurplusAmount =
+      exitKind === "exchange" && subtotal < 0
+        ? Math.max(0, Math.round(Math.abs(subtotal) * 100) / 100)
+        : 0;
+    const exchangeSurplusHandling: ExchangeSurplusHandling | null =
+      exchangeSurplusAmount > 0
+        ? input.exchangeSurplusHandling === "cash_refund"
+          ? "cash_refund"
+          : "favour_balance"
+        : null;
 
     let customerId = input.customerId || null;
     if (!customerId && customerName?.trim()) {
       customerId = await resolveCustomerId(client, customerName);
+    }
+
+    if (exchangeSurplusAmount > 0 && exchangeSurplusHandling === "favour_balance" && !customerId) {
+      throw Object.assign(new Error("customer_name_required"), {
+        code: "customer_name_required",
+      });
     }
 
     const initialPaidTotalForMeta = (exitKind === "credit" || exitKind === "sale" || exitKind === "exchange") && input.paymentBreakdown
@@ -912,6 +931,12 @@ export async function confirmExitDocument(
 
     const creditBalanceForMeta = Math.max(0, Math.round((finalNetSaleTotal - initialPaidTotalForMeta) * 100) / 100);
 
+    const invoiceNumber = await nextInvoiceNumber(client, warehouseId);
+    let exchangeRefundVoucherNumber: string | null = null;
+    if (exchangeSurplusAmount > 0 && exchangeSurplusHandling === "cash_refund") {
+      exchangeRefundVoucherNumber = await nextOutflowVoucherNumber(client, warehouseId);
+    }
+
     const metadata = {
       exitKind,
       customerName: customerName?.trim() || null,
@@ -928,7 +953,15 @@ export async function confirmExitDocument(
       discountReason,
       totalAmount: finalNetSaleTotal,
       paidAmount: initialPaidTotalForMeta,
-      excessToFavour: excessToFavourForMeta > 0 ? excessToFavourForMeta : null,
+      excessToFavour:
+        exchangeSurplusAmount > 0 && exchangeSurplusHandling === "favour_balance"
+          ? exchangeSurplusAmount
+          : excessToFavourForMeta > 0
+            ? excessToFavourForMeta
+            : null,
+      exchangeSurplusAmount: exchangeSurplusAmount > 0 ? exchangeSurplusAmount : null,
+      exchangeSurplusHandling,
+      exchangeRefundVoucherNumber,
       creditTotal: exitKind === "credit" ? finalNetSaleTotal : null,
       creditInitialPayment: exitKind === "credit" ? Math.min(finalNetSaleTotal, initialPaidTotalForMeta) : null,
       creditBalance: exitKind === "credit" ? creditBalanceForMeta : null,
@@ -937,8 +970,6 @@ export async function confirmExitDocument(
       destinationWarehouseCode,
       layawayId: input.layawayId || null,
     };
-
-    const invoiceNumber = await nextInvoiceNumber(client, warehouseId);
 
     const finalReceiptUrls = (input.receiptUrls && input.receiptUrls.length > 0)
       ? input.receiptUrls
@@ -1094,6 +1125,44 @@ export async function confirmExitDocument(
       }
       if (excessToFavourForMeta > 0 && customerId) {
         await creditCustomerWarehouseBalance(client, customerId, warehouseId, excessToFavourForMeta);
+      }
+    }
+
+    if (exitKind === "exchange" && exchangeSurplusAmount > 0) {
+      if (exchangeSurplusHandling === "favour_balance" && customerId) {
+        await creditCustomerWarehouseBalance(client, customerId, warehouseId, exchangeSurplusAmount);
+      } else if (exchangeSurplusHandling === "cash_refund") {
+        const voucherNum = exchangeRefundVoucherNumber || (await nextOutflowVoucherNumber(client, warehouseId));
+        const beneficiary = customerName?.trim() || "Cliente Mostrador";
+        const origRef = relatedInvoiceNumber?.trim() || "anterior";
+        const refundConcept = `Devolución de excedente por cambio de producto (${invoiceNumber} · Ref: ${origRef})`;
+        await client.query(
+          `
+          INSERT INTO cash_outflows (
+            voucher_number, warehouse_id, concept, beneficiary_name, beneficiary_doc,
+            amount, payment_method, supplier_id, payable_id, reference_code,
+            notes, created_by, receipt_url, receipt_filename, receipt_urls
+          )
+          VALUES (
+            $1, $2::uuid, $3, $4, NULL,
+            $5, 'efectivo', NULL, NULL, $6,
+            $7, $8::uuid, $9, $10, $11::jsonb
+          )
+          `,
+          [
+            voucherNum,
+            warehouseId,
+            refundConcept,
+            beneficiary,
+            exchangeSurplusAmount,
+            invoiceNumber,
+            notes?.trim() || `Reembolso en efectivo por diferencia a favor del cliente en cambio ${invoiceNumber}`,
+            auth.userId,
+            primaryReceiptUrl,
+            input.receiptFilename?.trim() || null,
+            jsonReceiptUrls,
+          ]
+        );
       }
     }
 

@@ -49,6 +49,7 @@ export type ExitCheckoutData = {
   receiptFilename?: string | null;
   discountAmount?: number;
   discountReason?: string | null;
+  exchangeSurplusHandling?: "favour_balance" | "cash_refund" | null;
 };
 
 export type PaymentPart = {
@@ -89,6 +90,15 @@ type Props = {
   exchangeReady?: { hasOutbound: boolean; hasReturn: boolean; netValue: number };
   /** Factura original sugerida/precargada (ej. en cambios) */
   initialRelatedInvoiceNumber?: string;
+  /** Cliente original sugerido/precargado de la factura de cambio */
+  initialCustomer?: {
+    id?: string | null;
+    name?: string | null;
+    taxId?: string | null;
+    phone?: string | null;
+    address?: string | null;
+    creditBalance?: number | null;
+  } | null;
   /** Error devuelto por el servidor al confirmar (se muestra dentro del modal) */
   serverError?: string | null;
 };
@@ -115,6 +125,7 @@ export function ExitCheckoutModal({
   lockedKind,
   exchangeReady,
   initialRelatedInvoiceNumber,
+  initialCustomer,
   serverError,
 }: Props) {
   const { token } = useAuth();
@@ -145,10 +156,14 @@ export function ExitCheckoutModal({
   const [discountReason, setDiscountReason] = useState<string>("");
   const [discountLimitWarning, setDiscountLimitWarning] = useState<string | null>(null);
 
+  // En cambios donde la prenda nueva vale menos que la devuelta (saldo a favor del cliente)
+  const [exchangeSurplusHandling, setExchangeSurplusHandling] = useState<"favour_balance" | "cash_refund">("favour_balance");
+
   const subtotal = totalValue;
-  const maxDiscount = Math.round(subtotal * 0.10);
+  const maxDiscount = Math.max(0, Math.round(subtotal * 0.10));
   const discountPercent = subtotal > 0 ? Math.round((discountAmount / subtotal) * 1000) / 10 : 0;
   const netTotal = Math.max(0, subtotal - discountAmount);
+  const exchangeSurplus = exitKind === "exchange" && subtotal < 0 ? Math.abs(subtotal) : 0;
 
   // Métodos de pago y destinos
   const [payments, setPayments] = useState<PaymentDraft[]>([
@@ -178,20 +193,32 @@ export function ExitCheckoutModal({
 
       const initKind = lockedKind ?? "sale";
       setExitKind(initKind);
-      setCustomerName(existingDraft?.customerName ?? "");
+      const fallbackCust: Customer | null =
+        !existingDraft?.selectedCustomer && initialCustomer?.id && initialCustomer?.name
+          ? {
+              id: initialCustomer.id,
+              displayName: initialCustomer.name,
+              taxId: initialCustomer.taxId ?? null,
+              phone: initialCustomer.phone ?? null,
+              address: initialCustomer.address ?? null,
+              creditBalance: initialCustomer.creditBalance ?? 0,
+            }
+          : null;
+      setCustomerName(existingDraft?.customerName || initialCustomer?.name || "");
       setRelatedInvoiceNumber(existingDraft?.relatedInvoiceNumber || initialRelatedInvoiceNumber || "");
       setNotes(existingDraft?.notes ?? "");
       setError(null);
       setSearchQuery("");
       setCustomerList([]);
-      setSelectedCustomer(existingDraft?.selectedCustomer ?? null);
-      setCustomerId(existingDraft?.customerId ?? null);
+      setSelectedCustomer(existingDraft?.selectedCustomer ?? fallbackCust);
+      setCustomerId(existingDraft?.customerId || initialCustomer?.id || null);
       setActiveLayaway(null);
       setSelectedLayawayId(existingDraft?.selectedLayawayId ?? null);
       setShowCreateNew(false);
       setDestinationWarehouseId(existingDraft?.destinationWarehouseId ?? "");
+      setExchangeSurplusHandling("favour_balance");
 
-      const maxAllowedDiscount = Math.round(totalValue * 0.10);
+      const maxAllowedDiscount = Math.max(0, Math.round(totalValue * 0.10));
       const initDiscount = Math.min(existingDraft?.discountAmount ?? 0, maxAllowedDiscount);
       const initDiscountReason = existingDraft?.discountReason ?? "";
       setDiscountAmount(initDiscount);
@@ -384,6 +411,10 @@ export function ExitCheckoutModal({
         setError("En un cambio debes marcar al menos un producto de salida y uno de retorno (cambio).");
         return;
       }
+      if (exchangeSurplus > 0 && exchangeSurplusHandling === "favour_balance" && !customerId) {
+        setError("Para abonar la diferencia a Saldo a Favor debes seleccionar o registrar al cliente.");
+        return;
+      }
     }
 
     if (discountAmount > maxDiscount) {
@@ -394,7 +425,7 @@ export function ExitCheckoutModal({
     }
 
     const paymentBreakdown: PaymentPart[] =
-      exitKind === "sale" || exitKind === "credit" || exitKind === "exchange"
+      (exitKind === "sale" || exitKind === "credit" || exitKind === "exchange") && netTotal > 0
         ? payments
             .filter((payment) => Number(String(payment.amount).replace(",", ".")) > 0)
             .map((payment) => ({
@@ -493,6 +524,8 @@ export function ExitCheckoutModal({
       receiptFilename: uploadedFilename,
       discountAmount: discountAmount > 0 ? discountAmount : 0,
       discountReason: discountAmount > 0 ? discountReason.trim() || null : null,
+      exchangeSurplusHandling:
+        exitKind === "exchange" && exchangeSurplus > 0 ? exchangeSurplusHandling : null,
     });
   }
 
@@ -742,9 +775,16 @@ export function ExitCheckoutModal({
           <div className="inv-checkout-customer">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem", flexWrap: "wrap", gap: "0.5rem" }}>
               <h3 className="inv-checkout-customer__title" style={{ margin: 0 }}>
-                Información del Cliente {(exitKind === "credit" || exitKind === "sale") && <span style={{ color: "#ef4444" }}>*</span>}
+                Información del Cliente{" "}
+                {(exitKind === "credit" ||
+                  exitKind === "sale" ||
+                  (exitKind === "exchange" && exchangeSurplus > 0 && exchangeSurplusHandling === "favour_balance")) && (
+                  <span style={{ color: "#ef4444" }}>*</span>
+                )}
               </h3>
-              {(exitKind === "credit" || exitKind === "sale") && (
+              {(exitKind === "credit" ||
+                exitKind === "sale" ||
+                (exitKind === "exchange" && exchangeSurplus > 0 && exchangeSurplusHandling === "favour_balance")) && (
                 <span
                   style={{
                     fontSize: "0.75rem",
@@ -1245,7 +1285,99 @@ export function ExitCheckoutModal({
         )}
 
         {/* Métodos de Pago o Abono Inicial o Excedente de Cambio */}
-        {exitKind === "exchange" && netTotal === 0 && (
+        {exitKind === "exchange" && exchangeSurplus > 0 && (
+          <div
+            style={{
+              padding: "14px",
+              background: "#fffbeb",
+              border: "1.5px solid #f59e0b",
+              borderRadius: "10px",
+              marginBottom: "1rem",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+              <span style={{ fontSize: "1.25rem" }}>💰</span>
+              <div>
+                <strong style={{ color: "#92400e", display: "block", fontSize: "0.95rem" }}>
+                  Diferencia a favor del cliente: {formatMoney(exchangeSurplus)}
+                </strong>
+                <span style={{ fontSize: "0.82rem", color: "#b45309" }}>
+                  La prenda nueva vale menos que la prenda devuelta. Elige cómo manejar este saldo:
+                </span>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px", marginTop: "10px" }}>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "10px",
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  border: exchangeSurplusHandling === "favour_balance" ? "2px solid #059669" : "1px solid #cbd5e1",
+                  background: exchangeSurplusHandling === "favour_balance" ? "#ecfdf5" : "#ffffff",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="exchangeSurplusHandling"
+                  value="favour_balance"
+                  checked={exchangeSurplusHandling === "favour_balance"}
+                  onChange={() => {
+                    setExchangeSurplusHandling("favour_balance");
+                    setError(null);
+                  }}
+                  style={{ marginTop: "3px" }}
+                />
+                <div>
+                  <strong style={{ display: "block", fontSize: "0.88rem", color: "#065f46" }}>
+                    Dejar como Saldo a Favor del cliente
+                  </strong>
+                  <span style={{ fontSize: "0.78rem", color: "#047857" }}>
+                    Se suma {formatMoney(exchangeSurplus)} a la billetera del cliente en esta sede para futuras compras (no afecta el efectivo de caja).
+                  </span>
+                </div>
+              </label>
+
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "10px",
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  border: exchangeSurplusHandling === "cash_refund" ? "2px solid #d97706" : "1px solid #cbd5e1",
+                  background: exchangeSurplusHandling === "cash_refund" ? "#fef3c7" : "#ffffff",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="exchangeSurplusHandling"
+                  value="cash_refund"
+                  checked={exchangeSurplusHandling === "cash_refund"}
+                  onChange={() => {
+                    setExchangeSurplusHandling("cash_refund");
+                    setError(null);
+                  }}
+                  style={{ marginTop: "3px" }}
+                />
+                <div>
+                  <strong style={{ display: "block", fontSize: "0.88rem", color: "#92400e" }}>
+                    Devolver dinero al cliente (descontar de caja)
+                  </strong>
+                  <span style={{ fontSize: "0.78rem", color: "#b45309" }}>
+                    Registra automáticamente un egreso de caja en efectivo por {formatMoney(exchangeSurplus)} para cuadrar el cierre diario.
+                  </span>
+                </div>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {exitKind === "exchange" && subtotal === 0 && (
           <div
             style={{
               padding: "12px 14px",
@@ -1480,7 +1612,17 @@ export function ExitCheckoutModal({
           >
             <strong>Cambio de Producto:</strong> La prenda de retorno reingresa al inventario del almacén y la prenda nueva sale del almacén.
             <div style={{ marginTop: "4px" }}>
-              Valor neto / Excedente: <strong>{formatMoney(exchangeReady?.netValue ?? totalValue)}</strong>
+              {exchangeSurplus > 0 ? (
+                <>
+                  Diferencia a favor del cliente:{" "}
+                  <strong style={{ color: "#059669" }}>+{formatMoney(exchangeSurplus)}</strong>{" "}
+                  ({exchangeSurplusHandling === "cash_refund" ? "Se devuelve en efectivo de caja" : "Se abona a Saldo a Favor"})
+                </>
+              ) : (
+                <>
+                  Valor neto / Excedente a cobrar: <strong>{formatMoney(exchangeReady?.netValue ?? totalValue)}</strong>
+                </>
+              )}
             </div>
           </div>
         ) : null}

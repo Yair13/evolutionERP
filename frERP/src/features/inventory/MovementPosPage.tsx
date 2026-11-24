@@ -360,7 +360,7 @@ export function MovementPosPage({ mode }: Props) {
 
   function handleApplyExcess(newExcessVal: number) {
     if (!returnLine) return;
-    const excess = Math.max(0, Math.round(newExcessVal));
+    const excess = Math.round(newExcessVal);
     const newReturnUnitPrice = Math.max(0, Math.round((outboundTotal - excess) / returnLine.quantity));
     setCart((prev) =>
       prev.map((l) => (l.isReturn ? { ...l, unitSalePrice: newReturnUnitPrice } : l))
@@ -1042,6 +1042,7 @@ export function MovementPosPage({ mode }: Props) {
         receiptFilename: data.receiptFilename || null,
         discountAmount: data.discountAmount || 0,
         discountReason: data.discountReason || null,
+        exchangeSurplusHandling: data.exchangeSurplusHandling || null,
       });
       setCart([]);
       setNotes("");
@@ -1471,20 +1472,25 @@ export function MovementPosPage({ mode }: Props) {
                       <span style={{ fontSize: "12px", color: "#475569" }}>
                         Prendas nuevas (salen): <strong>{formatMoney(outboundTotal)}</strong> &middot; Devolución (entra): <strong>- {formatMoney(returnTotal)}</strong>
                       </span>
-                      <div style={{ fontSize: "14px", fontWeight: 700, color: "#0f766e", marginTop: "2px" }}>
-                        Excedente calculado: {formatMoney(calculatedExcess ?? 0)}
-                      </div>
+                      {(calculatedExcess ?? 0) < 0 ? (
+                        <div style={{ fontSize: "14px", fontWeight: 700, color: "#b45309", marginTop: "2px" }}>
+                          Diferencia a favor del cliente: {formatMoney(Math.abs(calculatedExcess ?? 0))} (podrás devolver dinero o dejarlo en saldo a favor)
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: "14px", fontWeight: 700, color: "#0f766e", marginTop: "2px" }}>
+                          Excedente a cobrar al cliente: {formatMoney(calculatedExcess ?? 0)}
+                        </div>
+                      )}
                     </div>
 
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                       <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 700, color: "#1e293b" }}>
-                        <span>Valor de excedente:</span>
+                        <span>Diferencia / Excedente:</span>
                         <div style={{ position: "relative", display: "inline-block" }}>
                           <span style={{ position: "absolute", left: "8px", top: "50%", transform: "translateY(-50%)", color: "#64748b", fontWeight: 700 }}>$</span>
                           <input
                             type="number"
-                            min={0}
-                            value={calculatedExcess !== null ? Math.max(0, calculatedExcess) : ""}
+                            value={calculatedExcess !== null ? calculatedExcess : ""}
                             onChange={(e) => {
                               const val = Number(e.target.value);
                               if (!isNaN(val)) {
@@ -1494,11 +1500,11 @@ export function MovementPosPage({ mode }: Props) {
                             style={{
                               padding: "6px 8px 6px 20px",
                               borderRadius: "6px",
-                              border: "1px solid #0f766e",
+                              border: `1px solid ${(calculatedExcess ?? 0) < 0 ? "#d97706" : "#0f766e"}`,
                               fontWeight: 700,
                               fontSize: "14px",
-                              width: "110px",
-                              color: "#0f766e",
+                              width: "120px",
+                              color: (calculatedExcess ?? 0) < 0 ? "#b45309" : "#0f766e",
                             }}
                           />
                         </div>
@@ -1927,7 +1933,9 @@ export function MovementPosPage({ mode }: Props) {
                 ? "Finalizar salida"
                 : cart.length === 0
                   ? "Cobrar venta"
-                  : `Cobrar · ${formatMoney(cartTotalValue)}`}
+                  : exitKind === "exchange" && cartTotalValue < 0
+                    ? `Finalizar cambio · A favor ${formatMoney(Math.abs(cartTotalValue))}`
+                    : `Cobrar · ${formatMoney(cartTotalValue)}`}
           </button>
         </aside>
       </div>
@@ -2004,6 +2012,18 @@ export function MovementPosPage({ mode }: Props) {
           totalValue={cartTotalValue}
           confirming={confirming}
           initialRelatedInvoiceNumber={originInvoiceNumber}
+          initialCustomer={
+            exchangeDoc
+              ? {
+                  id: exchangeDoc.customerId ?? null,
+                  name: exchangeDoc.customerName ?? null,
+                  taxId: exchangeDoc.customerTaxId ?? null,
+                  phone: exchangeDoc.customerPhone ?? null,
+                  address: exchangeDoc.customerAddress ?? null,
+                  creditBalance: exchangeDoc.customerCreditBalance ?? 0,
+                }
+              : null
+          }
           onClose={() => {
             if (!confirming) {
               if (warehouseId) clearCheckoutDraft(warehouseId);
