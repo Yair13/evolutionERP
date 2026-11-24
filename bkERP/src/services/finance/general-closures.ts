@@ -309,7 +309,7 @@ export async function getGeneralClosureData(
            END
          ) AS p
     WHERE d.status = 'completed'
-      AND d.doc_type IN ('exit', 'sale')
+      AND d.doc_type IN ('exit', 'sale', 'warranty')
       ${whFilterDoc}
       ${timeFilterDoc}
     GROUP BY LOWER(TRIM(p->>'method'))

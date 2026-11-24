@@ -193,7 +193,7 @@ async function getReceiptAuditItemsBetween(
            END
          ) AS p
     WHERE d.status = 'completed'
-      AND d.doc_type IN ('exit', 'sale')
+      AND d.doc_type IN ('exit', 'sale', 'warranty')
       AND d.warehouse_id = $1::uuid
       ${fromTime ? `AND COALESCE(d.completed_at, d.created_at) > '${fromTime}'::timestamptz` : ""}
       AND COALESCE(d.completed_at, d.created_at) <= '${toTime}'::timestamptz
@@ -606,7 +606,7 @@ async function getDiscountAuditItemsBetween(
     LEFT JOIN customers c ON c.id = d.customer_id
     LEFT JOIN users u ON u.id = d.created_by
     WHERE d.status = 'completed'
-      AND d.doc_type IN ('exit', 'sale')
+      AND d.doc_type IN ('exit', 'sale', 'warranty')
       AND d.warehouse_id = $1::uuid
       ${fromTime ? `AND COALESCE(d.completed_at, d.created_at) > '${fromTime}'::timestamptz` : ""}
       AND COALESCE(d.completed_at, d.created_at) <= '${toTime}'::timestamptz
@@ -675,7 +675,7 @@ async function calculateMovementsBetween(
            END
          ) AS p
     WHERE d.status = 'completed'
-      AND d.doc_type IN ('exit', 'sale')
+      AND d.doc_type IN ('exit', 'sale', 'warranty')
       AND d.warehouse_id = $1::uuid
       ${fromTime ? `AND COALESCE(d.completed_at, d.created_at) > '${fromTime}'::timestamptz` : ""}
       AND COALESCE(d.completed_at, d.created_at) <= '${toTime}'::timestamptz
@@ -829,7 +829,7 @@ async function calculateMovementsBetween(
            END
          ) AS p
     WHERE d.status = 'completed'
-      AND d.doc_type IN ('exit', 'sale')
+      AND d.doc_type IN ('exit', 'sale', 'warranty')
       AND d.warehouse_id = $1::uuid
       ${fromTime ? `AND COALESCE(d.completed_at, d.created_at) > '${fromTime}'::timestamptz` : ""}
       AND COALESCE(d.completed_at, d.created_at) <= '${toTime}'::timestamptz

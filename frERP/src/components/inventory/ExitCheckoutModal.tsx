@@ -406,12 +406,16 @@ export function ExitCheckoutModal({
       setError("Indica el número de factura de la salida original para el cambio.");
       return;
     }
-    if (exitKind === "exchange") {
+    if (exitKind === "exchange" || exitKind === "warranty") {
       if (!exchangeReady?.hasOutbound || !exchangeReady?.hasReturn) {
-        setError("En un cambio debes marcar al menos un producto de salida y uno de retorno (cambio).");
+        setError(
+          exitKind === "warranty"
+            ? "En una garantía debes seleccionar el producto que entra por garantía de la factura original y el producto nuevo que sale."
+            : "En un cambio debes marcar al menos un producto de salida y uno de retorno (cambio)."
+        );
         return;
       }
-      if (exchangeSurplus > 0 && exchangeSurplusHandling === "favour_balance" && !customerId) {
+      if (exitKind === "exchange" && exchangeSurplus > 0 && exchangeSurplusHandling === "favour_balance" && !customerId) {
         setError("Para abonar la diferencia a Saldo a Favor debes seleccionar o registrar al cliente.");
         return;
       }
@@ -425,7 +429,7 @@ export function ExitCheckoutModal({
     }
 
     const paymentBreakdown: PaymentPart[] =
-      (exitKind === "sale" || exitKind === "credit" || exitKind === "exchange") && netTotal > 0
+      (exitKind === "sale" || exitKind === "credit" || exitKind === "exchange" || exitKind === "warranty") && netTotal > 0
         ? payments
             .filter((payment) => Number(String(payment.amount).replace(",", ".")) > 0)
             .map((payment) => ({
@@ -434,7 +438,7 @@ export function ExitCheckoutModal({
             }))
         : [];
 
-    if (exitKind === "sale" || exitKind === "exchange") {
+    if (exitKind === "sale" || exitKind === "exchange" || exitKind === "warranty") {
       if (netTotal > 0) {
         if (
           paymentBreakdown.length === 0 ||
@@ -443,7 +447,7 @@ export function ExitCheckoutModal({
           )
         ) {
           setError(
-            exitKind === "exchange"
+            exitKind === "exchange" || exitKind === "warranty"
               ? "Cada método de pago debe tener un valor mayor que $0 para cubrir el excedente."
               : "Cada método de pago debe tener un valor mayor que $0."
           );
@@ -453,7 +457,7 @@ export function ExitCheckoutModal({
         if (paidTotal + 0.01 < netTotal) {
           const difference = netTotal - paidTotal;
           setError(
-            exitKind === "exchange"
+            exitKind === "exchange" || exitKind === "warranty"
               ? `Faltan ${formatMoney(difference)} por asignar en los métodos de pago para cubrir el excedente.`
               : `Faltan ${formatMoney(difference)} por asignar en los métodos de pago.`
           );
@@ -770,8 +774,8 @@ export function ExitCheckoutModal({
           </fieldset>
         )}
 
-        {/* Clientes para Ventas / Crédito / Cambio */}
-        {(exitKind === "sale" || exitKind === "credit" || exitKind === "exchange") && (
+        {/* Clientes para Ventas / Crédito / Cambio / Garantía */}
+        {(exitKind === "sale" || exitKind === "credit" || exitKind === "exchange" || exitKind === "warranty") && (
           <div className="inv-checkout-customer">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem", flexWrap: "wrap", gap: "0.5rem" }}>
               <h3 className="inv-checkout-customer__title" style={{ margin: 0 }}>
@@ -1377,7 +1381,7 @@ export function ExitCheckoutModal({
           </div>
         )}
 
-        {exitKind === "exchange" && subtotal === 0 && (
+        {(exitKind === "exchange" || exitKind === "warranty") && subtotal === 0 && (
           <div
             style={{
               padding: "12px 14px",
@@ -1390,29 +1394,37 @@ export function ExitCheckoutModal({
               marginBottom: "1rem",
             }}
           >
-            <span style={{ fontSize: "1.2rem" }}>⚖️</span>
+            <span style={{ fontSize: "1.2rem" }}>{exitKind === "warranty" ? "🛡️" : "⚖️"}</span>
             <div>
-              <strong style={{ color: "#166534", display: "block" }}>Cambio mano a mano (Excedente: $0)</strong>
+              <strong style={{ color: "#166534", display: "block" }}>
+                {exitKind === "warranty"
+                  ? "Garantía sin excedente (Total a cobrar: $0)"
+                  : "Cambio mano a mano (Excedente: $0)"}
+              </strong>
               <span style={{ fontSize: "0.85rem", color: "#15803d" }}>
-                El valor de la prenda devuelta cubre exactamente la prenda entregada. No se requiere pago adicional.
+                {exitKind === "warranty"
+                  ? "El valor reconocido del producto en garantía cubre el producto entregado. En garantía no aplica devolución de dinero."
+                  : "El valor de la prenda devuelta cubre exactamente la prenda entregada. No se requiere pago adicional."}
               </span>
             </div>
           </div>
         )}
 
-        {(exitKind === "sale" || exitKind === "credit" || (exitKind === "exchange" && netTotal > 0)) && (
+        {(exitKind === "sale" ||
+          exitKind === "credit" ||
+          ((exitKind === "exchange" || exitKind === "warranty") && netTotal > 0)) && (
           <section className="inv-checkout-payments" aria-labelledby="payment-methods-title">
             <div className="inv-checkout-payments__head">
               <div>
                 <h3 id="payment-methods-title">
-                  {exitKind === "exchange"
+                  {exitKind === "exchange" || exitKind === "warranty"
                     ? "Método de pago del excedente"
                     : exitKind === "credit"
                     ? "Abono inicial (opcional)"
                     : "Métodos de pago"}
                 </h3>
                 <p>
-                  {exitKind === "exchange"
+                  {exitKind === "exchange" || exitKind === "warranty"
                     ? `Registra cómo cancela el cliente el valor del excedente (${formatMoney(netTotal)}).`
                     : exitKind === "credit"
                     ? "Si el cliente abona una parte hoy, regístralo aquí. El saldo restante generará la Cuenta por Cobrar."
@@ -1598,7 +1610,7 @@ export function ExitCheckoutModal({
           </label>
         ) : null}
 
-        {exitKind === "exchange" ? (
+        {exitKind === "exchange" || exitKind === "warranty" ? (
           <div
             style={{
               padding: "10px 12px",
@@ -1610,20 +1622,31 @@ export function ExitCheckoutModal({
               color: "#0f766e",
             }}
           >
-            <strong>Cambio de Producto:</strong> La prenda de retorno reingresa al inventario del almacén y la prenda nueva sale del almacén.
-            <div style={{ marginTop: "4px" }}>
-              {exchangeSurplus > 0 ? (
-                <>
-                  Diferencia a favor del cliente:{" "}
-                  <strong style={{ color: "#059669" }}>+{formatMoney(exchangeSurplus)}</strong>{" "}
-                  ({exchangeSurplusHandling === "cash_refund" ? "Se devuelve en efectivo de caja" : "Se abona a Saldo a Favor"})
-                </>
-              ) : (
-                <>
-                  Valor neto / Excedente a cobrar: <strong>{formatMoney(exchangeReady?.netValue ?? totalValue)}</strong>
-                </>
-              )}
-            </div>
+            {exitKind === "warranty" ? (
+              <>
+                <strong>Salida por Garantía:</strong> El producto recibido en garantía queda registrado pero <strong>no suma al stock disponible</strong>, y el producto nuevo entregado se descuenta del stock.
+                <div style={{ marginTop: "4px" }}>
+                  Excedente a cobrar: <strong>{formatMoney(Math.max(0, exchangeReady?.netValue ?? totalValue))}</strong> (En garantía no aplica devolución de dinero).
+                </div>
+              </>
+            ) : (
+              <>
+                <strong>Cambio de Producto:</strong> La prenda de retorno reingresa al inventario del almacén y la prenda nueva sale del almacén.
+                <div style={{ marginTop: "4px" }}>
+                  {exchangeSurplus > 0 ? (
+                    <>
+                      Diferencia a favor del cliente:{" "}
+                      <strong style={{ color: "#059669" }}>+{formatMoney(exchangeSurplus)}</strong>{" "}
+                      ({exchangeSurplusHandling === "cash_refund" ? "Se devuelve en efectivo de caja" : "Se abona a Saldo a Favor"})
+                    </>
+                  ) : (
+                    <>
+                      Valor neto / Excedente a cobrar: <strong>{formatMoney(exchangeReady?.netValue ?? totalValue)}</strong>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         ) : null}
 

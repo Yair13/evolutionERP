@@ -176,6 +176,11 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
     doc.exitKind === "exchange" ||
     doc.metadata?.exitKind === "exchange" ||
     kind === "Cambio";
+  const isWarranty =
+    doc.docType === "warranty" ||
+    doc.exitKind === "warranty" ||
+    doc.metadata?.exitKind === "warranty" ||
+    kind === "Garantía";
   const title = isAdjustment
     ? "Comprobante de ajuste de inventario"
     : isOp
@@ -186,11 +191,13 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
           ? "Comprobante de entrada"
           : isCredit
             ? "Comprobante de salida · Venta a crédito"
-            : isExchange
-              ? "Comprobante de cambio de producto"
-              : internalExit
-                ? "Comprobante de traslado"
-                : "Comprobante de salida";
+            : isWarranty
+              ? "Comprobante de salida · Garantía"
+              : isExchange
+                ? "Comprobante de cambio de producto"
+                : internalExit
+                  ? "Comprobante de traslado"
+                  : "Comprobante de salida";
   const voucherDocType = isAdjustment
     ? "COMPROBANTE DE AJUSTE"
     : isEntry
@@ -404,7 +411,11 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                 </span>
                 <span className="sale-voucher-item-name">
                   {line.productName}
-                  {isReturnLine ? " (Retorno / Entrada almacén)" : ""}
+                  {isReturnLine
+                    ? isWarranty
+                      ? " (Recibido por garantía · no suma al stock)"
+                      : " (Retorno / Entrada almacén)"
+                    : ""}
                 </span>
               </div>
               <div className="sale-voucher-item-sub">
@@ -469,7 +480,7 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
             <span className="sale-voucher-total-label">
               {isExchange && Number(doc.metadata?.exchangeSurplusAmount) > 0
                 ? "SALDO A FAVOR CLIENTE:"
-                : isExchange
+                : isExchange || isWarranty
                   ? "TOTAL EXCEDENTE:"
                   : discountAmount > 0
                     ? "TOTAL NETO:"
@@ -873,7 +884,11 @@ export function DocumentInvoicePrint({ document: doc, initialFormat = "half_lett
                       <td>{line.referenceCode}</td>
                       <td>
                         {line.productName}
-                        {isReturnLine ? " (Retorno / Entrada almacén)" : ""}
+                        {isReturnLine
+                          ? isWarranty
+                            ? " (Recibido por garantía · no suma al stock)"
+                            : " (Retorno / Entrada almacén)"
+                          : ""}
                       </td>
                       {isAdjustment ? (
                         <td>

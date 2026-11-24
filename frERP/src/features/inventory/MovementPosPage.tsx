@@ -281,10 +281,10 @@ export function MovementPosPage({ mode }: Props) {
     return m;
   }, [cart]);
 
-  const cartTotalValue = useMemo(
-    () => cart.reduce((s, l) => s + (l.isReturn ? -l.quantity : l.quantity) * l.unitSalePrice, 0),
-    [cart]
-  );
+  const cartTotalValue = useMemo(() => {
+    const raw = cart.reduce((s, l) => s + (l.isReturn ? -l.quantity : l.quantity) * l.unitSalePrice, 0);
+    return exitKind === "warranty" ? Math.max(0, raw) : raw;
+  }, [cart, exitKind]);
 
   const cartTotalUnits = useMemo(() => cart.reduce((s, l) => s + l.quantity, 0), [cart]);
 
@@ -299,10 +299,11 @@ export function MovementPosPage({ mode }: Props) {
     () => (returnLine ? returnLine.quantity * returnLine.unitSalePrice : 0),
     [returnLine]
   );
-  const calculatedExcess = useMemo(
-    () => (outboundLines.length > 0 && returnLine ? outboundTotal - returnTotal : null),
-    [outboundLines.length, returnLine, outboundTotal, returnTotal]
-  );
+  const calculatedExcess = useMemo(() => {
+    if (outboundLines.length === 0 || !returnLine) return null;
+    const rawDiff = outboundTotal - returnTotal;
+    return exitKind === "warranty" ? Math.max(0, rawDiff) : rawDiff;
+  }, [outboundLines.length, returnLine, outboundTotal, returnTotal, exitKind]);
 
   async function handleSearchExchangeInvoice() {
     const code = exchangeInvoiceCode.trim();
@@ -360,7 +361,8 @@ export function MovementPosPage({ mode }: Props) {
 
   function handleApplyExcess(newExcessVal: number) {
     if (!returnLine) return;
-    const excess = Math.round(newExcessVal);
+    const rawExcess = Math.round(newExcessVal);
+    const excess = exitKind === "warranty" ? Math.max(0, rawExcess) : rawExcess;
     const newReturnUnitPrice = Math.max(0, Math.round((outboundTotal - excess) / returnLine.quantity));
     setCart((prev) =>
       prev.map((l) => (l.isReturn ? { ...l, unitSalePrice: newReturnUnitPrice } : l))
@@ -377,11 +379,18 @@ export function MovementPosPage({ mode }: Props) {
   }
 
   const applyLocalStockDelta = useCallback(
-    (lines: { productId: string; quantity: number; isReturn?: boolean }[], direction: "entry" | "exit") => {
+    (
+      lines: { productId: string; quantity: number; isReturn?: boolean }[],
+      direction: "entry" | "exit",
+      currentExitKind?: ExitKind
+    ) => {
       setProducts((prev) =>
         prev.map((p) => {
           const line = lines.find((l) => l.productId === p.id);
           if (!line) return p;
+          if (direction === "exit" && currentExitKind === "warranty" && line.isReturn) {
+            return p;
+          }
           const signed =
             direction === "entry"
               ? line.quantity
@@ -1061,7 +1070,8 @@ export function MovementPosPage({ mode }: Props) {
           quantity: l.quantity,
           isReturn: l.isReturn,
         })),
-        "exit"
+        "exit",
+        data.exitKind
       );
       void loadProducts({ silent: true });
     } catch (err) {
@@ -1259,7 +1269,7 @@ export function MovementPosPage({ mode }: Props) {
                 const next = e.target.value as ExitKind;
                 setExitKind(next);
                 setError(null);
-                if (next !== "exchange") {
+                if (next !== "exchange" && next !== "warranty") {
                   setCart((prev) => prev.filter((l) => !l.isReturn));
                 }
               }}
@@ -1311,15 +1321,21 @@ export function MovementPosPage({ mode }: Props) {
         </div>
       ) : null}
 
-      {!isEntry && exitKind === "exchange" ? (
+      {!isEntry && (exitKind === "exchange" || exitKind === "warranty") ? (
         <div className="inv-pos-exchange-panel">
           <div className="inv-pos-exchange-panel__head">
             <div className="inv-pos-exchange-panel__title">
               <ArrowLeftRight size={18} />
-              <span>Venta de Cambio de Producto</span>
+              <span>
+                {exitKind === "warranty"
+                  ? "Salida por Garantía de Producto"
+                  : "Venta de Cambio de Producto"}
+              </span>
             </div>
             <span style={{ fontSize: "12px", color: "#0f766e", fontWeight: 600 }}>
-              1. Factura original &rarr; 2. Prenda a devolver (entra) &rarr; 3. Prenda nueva (sale)
+              {exitKind === "warranty"
+                ? "1. Factura original → 2. Producto en garantía (no suma al stock) → 3. Producto nuevo (sale)"
+                : "1. Factura original → 2. Prenda a devolver (entra) → 3. Prenda nueva (sale)"}
             </span>
           </div>
 
@@ -1358,7 +1374,9 @@ export function MovementPosPage({ mode }: Props) {
                 </span>
               ) : (
                 <span className="inv-pos-config__note" style={{ display: "block", marginTop: "6px" }}>
-                  Ingresa el código que aparece en el comprobante del cliente para cargar las prendas vendidas.
+                  {exitKind === "warranty"
+                    ? "Ingresa el código de la factura original del cliente para seleccionar el producto que entra por garantía."
+                    : "Ingresa el código que aparece en el comprobante del cliente para cargar las prendas vendidas."}
                 </span>
               )}
             </div>
@@ -1388,7 +1406,9 @@ export function MovementPosPage({ mode }: Props) {
 
               <div className="inv-pos-exchange-panel__products" style={{ marginTop: "10px" }}>
                 <span style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
-                  Selecciona la prenda de esta factura que se va a devolver (ingresará al inventario del almacén):
+                  {exitKind === "warranty"
+                    ? "Selecciona el producto de esta factura que ingresa por garantía (NO sumará al stock disponible del almacén):"
+                    : "Selecciona la prenda de esta factura que se va a devolver (ingresará al inventario del almacén):"}
                 </span>
                 <div className="inv-pos-exchange-items">
                   {exchangeDoc.lines
@@ -1434,7 +1454,11 @@ export function MovementPosPage({ mode }: Props) {
                               }
                             }}
                           >
-                            {isSelected ? "✓ Seleccionada" : "Devolver"}
+                            {isSelected
+                              ? "✓ Seleccionada"
+                              : exitKind === "warranty"
+                                ? "Recibir en garantía"
+                                : "Devolver"}
                           </button>
                         </div>
                       );
@@ -1449,10 +1473,16 @@ export function MovementPosPage({ mode }: Props) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
                 <div>
                   <strong style={{ color: "#15803d", fontSize: "13px" }}>
-                    ↩ Prenda que ingresa en retorno: {returnLine.name}
+                    {exitKind === "warranty"
+                      ? `🛡️ Producto recibido por garantía: ${returnLine.name}`
+                      : `↩ Prenda que ingresa en retorno: ${returnLine.name}`}
                   </strong>
                   <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
-                    Valor reconocido por la prenda: <strong>{formatMoney(returnLine.unitSalePrice)}</strong> (ingresará al almacén)
+                    Valor reconocido:{" "}
+                    <strong>{formatMoney(returnLine.unitSalePrice)}</strong>{" "}
+                    {exitKind === "warranty"
+                      ? "(queda registrado en la garantía · NO suma al stock disponible)"
+                      : "(ingresará al almacén)"}
                   </div>
                 </div>
                 <button
@@ -1461,7 +1491,7 @@ export function MovementPosPage({ mode }: Props) {
                   style={{ fontSize: "11px", padding: "2px 6px", color: "#dc2626" }}
                   onClick={handleRemoveReturnProduct}
                 >
-                  Quitar devolución
+                  {exitKind === "warranty" ? "Quitar garantía" : "Quitar devolución"}
                 </button>
               </div>
 
@@ -1470,11 +1500,17 @@ export function MovementPosPage({ mode }: Props) {
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
                     <div>
                       <span style={{ fontSize: "12px", color: "#475569" }}>
-                        Prendas nuevas (salen): <strong>{formatMoney(outboundTotal)}</strong> &middot; Devolución (entra): <strong>- {formatMoney(returnTotal)}</strong>
+                        Producto nuevo (sale): <strong>{formatMoney(outboundTotal)}</strong> &middot;{" "}
+                        {exitKind === "warranty" ? "Valor garantía:" : "Devolución (entra):"}{" "}
+                        <strong>- {formatMoney(returnTotal)}</strong>
                       </span>
-                      {(calculatedExcess ?? 0) < 0 ? (
+                      {exitKind === "exchange" && (calculatedExcess ?? 0) < 0 ? (
                         <div style={{ fontSize: "14px", fontWeight: 700, color: "#b45309", marginTop: "2px" }}>
                           Diferencia a favor del cliente: {formatMoney(Math.abs(calculatedExcess ?? 0))} (podrás devolver dinero o dejarlo en saldo a favor)
+                        </div>
+                      ) : exitKind === "warranty" && outboundTotal <= returnTotal ? (
+                        <div style={{ fontSize: "14px", fontWeight: 700, color: "#15803d", marginTop: "2px" }}>
+                          Excedente a cobrar: $0 (Cubierto 100% por garantía · En garantía no aplica devolución de dinero)
                         </div>
                       ) : (
                         <div style={{ fontSize: "14px", fontWeight: 700, color: "#0f766e", marginTop: "2px" }}>
@@ -1485,11 +1521,12 @@ export function MovementPosPage({ mode }: Props) {
 
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                       <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 700, color: "#1e293b" }}>
-                        <span>Diferencia / Excedente:</span>
+                        <span>{exitKind === "warranty" ? "Excedente a cobrar:" : "Diferencia / Excedente:"}</span>
                         <div style={{ position: "relative", display: "inline-block" }}>
                           <span style={{ position: "absolute", left: "8px", top: "50%", transform: "translateY(-50%)", color: "#64748b", fontWeight: 700 }}>$</span>
                           <input
                             type="number"
+                            min={exitKind === "warranty" ? 0 : undefined}
                             value={calculatedExcess !== null ? calculatedExcess : ""}
                             onChange={(e) => {
                               const val = Number(e.target.value);
@@ -1514,16 +1551,16 @@ export function MovementPosPage({ mode }: Props) {
                         className="inv-btn inv-btn--ghost"
                         style={{ fontSize: "11px", padding: "4px 8px" }}
                         onClick={() => handleApplyExcess(0)}
-                        title="Ajustar prenda devuelta para que el excedente a pagar sea $0"
+                        title="Ajustar valor reconocido para que el excedente a pagar sea $0"
                       >
-                        Mano a mano ($0)
+                        {exitKind === "warranty" ? "Sin excedente ($0)" : "Mano a mano ($0)"}
                       </button>
                       <button
                         type="button"
                         className="inv-btn inv-btn--ghost"
                         style={{ fontSize: "11px", padding: "4px 8px" }}
                         onClick={handleResetOriginalInvoicePrice}
-                        title="Restablecer el valor de la prenda devuelta a su precio original de factura"
+                        title="Restablecer el valor de la prenda a su precio original de factura"
                       >
                         <RotateCcw size={12} style={{ marginRight: "3px" }} />
                         Precio original
@@ -1533,7 +1570,9 @@ export function MovementPosPage({ mode }: Props) {
                 </div>
               ) : (
                 <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#0f766e", fontWeight: 600 }}>
-                  👉 Ahora selecciona o escanea con la pistola la prenda nueva del catálogo que el cliente se va a llevar (saldrá del almacén).
+                  {exitKind === "warranty"
+                    ? "👉 Ahora selecciona o escanea con la pistola el producto nuevo del catálogo que se entregará por garantía (saldrá del stock del almacén)."
+                    : "👉 Ahora selecciona o escanea con la pistola la prenda nueva del catálogo que el cliente se va a llevar (saldrá del almacén)."}
                 </p>
               )}
             </div>

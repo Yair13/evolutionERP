@@ -3366,7 +3366,7 @@ export async function getPaymentsCashSummary(
            END
          ) AS p
     WHERE d.status = 'completed'
-      AND d.doc_type IN ('exit', 'sale')
+      AND d.doc_type IN ('exit', 'sale', 'warranty')
       ${whDocFilter}
       ${dateDocFilter}
     GROUP BY LOWER(TRIM(p->>'method'))
@@ -3504,7 +3504,7 @@ export async function getPaymentsCashSummary(
       END
     ) AS p
     WHERE d.status = 'completed'
-      AND d.doc_type IN ('exit', 'sale')
+      AND d.doc_type IN ('exit', 'sale', 'warranty')
       ${whDocFilter}
       ${dateDocFilter}
   `;
@@ -3802,7 +3802,7 @@ export async function getPaymentsCashSummary(
     LEFT JOIN customers c ON c.id = d.customer_id
     LEFT JOIN users u ON u.id = d.created_by
     WHERE d.status = 'completed'
-      AND d.doc_type IN ('exit', 'sale')
+      AND d.doc_type IN ('exit', 'sale', 'warranty')
       AND COALESCE(NULLIF(d.discount_amount, 0), NULLIF(NULLIF(TRIM(d.metadata->>'discountAmount'), '')::numeric, 0), 0) > 0
       ${whDocFilter}
       ${dateDocFilter}

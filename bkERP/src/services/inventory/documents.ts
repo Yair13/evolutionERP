@@ -804,7 +804,7 @@ export async function confirmExitDocument(
     }
   }
 
-  if (exitKind === "exchange") {
+  if (exitKind === "exchange" || exitKind === "warranty") {
     const hasOut = cleaned.some((l) => !l.isReturn);
     const hasIn = cleaned.some((l) => l.isReturn);
     if (!hasOut || !hasIn) {
@@ -903,11 +903,11 @@ export async function confirmExitDocument(
       });
     }
 
-    const initialPaidTotalForMeta = (exitKind === "credit" || exitKind === "sale" || exitKind === "exchange") && input.paymentBreakdown
+    const initialPaidTotalForMeta = (exitKind === "credit" || exitKind === "sale" || exitKind === "exchange" || exitKind === "warranty") && input.paymentBreakdown
       ? Math.round(input.paymentBreakdown.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) * 100) / 100
       : 0;
 
-    if (exitKind === "sale" || exitKind === "exchange") {
+    if (exitKind === "sale" || exitKind === "exchange" || exitKind === "warranty") {
       if (finalNetSaleTotal > 0 && initialPaidTotalForMeta + 0.01 < finalNetSaleTotal) {
         throw Object.assign(new Error("payment_total_mismatch"), {
           code: "payment_total_mismatch",
@@ -925,7 +925,7 @@ export async function confirmExitDocument(
     }
 
     const excessToFavourForMeta =
-      (exitKind === "sale" || exitKind === "credit" || exitKind === "exchange") && initialPaidTotalForMeta > finalNetSaleTotal
+      (exitKind === "sale" || exitKind === "credit" || exitKind === "exchange" || exitKind === "warranty") && initialPaidTotalForMeta > finalNetSaleTotal
         ? Math.max(0, Math.round((initialPaidTotalForMeta - finalNetSaleTotal) * 100) / 100)
         : 0;
 
@@ -946,7 +946,7 @@ export async function confirmExitDocument(
       productionOrderId: null,
       paymentMethod: input.paymentMethod || null,
       paymentBreakdown:
-        exitKind === "sale" || exitKind === "credit" || exitKind === "exchange" ? input.paymentBreakdown || null : null,
+        exitKind === "sale" || exitKind === "credit" || exitKind === "exchange" || exitKind === "warranty" ? input.paymentBreakdown || null : null,
       isCredit: exitKind === "credit",
       subtotalAmount: subtotal,
       discountAmount,
@@ -1063,7 +1063,9 @@ export async function confirmExitDocument(
       // no a cliente final: se registran sin valor de venta.
       const unitSale = needsDestination
         ? null
-        : resolveUnitSalePrice(line.unitSalePrice, Number(product.base_sale_price));
+        : line.isReturn
+          ? Math.max(0, Math.round(Number(line.unitSalePrice) || 0))
+          : resolveUnitSalePrice(line.unitSalePrice, Number(product.base_sale_price));
       const unitCost = includeCost ? Number(product.production_cost) : null;
       const lineQty = line.isReturn ? -line.quantity : line.quantity;
 
@@ -1077,32 +1079,36 @@ export async function confirmExitDocument(
         [documentId, line.productId, lineQty, unitCost, unitSale]
       );
 
-      let signedQty = -line.quantity;
-      let movType = movementType;
-      if (exitKind === "return" || line.isReturn) {
-        signedQty = line.quantity;
-        movType = "return_in";
-      }
+      // En Garantía, el producto recibido (line.isReturn) viene defectuoso/por garantía,
+      // por lo que NO se suma al stock disponible para venta de la sede.
+      if (!(exitKind === "warranty" && line.isReturn)) {
+        let signedQty = -line.quantity;
+        let movType = movementType;
+        if (exitKind === "return" || line.isReturn) {
+          signedQty = line.quantity;
+          movType = "return_in";
+        }
 
-      await client.query(
-        `
-        INSERT INTO stock_movements (
-          warehouse_id, product_id, movement_type, quantity, unit_cost, batch_id, created_by, notes, production_order_id
-        )
-        VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::uuid, $7::uuid, $8, $9::uuid)
-        `,
-        [
-          warehouseId,
-          line.productId,
-          movType,
-          signedQty,
-          unitCost,
-          documentId,
-          auth.userId,
-          notes?.trim() || null,
-          null,
-        ]
-      );
+        await client.query(
+          `
+          INSERT INTO stock_movements (
+            warehouse_id, product_id, movement_type, quantity, unit_cost, batch_id, created_by, notes, production_order_id
+          )
+          VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::uuid, $7::uuid, $8, $9::uuid)
+          `,
+          [
+            warehouseId,
+            line.productId,
+            movType,
+            signedQty,
+            unitCost,
+            documentId,
+            auth.userId,
+            notes?.trim() || null,
+            null,
+          ]
+        );
+      }
     }
 
     if (exitKind === "credit") {
@@ -1116,7 +1122,7 @@ export async function confirmExitDocument(
         notes: notes?.trim() || null,
         userId: auth.userId,
       });
-    } else if ((exitKind === "sale" || exitKind === "exchange") && input.paymentBreakdown) {
+    } else if ((exitKind === "sale" || exitKind === "exchange" || exitKind === "warranty") && input.paymentBreakdown) {
       for (const p of input.paymentBreakdown) {
         const pAmount = Math.round((Number(p.amount) || 0) * 100) / 100;
         if (p.method === "saldo_a_favor" && customerId) {
