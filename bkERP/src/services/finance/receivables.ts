@@ -698,7 +698,7 @@ export async function listAccountsReceivable(
   opts: {
     warehouseId?: string | null;
     allowedWarehouseIds?: string[] | null;
-    status?: "all" | "pending" | "open" | "partial" | "paid" | "cancelled" | "with_favour";
+    status?: "all" | "pending" | "open" | "partial" | "paid" | "cancelled" | "with_favour" | "with_payments";
     customerId?: string | null;
     dateFrom?: string | null;
     dateTo?: string | null;
@@ -719,28 +719,56 @@ export async function listAccountsReceivable(
     countWithCreditBalance: number;
   };
 }> {
-  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
   const offset = Math.max(opts.offset ?? 0, 0);
 
-  const conditions: string[] = ["1=1"];
-  const params: unknown[] = [];
+  const baseConditions: string[] = ["1=1"];
+  const baseParams: unknown[] = [];
 
   if (opts.warehouseId) {
-    params.push(opts.warehouseId);
-    conditions.push(`ar.warehouse_id = $${params.length}::uuid`);
+    baseParams.push(opts.warehouseId);
+    baseConditions.push(`ar.warehouse_id = $${baseParams.length}::uuid`);
   } else if (opts.allowedWarehouseIds && opts.allowedWarehouseIds.length > 0) {
-    params.push(opts.allowedWarehouseIds);
-    conditions.push(`ar.warehouse_id = ANY($${params.length}::uuid[])`);
+    baseParams.push(opts.allowedWarehouseIds);
+    baseConditions.push(`ar.warehouse_id = ANY($${baseParams.length}::uuid[])`);
   }
 
   if (opts.customerId) {
-    params.push(opts.customerId);
-    conditions.push(`ar.customer_id = $${params.length}::uuid`);
+    baseParams.push(opts.customerId);
+    baseConditions.push(`ar.customer_id = $${baseParams.length}::uuid`);
   }
+
+  if (opts.dateFrom) {
+    baseParams.push(opts.dateFrom);
+    baseConditions.push(`ar.created_at::date >= $${baseParams.length}::date`);
+  }
+
+  if (opts.dateTo) {
+    baseParams.push(opts.dateTo);
+    baseConditions.push(`ar.created_at::date <= $${baseParams.length}::date`);
+  }
+
+  if (opts.query?.trim()) {
+    baseParams.push(`%${opts.query.trim()}%`);
+    const idx = baseParams.length;
+    baseConditions.push(`(
+      ar.invoice_number ILIKE $${idx}
+      OR c.display_name ILIKE $${idx}
+      OR c.tax_id ILIKE $${idx}
+      OR c.phone ILIKE $${idx}
+    )`);
+  }
+
+  const baseWhereSql = baseConditions.join(" AND ");
+
+  const conditions = [...baseConditions];
+  const params = [...baseParams];
 
   if (opts.status && opts.status !== "all") {
     if (opts.status === "pending") {
       conditions.push(`ar.status IN ('open', 'partial')`);
+    } else if (opts.status === "with_payments") {
+      conditions.push(`ar.paid_amount > 0 AND ar.status != 'cancelled'`);
     } else if (opts.status === "with_favour") {
       conditions.push(`COALESCE(c.credit_balance, 0) > 0`);
     } else {
@@ -749,57 +777,44 @@ export async function listAccountsReceivable(
     }
   }
 
-  if (opts.dateFrom) {
-    params.push(opts.dateFrom);
-    conditions.push(`ar.created_at::date >= $${params.length}::date`);
-  }
-
-  if (opts.dateTo) {
-    params.push(opts.dateTo);
-    conditions.push(`ar.created_at::date <= $${params.length}::date`);
-  }
-
-  if (opts.query?.trim()) {
-    params.push(`%${opts.query.trim()}%`);
-    const idx = params.length;
-    conditions.push(`(
-      ar.invoice_number ILIKE $${idx}
-      OR c.display_name ILIKE $${idx}
-      OR c.tax_id ILIKE $${idx}
-      OR c.phone ILIKE $${idx}
-    )`);
-  }
-
   const whereSql = conditions.join(" AND ");
 
-  // Totales
+  // Totales de KPI (usando baseWhereSql sin filtro de estado para que las cards mantengan sus valores al filtrar)
   const summarySql = `
     SELECT
-      COUNT(*)::text AS total_count,
-      COALESCE(SUM(ar.total_amount), 0)::text AS total_amount,
-      COALESCE(SUM(ar.paid_amount), 0)::text AS total_paid,
-      COALESCE(SUM(ar.balance_amount), 0)::text AS total_balance,
+      COALESCE(SUM(ar.total_amount) FILTER (WHERE ar.status != 'cancelled'), 0)::text AS total_amount,
+      COALESCE(SUM(ar.paid_amount) FILTER (WHERE ar.status != 'cancelled'), 0)::text AS total_paid,
+      COALESCE(SUM(ar.balance_amount) FILTER (WHERE ar.status IN ('open', 'partial')), 0)::text AS total_balance,
       COUNT(*) FILTER (WHERE ar.status IN ('open', 'partial'))::text AS count_pending,
       COUNT(*) FILTER (WHERE ar.status = 'paid')::text AS count_paid,
       (SELECT COALESCE(SUM(c2.credit_balance), 0)::text FROM customers c2 WHERE c2.credit_balance > 0) AS total_customer_credit_balance,
       (SELECT COUNT(*)::text FROM customers c2 WHERE c2.credit_balance > 0) AS count_with_credit_balance
     FROM accounts_receivable ar
     JOIN customers c ON c.id = ar.customer_id
+    WHERE ${baseWhereSql}
+  `;
+
+  const countSql = `
+    SELECT COUNT(*)::text AS total_count
+    FROM accounts_receivable ar
+    JOIN customers c ON c.id = ar.customer_id
     WHERE ${whereSql}
   `;
 
-  const { rows: sumRows } = await pool.query<{
-    total_count: string;
-    total_amount: string;
-    total_paid: string;
-    total_balance: string;
-    count_pending: string;
-    count_paid: string;
-    total_customer_credit_balance: string;
-    count_with_credit_balance: string;
-  }>(summarySql, params);
+  const [{ rows: sumRows }, { rows: countRows }] = await Promise.all([
+    pool.query<{
+      total_amount: string;
+      total_paid: string;
+      total_balance: string;
+      count_pending: string;
+      count_paid: string;
+      total_customer_credit_balance: string;
+      count_with_credit_balance: string;
+    }>(summarySql, baseParams),
+    pool.query<{ total_count: string }>(countSql, params),
+  ]);
 
-  const total = Number(sumRows[0]?.total_count ?? 0);
+  let total = Number(countRows[0]?.total_count ?? 0);
   const summary = {
     totalAmount: Number(sumRows[0]?.total_amount ?? 0),
     totalPaid: Number(sumRows[0]?.total_paid ?? 0),
@@ -853,6 +868,91 @@ export async function listAccountsReceivable(
   `;
 
   const { rows: items } = await pool.query<ReceivableSummaryItem>(listSql, listParams);
+
+  // Si se filtra por "with_favour", incluir también clientes con saldo a favor (ej. por abono sin factura) que no tengan fila en accounts_receivable en este listado
+  if (opts.status === "with_favour") {
+    const existingCustomerIds = new Set(items.map((it) => it.customerId));
+    const favParams: unknown[] = [];
+    const favConds: string[] = [`COALESCE(c.credit_balance, 0) > 0`];
+
+    if (opts.customerId) {
+      favParams.push(opts.customerId);
+      favConds.push(`c.id = $${favParams.length}::uuid`);
+    }
+    if (opts.query?.trim()) {
+      favParams.push(`%${opts.query.trim()}%`);
+      const qIdx = favParams.length;
+      favConds.push(`(c.display_name ILIKE $${qIdx} OR c.tax_id ILIKE $${qIdx} OR c.phone ILIKE $${qIdx})`);
+    }
+    if (opts.warehouseId) {
+      favParams.push(opts.warehouseId);
+      favConds.push(`(
+        EXISTS (SELECT 1 FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = c.id AND cw.warehouse_id = $${favParams.length}::uuid AND cw.credit_balance > 0)
+        OR EXISTS (SELECT 1 FROM receivable_payments rp WHERE rp.customer_id = c.id AND rp.warehouse_id = $${favParams.length}::uuid)
+      )`);
+    }
+
+    const { rows: favCustomers } = await pool.query<ReceivableSummaryItem>(
+      `
+      SELECT
+        ('favour-' || c.id::text) AS id,
+        NULL::text AS "documentId",
+        COALESCE(
+          (SELECT rp.receipt_number FROM receivable_payments rp WHERE rp.customer_id = c.id ORDER BY rp.created_at DESC LIMIT 1),
+          'SALDO A FAVOR'
+        ) AS "invoiceNumber",
+        COALESCE(
+          (SELECT cw.warehouse_id::text FROM customer_warehouse_credit_balances cw WHERE cw.customer_id = c.id AND cw.credit_balance > 0 ORDER BY cw.updated_at DESC LIMIT 1),
+          (SELECT rp.warehouse_id::text FROM receivable_payments rp WHERE rp.customer_id = c.id ORDER BY rp.created_at DESC LIMIT 1),
+          (SELECT w2.id::text FROM warehouses w2 WHERE w2.is_active = true ORDER BY w2.created_at ASC LIMIT 1)
+        ) AS "warehouseId",
+        COALESCE(
+          (SELECT w2.code FROM customer_warehouse_credit_balances cw JOIN warehouses w2 ON w2.id = cw.warehouse_id WHERE cw.customer_id = c.id AND cw.credit_balance > 0 ORDER BY cw.updated_at DESC LIMIT 1),
+          (SELECT w2.code FROM receivable_payments rp JOIN warehouses w2 ON w2.id = rp.warehouse_id WHERE rp.customer_id = c.id ORDER BY rp.created_at DESC LIMIT 1),
+          'SEDE'
+        ) AS "warehouseCode",
+        COALESCE(
+          (SELECT w2.name FROM customer_warehouse_credit_balances cw JOIN warehouses w2 ON w2.id = cw.warehouse_id WHERE cw.customer_id = c.id AND cw.credit_balance > 0 ORDER BY cw.updated_at DESC LIMIT 1),
+          (SELECT w2.name FROM receivable_payments rp JOIN warehouses w2 ON w2.id = rp.warehouse_id WHERE rp.customer_id = c.id ORDER BY rp.created_at DESC LIMIT 1),
+          'Sede Principal'
+        ) AS "warehouseName",
+        c.id::text AS "customerId",
+        c.display_name AS "customerName",
+        c.tax_id AS "customerTaxId",
+        c.phone AS "customerPhone",
+        COALESCE(c.credit_balance, 0)::float AS "customerCreditBalance",
+        COALESCE(c.credit_balance, 0)::float AS "excessPaidTotal",
+        0::float AS "totalAmount",
+        0::float AS "initialPayment",
+        COALESCE(
+          (SELECT SUM(rp.amount) FROM receivable_payments rp WHERE rp.customer_id = c.id AND rp.receivable_id IS NULL),
+          c.credit_balance,
+          0
+        )::float AS "paidAmount",
+        0::float AS "balanceAmount",
+        'paid' AS status,
+        NULL::text AS "dueDate",
+        'Saldo a favor disponible del cliente' AS notes,
+        COALESCE(
+          (SELECT rp.created_at::text FROM receivable_payments rp WHERE rp.customer_id = c.id ORDER BY rp.created_at DESC LIMIT 1),
+          c.created_at::text
+        ) AS "createdAt",
+        NULL::text AS "paidAt",
+        NULL::text AS "createdByName"
+      FROM customers c
+      WHERE ${favConds.join(" AND ")}
+      ORDER BY c.credit_balance DESC
+      `,
+      favParams
+    );
+
+    for (const fc of favCustomers) {
+      if (!existingCustomerIds.has(fc.customerId)) {
+        items.push(fc);
+        total += 1;
+      }
+    }
+  }
 
   return { items, total, summary };
 }

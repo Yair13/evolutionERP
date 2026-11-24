@@ -144,9 +144,25 @@ export function LayawaysPage() {
         </div>
       </div>
 
-      {/* KPI Summary Cards */}
+      {/* KPI Summary Cards (Filtros Interactivos) */}
       <div className="fin-kpi-grid fin-kpi-grid--4">
-        <div className="fin-kpi-card fin-kpi-card--indigo">
+        <div
+          role="button"
+          tabIndex={0}
+          className={`fin-kpi-card fin-kpi-card--indigo fin-kpi-card--filter ${selectedStatus === "active" ? "is-active" : ""}`}
+          onClick={() => {
+            setSelectedStatus(selectedStatus === "active" ? "all" : "active");
+            setPage(1);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setSelectedStatus(selectedStatus === "active" ? "all" : "active");
+              setPage(1);
+            }
+          }}
+          title="Clic para filtrar apartados activos con mercancía reservada"
+        >
           <div className="fin-kpi-top">
             <span className="fin-kpi-label">Apartados Activos</span>
             <div className="fin-kpi-icon fin-kpi-icon--indigo">
@@ -161,7 +177,23 @@ export function LayawaysPage() {
           </div>
         </div>
 
-        <div className="fin-kpi-card fin-kpi-card--teal">
+        <div
+          role="button"
+          tabIndex={0}
+          className={`fin-kpi-card fin-kpi-card--teal fin-kpi-card--filter ${selectedStatus === "all" ? "is-active" : ""}`}
+          onClick={() => {
+            setSelectedStatus("all");
+            setPage(1);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setSelectedStatus("all");
+              setPage(1);
+            }
+          }}
+          title="Clic para ver todos los planes separe registrados"
+        >
           <div className="fin-kpi-top">
             <span className="fin-kpi-label">Total Mercancía</span>
             <div className="fin-kpi-icon fin-kpi-icon--teal">
@@ -176,7 +208,23 @@ export function LayawaysPage() {
           </div>
         </div>
 
-        <div className="fin-kpi-card fin-kpi-card--emerald">
+        <div
+          role="button"
+          tabIndex={0}
+          className={`fin-kpi-card fin-kpi-card--emerald fin-kpi-card--filter ${selectedStatus === "with_payments" ? "is-active" : ""}`}
+          onClick={() => {
+            setSelectedStatus(selectedStatus === "with_payments" ? "all" : "with_payments");
+            setPage(1);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setSelectedStatus(selectedStatus === "with_payments" ? "all" : "with_payments");
+              setPage(1);
+            }
+          }}
+          title="Clic para filtrar apartados con abonos recaudados en caja"
+        >
           <div className="fin-kpi-top">
             <span className="fin-kpi-label" style={{ color: "#059669" }}>Total Recaudado</span>
             <div className="fin-kpi-icon fin-kpi-icon--emerald">
@@ -191,7 +239,23 @@ export function LayawaysPage() {
           </div>
         </div>
 
-        <div className="fin-kpi-card fin-kpi-card--amber">
+        <div
+          role="button"
+          tabIndex={0}
+          className={`fin-kpi-card fin-kpi-card--amber fin-kpi-card--filter ${selectedStatus === "with_balance" ? "is-active" : ""}`}
+          onClick={() => {
+            setSelectedStatus(selectedStatus === "with_balance" ? "all" : "with_balance");
+            setPage(1);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setSelectedStatus(selectedStatus === "with_balance" ? "all" : "with_balance");
+              setPage(1);
+            }
+          }}
+          title="Clic para filtrar apartados con saldo pendiente por cobrar"
+        >
           <div className="fin-kpi-top">
             <span className="fin-kpi-label" style={{ color: "#d97706" }}>Saldo Pendiente</span>
             <div className="fin-kpi-icon fin-kpi-icon--amber">
@@ -241,7 +305,7 @@ export function LayawaysPage() {
         )}
 
         {/* Estado */}
-        <div className="fin-filter-field" style={{ minWidth: 150 }}>
+        <div className="fin-filter-field" style={{ minWidth: 175 }}>
           <span>ESTADO</span>
           <select
             className="fin-select"
@@ -253,6 +317,8 @@ export function LayawaysPage() {
           >
             <option value="all">Todos los Estados</option>
             <option value="active">Activos / Vigentes</option>
+            <option value="with_payments">Con Abonos Recibidos</option>
+            <option value="with_balance">Con Saldo Pendiente</option>
             <option value="completed">Completados / Redimidos</option>
             <option value="cancelled">Cancelados</option>
           </select>

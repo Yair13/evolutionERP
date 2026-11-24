@@ -574,7 +574,7 @@ export async function fetchLayaways(
   token: string,
   params?: {
     warehouseId?: string | null;
-    status?: LayawayStatus | null;
+    status?: LayawayStatus | "all" | "with_payments" | "with_balance" | string | null;
     customerId?: string | null;
     dateFrom?: string | null;
     dateTo?: string | null;

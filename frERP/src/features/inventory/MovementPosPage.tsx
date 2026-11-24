@@ -592,6 +592,8 @@ export function MovementPosPage({ mode }: Props) {
       if (el.closest(".inv-pos__catalog-search")) return true;
       if (el.closest(".inv-pos-config")) return true;
       if (el.closest(".inv-pos-sellbar")) return true;
+      if (el.closest(".inv-pos-exchange-panel")) return true;
+      if (el.closest(".inv-pos-verify__controls")) return true;
       if (el.closest(".inv-pos__notes")) return true;
       if (el.closest(".inv-cart__qty") && el.tagName === "INPUT") return true;
       if (el.closest('[role="dialog"], .inv-modal, .inv-modal-backdrop, .inv-photo-lightbox')) {

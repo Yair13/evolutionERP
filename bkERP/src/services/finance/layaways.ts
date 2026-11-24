@@ -238,7 +238,7 @@ export async function listLayaways(
   pool: pg.Pool,
   opts: {
     warehouseId?: string | null;
-    status?: "all" | "active" | "completed" | "cancelled";
+    status?: "all" | "active" | "completed" | "cancelled" | "with_payments" | "with_balance";
     customerId?: string | null;
     dateFrom?: string | null;
     dateTo?: string | null;
@@ -259,38 +259,33 @@ export async function listLayaways(
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
   const offset = Math.max(opts.offset ?? 0, 0);
 
-  const conditions: string[] = ["1=1"];
-  const params: unknown[] = [];
+  const baseConditions: string[] = ["1=1"];
+  const baseParams: unknown[] = [];
 
   if (opts.warehouseId) {
-    params.push(opts.warehouseId);
-    conditions.push(`l.warehouse_id = $${params.length}::uuid`);
+    baseParams.push(opts.warehouseId);
+    baseConditions.push(`l.warehouse_id = $${baseParams.length}::uuid`);
   }
 
   if (opts.customerId) {
-    params.push(opts.customerId);
-    conditions.push(`l.customer_id = $${params.length}::uuid`);
-  }
-
-  if (opts.status && opts.status !== "all") {
-    params.push(opts.status);
-    conditions.push(`l.status = $${params.length}`);
+    baseParams.push(opts.customerId);
+    baseConditions.push(`l.customer_id = $${baseParams.length}::uuid`);
   }
 
   if (opts.dateFrom) {
-    params.push(opts.dateFrom);
-    conditions.push(`l.created_at::date >= $${params.length}::date`);
+    baseParams.push(opts.dateFrom);
+    baseConditions.push(`l.created_at::date >= $${baseParams.length}::date`);
   }
 
   if (opts.dateTo) {
-    params.push(opts.dateTo);
-    conditions.push(`l.created_at::date <= $${params.length}::date`);
+    baseParams.push(opts.dateTo);
+    baseConditions.push(`l.created_at::date <= $${baseParams.length}::date`);
   }
 
   if (opts.query?.trim()) {
-    params.push(`%${opts.query.trim()}%`);
-    const idx = params.length;
-    conditions.push(`(
+    baseParams.push(`%${opts.query.trim()}%`);
+    const idx = baseParams.length;
+    baseConditions.push(`(
       l.code ILIKE $${idx}
       OR c.display_name ILIKE $${idx}
       OR c.tax_id ILIKE $${idx}
@@ -298,28 +293,52 @@ export async function listLayaways(
     )`);
   }
 
+  const baseWhereSql = baseConditions.join(" AND ");
+
+  const conditions = [...baseConditions];
+  const params = [...baseParams];
+
+  if (opts.status && opts.status !== "all") {
+    if (opts.status === "with_payments") {
+      conditions.push(`l.paid_amount > 0 AND l.status != 'cancelled'`);
+    } else if (opts.status === "with_balance") {
+      conditions.push(`l.status = 'active' AND (l.target_amount - l.paid_amount) > 0`);
+    } else {
+      params.push(opts.status);
+      conditions.push(`l.status = $${params.length}`);
+    }
+  }
+
   const whereSql = conditions.join(" AND ");
 
-  // Totales
+  // Totales de KPI (usando baseWhereSql sin filtro de estado para que las cards mantengan sus valores al filtrar)
   const summarySql = `
     SELECT
-      COUNT(*)::text AS total_count,
       COUNT(*) FILTER (WHERE l.status = 'active')::text AS active_count,
       COALESCE(SUM(l.target_amount) FILTER (WHERE l.status = 'active'), 0)::text AS total_target,
       COALESCE(SUM(l.paid_amount) FILTER (WHERE l.status = 'active'), 0)::text AS total_collected
     FROM layaways l
     JOIN customers c ON c.id = l.customer_id
+    WHERE ${baseWhereSql}
+  `;
+
+  const countSql = `
+    SELECT COUNT(*)::text AS total_count
+    FROM layaways l
+    JOIN customers c ON c.id = l.customer_id
     WHERE ${whereSql}
   `;
 
-  const { rows: sumRows } = await pool.query<{
-    total_count: string;
-    active_count: string;
-    total_target: string;
-    total_collected: string;
-  }>(summarySql, params);
+  const [{ rows: sumRows }, { rows: countRows }] = await Promise.all([
+    pool.query<{
+      active_count: string;
+      total_target: string;
+      total_collected: string;
+    }>(summarySql, baseParams),
+    pool.query<{ total_count: string }>(countSql, params),
+  ]);
 
-  const total = Number(sumRows[0]?.total_count ?? 0);
+  const total = Number(countRows[0]?.total_count ?? 0);
   const activeCount = Number(sumRows[0]?.active_count ?? 0);
   const totalTarget = Number(sumRows[0]?.total_target ?? 0);
   const totalCollected = Number(sumRows[0]?.total_collected ?? 0);

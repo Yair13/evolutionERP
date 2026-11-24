@@ -198,7 +198,7 @@ export function ReceivablesPage() {
         q: searchQuery.trim() || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
-        limit: 50,
+        limit: 200,
       });
       setItems(res.items);
       setSummary({
@@ -355,9 +355,21 @@ export function ReceivablesPage() {
       {/* ────────────────── TAB 1: LISTADO DE CRÉDITOS ────────────────── */}
       {activeTab === "credits" && (
         <>
-          {/* Tarjetas KPI */}
+          {/* Tarjetas KPI (Filtros Interactivos) */}
           <div className="fin-kpi-grid fin-kpi-grid--4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))" }}>
-            <div className="fin-kpi-card fin-kpi-card--indigo">
+            <div
+              role="button"
+              tabIndex={0}
+              className={`fin-kpi-card fin-kpi-card--indigo fin-kpi-card--filter ${statusFilter === "all" ? "is-active" : ""}`}
+              onClick={() => setStatusFilter("all")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setStatusFilter("all");
+                }
+              }}
+              title="Clic para filtrar todos los créditos emitidos"
+            >
               <div className="fin-kpi-top">
                 <span className="fin-kpi-label">Total Cartera Emitida</span>
                 <div className="fin-kpi-icon fin-kpi-icon--indigo">
@@ -372,7 +384,19 @@ export function ReceivablesPage() {
               </div>
             </div>
 
-            <div className="fin-kpi-card fin-kpi-card--emerald">
+            <div
+              role="button"
+              tabIndex={0}
+              className={`fin-kpi-card fin-kpi-card--emerald fin-kpi-card--filter ${statusFilter === "with_payments" ? "is-active" : ""}`}
+              onClick={() => setStatusFilter(statusFilter === "with_payments" ? "all" : "with_payments")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setStatusFilter(statusFilter === "with_payments" ? "all" : "with_payments");
+                }
+              }}
+              title="Clic para filtrar créditos con abonos recaudados"
+            >
               <div className="fin-kpi-top">
                 <span className="fin-kpi-label" style={{ color: "#059669" }}>Total Recaudado</span>
                 <div className="fin-kpi-icon fin-kpi-icon--emerald">
@@ -387,7 +411,19 @@ export function ReceivablesPage() {
               </div>
             </div>
 
-            <div className="fin-kpi-card fin-kpi-card--rose">
+            <div
+              role="button"
+              tabIndex={0}
+              className={`fin-kpi-card fin-kpi-card--rose fin-kpi-card--filter ${statusFilter === "pending" ? "is-active" : ""}`}
+              onClick={() => setStatusFilter(statusFilter === "pending" ? "all" : "pending")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setStatusFilter(statusFilter === "pending" ? "all" : "pending");
+                }
+              }}
+              title="Clic para filtrar créditos activos con saldo pendiente por cobrar"
+            >
               <div className="fin-kpi-top">
                 <span className="fin-kpi-label" style={{ color: "#e11d48" }}>Saldo Pendiente por Cobrar</span>
                 <div className="fin-kpi-icon fin-kpi-icon--rose">
@@ -403,10 +439,17 @@ export function ReceivablesPage() {
             </div>
 
             <div
-              className="fin-kpi-card fin-kpi-card--teal"
-              style={{ cursor: "pointer", border: statusFilter === "with_favour" ? "2px solid #10b981" : undefined }}
-              onClick={() => setStatusFilter(statusFilter === "with_favour" ? "pending" : "with_favour")}
-              title="Click para filtrar créditos de clientes con saldo a favor"
+              role="button"
+              tabIndex={0}
+              className={`fin-kpi-card fin-kpi-card--teal fin-kpi-card--filter ${statusFilter === "with_favour" ? "is-active" : ""}`}
+              onClick={() => setStatusFilter(statusFilter === "with_favour" ? "all" : "with_favour")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setStatusFilter(statusFilter === "with_favour" ? "all" : "with_favour");
+                }
+              }}
+              title="Clic para filtrar clientes con saldo a favor disponible"
             >
               <div className="fin-kpi-top">
                 <span className="fin-kpi-label" style={{ color: "#059669" }}>Saldo a Favor Clientes</span>
@@ -467,7 +510,7 @@ export function ReceivablesPage() {
             )}
 
             {/* Estado */}
-            <div className="fin-filter-field" style={{ minWidth: 160 }}>
+            <div className="fin-filter-field" style={{ minWidth: 175 }}>
               <span>ESTADO</span>
               <select
                 className="fin-select"
@@ -475,6 +518,7 @@ export function ReceivablesPage() {
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
                 <option value="pending">Con Saldo (Pendientes)</option>
+                <option value="with_payments">Con Abonos Recibidos</option>
                 <option value="with_favour">Con Saldo a Favor</option>
                 <option value="all">Todos los Créditos</option>
                 <option value="paid">Completamente Pagados</option>
@@ -574,7 +618,17 @@ export function ReceivablesPage() {
                         )}
                         <td>
                           <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
-                            <strong style={{ color: "#0f172a" }}>{c.customerName}</strong>
+                            <strong
+                              style={{ color: "#0f172a", cursor: "pointer", textDecoration: "underline" }}
+                              onClick={() => {
+                                setSelectedCustId(c.customerId);
+                                setCustSearch(c.customerName);
+                                setActiveTab("customer");
+                              }}
+                              title="Ver ficha y estado de cuenta del cliente"
+                            >
+                              {c.customerName}
+                            </strong>
                             {c.customerCreditBalance != null && c.customerCreditBalance > 0 && (
                               <span
                                 style={{
@@ -615,19 +669,27 @@ export function ReceivablesPage() {
                         <td style={{ textAlign: "center" }}>
                           <span
                             className={`fin-badge ${
-                              c.status === "paid"
+                              c.id.startsWith("favour-")
+                                ? "fin-badge--teal"
+                                : c.status === "paid"
                                 ? "fin-badge--success"
                                 : c.status === "partial"
                                 ? "fin-badge--warning"
                                 : "fin-badge--danger"
                             }`}
                           >
-                            {c.status === "paid" ? "Pagado" : c.status === "partial" ? "Parcial" : "Pendiente"}
+                            {c.id.startsWith("favour-")
+                              ? "Saldo a Favor"
+                              : c.status === "paid"
+                              ? "Pagado"
+                              : c.status === "partial"
+                              ? "Parcial"
+                              : "Pendiente"}
                           </span>
                         </td>
                         <td style={{ textAlign: "right" }}>
                           <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.35rem" }}>
-                            {c.balanceAmount > 0 && (
+                            {c.balanceAmount > 0 && !c.id.startsWith("favour-") && (
                               <button
                                 type="button"
                                 className="fin-btn fin-btn--primary fin-btn--sm"
@@ -639,11 +701,19 @@ export function ReceivablesPage() {
                             <button
                               type="button"
                               className="fin-btn fin-btn--ghost fin-btn--sm"
-                              onClick={() => setActiveReceivableDetailId(c.id)}
+                              onClick={() => {
+                                if (c.id.startsWith("favour-")) {
+                                  setSelectedCustId(c.customerId);
+                                  setCustSearch(c.customerName);
+                                  setActiveTab("customer");
+                                } else {
+                                  setActiveReceivableDetailId(c.id);
+                                }
+                              }}
                             >
-                              Detalles
+                              {c.id.startsWith("favour-") ? "Ver Ficha" : "Detalles"}
                             </button>
-                            {canManageInitial && (
+                            {canManageInitial && !c.id.startsWith("favour-") && (
                               <button
                                 type="button"
                                 className="fin-btn fin-btn--ghost fin-btn--sm"
