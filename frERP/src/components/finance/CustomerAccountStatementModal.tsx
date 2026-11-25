@@ -50,7 +50,6 @@ function toBogotaDateYmd(iso: string | null | undefined): string {
   try {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "";
-    // Convertir a YYYY-MM-DD en zona America/Bogota
     const parts = new Intl.DateTimeFormat("en-CA", {
       timeZone: "America/Bogota",
       year: "numeric",
@@ -68,28 +67,56 @@ function toBogotaDateYmd(iso: string | null | undefined): string {
 
 function formatShortDateDmy(ymdOrIso: string | null | undefined): string {
   if (!ymdOrIso) return "—";
-  const ymd = ymdOrIso.length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(ymdOrIso)
-    ? ymdOrIso
-    : toBogotaDateYmd(ymdOrIso);
+  const ymd =
+    ymdOrIso.length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(ymdOrIso)
+      ? ymdOrIso
+      : toBogotaDateYmd(ymdOrIso);
   if (!ymd) return "—";
   const [y, m, d] = ymd.split("-");
   return `${d}/${m}/${y}`;
 }
 
-export interface StatementLedgerRow {
+export interface StatementInvoiceItem {
   key: string;
   dateYmd: string;
   dateDisplay: string;
-  invoiceNumbers: string[];
+  invoiceNumber: string;
+  warehouseCode: string;
+  warehouseName: string;
+  description: string;
+  totalAmount: number;
+  paidAmount: number;
+  balanceAmount: number;
+  isInitial: boolean;
+  statusLabel: string;
+}
+
+export interface StatementPaymentItem {
+  key: string;
+  dateYmd: string;
+  dateDisplay: string;
+  receiptNumber: string;
+  invoiceRefs: string[];
+  paymentMethod: string;
+  notes: string;
+  warehouseCode: string;
+  amount: number;
+  isInitial: boolean;
+}
+
+export interface StatementTimelineItem {
+  key: string;
+  dateYmd: string;
+  dateDisplay: string;
+  type: "prior_balance" | "invoice" | "payment";
+  typeLabel: string;
+  reference: string;
+  description: string;
+  subDescription: string;
+  warehouseCode: string;
   chargeAmount: number;
-  abonoAmount: number;
-  paymentMethods: string[];
-  vouchers: string[];
-  detailsText: string;
-  itemsSummary: string[];
-  warehouseCodes: string[];
+  paymentAmount: number;
   runningBalance: number;
-  isInitialRow?: boolean;
 }
 
 type Props = {
@@ -109,10 +136,10 @@ export function CustomerAccountStatementModal({
 }: Props) {
   const [portalReady, setPortalReady] = useState(false);
   const [format, setFormat] = useState<"letter" | "voucher">("letter");
+  const [viewMode, setViewMode] = useState<"by_type" | "timeline">("by_type");
   const [warehouseFilter, setWarehouseFilter] = useState<string>(selectedWarehouseId);
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
-  const [groupSameDay, setGroupSameDay] = useState<boolean>(true);
   const [showProductDetails, setShowProductDetails] = useState<boolean>(true);
   const [includeCashSales, setIncludeCashSales] = useState<boolean>(false);
 
@@ -158,7 +185,7 @@ export function CustomerAccountStatementModal({
     } else {
       document.body.classList.remove("inv-print-customer-statement-voucher");
       document.body.classList.add("inv-print-customer-statement-letter");
-      pageStyle.textContent = "@page { size: letter portrait; margin: 10mm; }";
+      pageStyle.textContent = "@page { size: letter portrait; margin: 8mm 10mm; }";
     }
 
     const oldTitle = document.title;
@@ -177,19 +204,22 @@ export function CustomerAccountStatementModal({
     }, 80);
   }
 
-  // Construir libro mayor cronológico (Facturas / Saldos iniciales vs Abonos)
-  const ledgerData = useMemo(() => {
-    // 1. Obtener facturas/cargos filtrados por sede
+  const statementData = useMemo(() => {
+    // 1. Obtener facturas / cargos filtrados por sede
     const allInvoices: CustomerInvoiceItem[] = (profile.invoices ?? []).filter((inv) => {
       if (inv.status === "cancelled") return false;
       if (warehouseFilter && inv.warehouseId !== warehouseFilter) return false;
-      if (!includeCashSales && inv.exitKind !== "credit" && inv.docType !== "manual_credit" && !inv.receivableId) {
+      if (
+        !includeCashSales &&
+        inv.exitKind !== "credit" &&
+        inv.docType !== "manual_credit" &&
+        !inv.receivableId
+      ) {
         return false;
       }
       return true;
     });
 
-    // Asegurar que cualquier receivable que no esté en profile.invoices sea incluido
     const includedRecIds = new Set(
       allInvoices.map((i) => i.receivableId).filter(Boolean) as string[]
     );
@@ -224,7 +254,7 @@ export function CustomerAccountStatementModal({
       }
     }
 
-    // 2. Obtener abonos consolidados por receiptNumber para evitar duplicar filas cuando un recibo amortizó varias facturas en cascada
+    // 2. Obtener abonos consolidados por receiptNumber
     const rawPayments: ReceivablePaymentItem[] = (profile.recentPayments ?? []).filter((p) => {
       if (warehouseFilter && p.warehouseId !== warehouseFilter) return false;
       return true;
@@ -249,7 +279,11 @@ export function CustomerAccountStatementModal({
       const existing = payByReceipt.get(key);
       if (existing) {
         existing.amount = Math.round((existing.amount + Number(p.amount || 0)) * 100) / 100;
-        if (p.invoiceNumber && !existing.invoiceNumbers.includes(p.invoiceNumber)) {
+        if (
+          p.invoiceNumber &&
+          !p.invoiceNumber.includes("Abono directo") &&
+          !existing.invoiceNumbers.includes(p.invoiceNumber)
+        ) {
           existing.invoiceNumbers.push(p.invoiceNumber);
         }
         if (p.notes && (!existing.notes || !existing.notes.includes(p.notes))) {
@@ -264,27 +298,32 @@ export function CustomerAccountStatementModal({
           paymentMethod: p.paymentMethod,
           amount: Math.round(Number(p.amount || 0) * 100) / 100,
           notes: p.notes,
-          invoiceNumbers: p.invoiceNumber ? [p.invoiceNumber] : [],
+          invoiceNumbers:
+            p.invoiceNumber && !p.invoiceNumber.includes("Abono directo")
+              ? [p.invoiceNumber]
+              : [],
           warehouseCode: p.warehouseCode || "",
           isInitial: Boolean(p.isInitial),
         });
       }
     }
 
-    // Si hay ventas de contado incluidas, o saldos iniciales manuales con abono previo que no tenían fila en receivable_payments, agregar su pago implícito para que el estado de cuenta cuadre
     const paymentsForReceivableSum = new Map<string, number>();
     for (const p of rawPayments) {
       if (p.receivableId) {
         paymentsForReceivableSum.set(
           p.receivableId,
-          Math.round(((paymentsForReceivableSum.get(p.receivableId) ?? 0) + Number(p.appliedToDebt || p.amount || 0)) * 100) / 100
+          Math.round(
+            ((paymentsForReceivableSum.get(p.receivableId) ?? 0) +
+              Number(p.appliedToDebt || p.amount || 0)) *
+              100
+          ) / 100
         );
       }
     }
 
     for (const inv of allInvoices) {
       if (!inv.receivableId && inv.exitKind !== "credit" && inv.paidAmount > 0) {
-        // Venta de contado
         const methods =
           inv.paymentBreakdown && inv.paymentBreakdown.length > 0
             ? inv.paymentBreakdown.map((b) => paymentMethodLabel(b.method)).join(" / ")
@@ -303,7 +342,6 @@ export function CustomerAccountStatementModal({
           isInitial: false,
         });
       } else if (inv.receivableId) {
-        // Verificar si una factura manual tenía abono previo en sistema anterior (initialPayment > 0 sin fila en receivable_payments)
         const recordedPaid = paymentsForReceivableSum.get(inv.receivableId) ?? 0;
         const unrecordedPaid = Math.round((inv.paidAmount - recordedPaid) * 100) / 100;
         if (unrecordedPaid > 0.01) {
@@ -315,7 +353,7 @@ export function CustomerAccountStatementModal({
             dateYmd: toBogotaDateYmd(inv.createdAt),
             paymentMethod: "Abono previo",
             amount: unrecordedPaid,
-            notes: `Abonos anteriores a ${inv.invoiceNumber}`,
+            notes: `Abonos anteriores a factura ${inv.invoiceNumber}`,
             invoiceNumbers: [inv.invoiceNumber],
             warehouseCode: inv.warehouseCode,
             isInitial: true,
@@ -324,50 +362,76 @@ export function CustomerAccountStatementModal({
       }
     }
 
-    // 3. Crear lista unificada de eventos ordenados cronológicamente (ASC)
-    interface RawEvent {
-      id: string;
-      kind: "charge" | "payment";
-      createdAt: string;
-      dateYmd: string;
-      invoiceNumber: string;
-      chargeAmount: number;
-      abonoAmount: number;
-      paymentMethod: string;
-      voucher: string;
-      notes: string;
-      itemsSummary: string;
-      warehouseCode: string;
-      isInitial: boolean;
-    }
+    // Ordenar facturas cronológicamente (de más antigua a más reciente)
+    const sortedInvoices = [...allInvoices].sort((a, b) => {
+      const da = toBogotaDateYmd(a.createdAt);
+      const db = toBogotaDateYmd(b.createdAt);
+      if (da !== db) return da.localeCompare(db);
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
 
-    const events: RawEvent[] = [];
+    // Ordenar pagos cronológicamente (de más antiguo a más reciente)
+    const sortedPayments = Array.from(payByReceipt.values()).sort((a, b) => {
+      if (a.dateYmd !== b.dateYmd) return a.dateYmd.localeCompare(b.dateYmd);
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
 
-    for (const inv of allInvoices) {
+    // Aplicar filtro de fechas (dateFrom / dateTo)
+    let priorCharges = 0;
+    let priorAbonos = 0;
+
+    const invoicesList: StatementInvoiceItem[] = [];
+    const paymentsList: StatementPaymentItem[] = [];
+
+    for (const inv of sortedInvoices) {
+      const ymd = toBogotaDateYmd(inv.createdAt);
+      if (dateFrom && ymd < dateFrom) {
+        priorCharges = Math.round((priorCharges + Number(inv.totalAmount || 0)) * 100) / 100;
+        continue;
+      }
+      if (dateTo && ymd > dateTo) continue;
+
       const isInitial =
         inv.docType === "manual_credit" ||
         /saldo\s*inicial|saldo\s*anterior/i.test(inv.invoiceNumber) ||
         /saldo\s*inicial|saldo\s*anterior/i.test(inv.notes || "");
 
-      events.push({
-        id: `inv-${inv.documentId || inv.receivableId || inv.invoiceNumber}`,
-        kind: "charge",
-        createdAt: inv.createdAt,
-        dateYmd: toBogotaDateYmd(inv.createdAt),
+      const desc = showProductDetails
+        ? inv.itemsSummary || inv.notes || (isInitial ? "Saldo inicial / Factura anterior" : "Venta a crédito")
+        : isInitial
+        ? inv.notes || "Saldo inicial / Factura anterior"
+        : `Factura de venta (${inv.linesCount || 1} ítem(s))`;
+
+      const statusLabel =
+        inv.balanceAmount <= 0.01
+          ? "Pagada"
+          : inv.paidAmount > 0
+          ? "Abono parcial"
+          : "Pendiente";
+
+      invoicesList.push({
+        key: `inv-${inv.documentId || inv.receivableId || inv.invoiceNumber}`,
+        dateYmd: ymd,
+        dateDisplay: formatShortDateDmy(ymd),
         invoiceNumber: inv.invoiceNumber,
-        chargeAmount: Math.round(Number(inv.totalAmount || 0) * 100) / 100,
-        abonoAmount: 0,
-        paymentMethod: "",
-        voucher: "",
-        notes: inv.notes || "",
-        itemsSummary: inv.itemsSummary || "",
-        warehouseCode: inv.warehouseCode || "",
+        warehouseCode: inv.warehouseCode,
+        warehouseName: inv.warehouseName,
+        description: desc,
+        totalAmount: Math.round(Number(inv.totalAmount || 0) * 100) / 100,
+        paidAmount: Math.round(Number(inv.paidAmount || 0) * 100) / 100,
+        balanceAmount: Math.round(Number(inv.balanceAmount || 0) * 100) / 100,
         isInitial,
+        statusLabel,
       });
     }
 
-    for (const p of payByReceipt.values()) {
-      // Extraer comprobante corto o referencia si está en las notas, o usar el número de recibo
+    for (const p of sortedPayments) {
+      if (dateFrom && p.dateYmd < dateFrom) {
+        priorAbonos = Math.round((priorAbonos + p.amount) * 100) / 100;
+        continue;
+      }
+      if (dateTo && p.dateYmd > dateTo) continue;
+
       let cleanNote = p.notes || "";
       cleanNote = cleanNote
         .replace(/\(Aplicado a [^)]+\)/gi, "")
@@ -375,154 +439,162 @@ export function CustomerAccountStatementModal({
         .replace(/Abono inicial en venta a crédito(\s*\(con saldo a favor\))?/gi, "Abono inicial")
         .trim();
 
-      events.push({
-        id: `pay-${p.id}`,
-        kind: "payment",
-        createdAt: p.createdAt,
+      paymentsList.push({
+        key: `pay-${p.id}`,
         dateYmd: p.dateYmd,
-        invoiceNumber: "",
-        chargeAmount: 0,
-        abonoAmount: p.amount,
+        dateDisplay: formatShortDateDmy(p.dateYmd),
+        receiptNumber: p.receiptNumber,
+        invoiceRefs: p.invoiceNumbers,
         paymentMethod: paymentMethodLabel(p.paymentMethod),
-        voucher: p.receiptNumber,
         notes: cleanNote,
-        itemsSummary: "",
         warehouseCode: p.warehouseCode,
+        amount: p.amount,
         isInitial: p.isInitial,
       });
     }
 
-    events.sort((a, b) => {
-      if (a.dateYmd !== b.dateYmd) return a.dateYmd.localeCompare(b.dateYmd);
-      if (a.kind !== b.kind) return a.kind === "charge" ? -1 : 1;
-      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-    });
-
-    // 4. Si hay filtro de fecha "Desde" (dateFrom), todo lo anterior a dateFrom se consolida en una fila de "SALDO ANTERIOR"
-    let priorCharges = 0;
-    let priorAbonos = 0;
-    const inRangeEvents: RawEvent[] = [];
-
-    for (const ev of events) {
-      if (dateFrom && ev.dateYmd < dateFrom) {
-        priorCharges = Math.round((priorCharges + ev.chargeAmount) * 100) / 100;
-        priorAbonos = Math.round((priorAbonos + ev.abonoAmount) * 100) / 100;
-      } else if (dateTo && ev.dateYmd > dateTo) {
-        // Excluir posteriores a dateTo
-        continue;
+    // Si hay saldo anterior por filtro de fecha "Desde", agregarlo al inicio
+    const priorNet = Math.round((priorCharges - priorAbonos) * 100) / 100;
+    if (dateFrom && Math.abs(priorNet) > 0.01) {
+      if (priorNet > 0) {
+        invoicesList.unshift({
+          key: "prior-balance-inv",
+          dateYmd: dateFrom,
+          dateDisplay: `Antes de ${formatShortDateDmy(dateFrom)}`,
+          invoiceNumber: "SALDO ANTERIOR",
+          warehouseCode: "",
+          warehouseName: "",
+          description: "Saldo acumulado del período anterior",
+          totalAmount: priorNet,
+          paidAmount: 0,
+          balanceAmount: priorNet,
+          isInitial: true,
+          statusLabel: "Saldo anterior",
+        });
       } else {
-        inRangeEvents.push(ev);
-      }
-    }
-
-    const rows: StatementLedgerRow[] = [];
-    let runningBalance = 0;
-    let totalCharges = 0;
-    let totalAbonos = 0;
-
-    if (dateFrom && (priorCharges > 0 || priorAbonos > 0)) {
-      const priorNet = Math.round((priorCharges - priorAbonos) * 100) / 100;
-      const chargeCol = priorNet >= 0 ? priorNet : 0;
-      const abonoCol = priorNet < 0 ? Math.abs(priorNet) : 0;
-      runningBalance = priorNet;
-      totalCharges = Math.round((totalCharges + chargeCol) * 100) / 100;
-      totalAbonos = Math.round((totalAbonos + abonoCol) * 100) / 100;
-
-      rows.push({
-        key: "prior-balance-row",
-        dateYmd: dateFrom,
-        dateDisplay: `Antes de ${formatShortDateDmy(dateFrom)}`,
-        invoiceNumbers: ["SALDO ANTERIOR"],
-        chargeAmount: chargeCol,
-        abonoAmount: abonoCol,
-        paymentMethods: [],
-        vouchers: ["—"],
-        detailsText: "Saldo acumulado del período anterior",
-        itemsSummary: [],
-        warehouseCodes: [],
-        runningBalance,
-        isInitialRow: true,
-      });
-    }
-
-    // 5. Construir filas (agrupando en la misma fecha si groupSameDay está activo, tal como en el Excel tradicional del usuario)
-    for (const ev of inRangeEvents) {
-      totalCharges = Math.round((totalCharges + ev.chargeAmount) * 100) / 100;
-      totalAbonos = Math.round((totalAbonos + ev.abonoAmount) * 100) / 100;
-      runningBalance = Math.round((runningBalance + ev.chargeAmount - ev.abonoAmount) * 100) / 100;
-
-      const lastRow = rows.length > 0 ? rows[rows.length - 1] : null;
-
-      // Si groupSameDay está activo y la fila anterior es de la misma fecha (y no es la fila de saldo anterior acumulado)
-      // podemos combinar una factura y un abono del mismo día en la misma fila estilo Excel:
-      // Fecha | # Factura | Valor | Abonos | Detalles | Comprobante
-      const canMergeWithLast =
-        groupSameDay &&
-        lastRow &&
-        !lastRow.isInitialRow &&
-        lastRow.dateYmd === ev.dateYmd &&
-        ((ev.kind === "payment" && lastRow.abonoAmount === 0) ||
-          (ev.kind === "charge" && lastRow.chargeAmount === 0));
-
-      if (canMergeWithLast && lastRow) {
-        lastRow.chargeAmount = Math.round((lastRow.chargeAmount + ev.chargeAmount) * 100) / 100;
-        lastRow.abonoAmount = Math.round((lastRow.abonoAmount + ev.abonoAmount) * 100) / 100;
-        if (ev.invoiceNumber && !lastRow.invoiceNumbers.includes(ev.invoiceNumber)) {
-          lastRow.invoiceNumbers.push(ev.invoiceNumber);
-        }
-        if (ev.paymentMethod && !lastRow.paymentMethods.includes(ev.paymentMethod)) {
-          lastRow.paymentMethods.push(ev.paymentMethod);
-        }
-        if (ev.voucher && !lastRow.vouchers.includes(ev.voucher)) {
-          lastRow.vouchers.push(ev.voucher);
-        }
-        if (ev.itemsSummary && !lastRow.itemsSummary.includes(ev.itemsSummary)) {
-          lastRow.itemsSummary.push(ev.itemsSummary);
-        }
-        if (ev.warehouseCode && !lastRow.warehouseCodes.includes(ev.warehouseCode)) {
-          lastRow.warehouseCodes.push(ev.warehouseCode);
-        }
-
-        const detailParts: string[] = [...lastRow.paymentMethods];
-        if (ev.notes && !detailParts.includes(ev.notes)) {
-          detailParts.push(ev.notes);
-        }
-        lastRow.detailsText = detailParts.filter(Boolean).join(" · ");
-        lastRow.runningBalance = runningBalance;
-      } else {
-        const paymentMethods = ev.paymentMethod ? [ev.paymentMethod] : [];
-        const detailParts: string[] = [...paymentMethods];
-        if (ev.notes && ev.notes !== ev.paymentMethod) {
-          detailParts.push(ev.notes);
-        }
-
-        rows.push({
-          key: ev.id,
-          dateYmd: ev.dateYmd,
-          dateDisplay: formatShortDateDmy(ev.dateYmd),
-          invoiceNumbers: ev.invoiceNumber ? [ev.invoiceNumber] : [],
-          chargeAmount: ev.chargeAmount,
-          abonoAmount: ev.abonoAmount,
-          paymentMethods,
-          vouchers: ev.voucher ? [ev.voucher] : [],
-          detailsText: detailParts.filter(Boolean).join(" · "),
-          itemsSummary: ev.itemsSummary ? [ev.itemsSummary] : [],
-          warehouseCodes: ev.warehouseCode ? [ev.warehouseCode] : [],
-          runningBalance,
-          isInitialRow: ev.isInitial && ev.kind === "charge" && rows.length === 0,
+        paymentsList.unshift({
+          key: "prior-balance-pay",
+          dateYmd: dateFrom,
+          dateDisplay: `Antes de ${formatShortDateDmy(dateFrom)}`,
+          receiptNumber: "SALDO A FAVOR ANT.",
+          invoiceRefs: [],
+          paymentMethod: "Saldo a favor anterior",
+          notes: "Saldo a favor acumulado antes del período",
+          warehouseCode: "",
+          amount: Math.abs(priorNet),
+          isInitial: true,
         });
       }
     }
 
+    // Construir también línea de tiempo unificada (por si el usuario alterna a vista cronológica)
+    interface RawTimelineEv {
+      key: string;
+      dateYmd: string;
+      dateDisplay: string;
+      type: "prior_balance" | "invoice" | "payment";
+      typeLabel: string;
+      reference: string;
+      description: string;
+      subDescription: string;
+      warehouseCode: string;
+      chargeAmount: number;
+      paymentAmount: number;
+      sortOrder: number;
+    }
+
+    const rawTimeline: RawTimelineEv[] = [];
+    for (const inv of invoicesList) {
+      rawTimeline.push({
+        key: inv.key,
+        dateYmd: inv.dateYmd,
+        dateDisplay: inv.dateDisplay,
+        type: inv.key === "prior-balance-inv" ? "prior_balance" : "invoice",
+        typeLabel: inv.isInitial ? "Saldo Inicial / Factura" : "Factura de Venta",
+        reference: inv.invoiceNumber,
+        description: inv.description,
+        subDescription: inv.warehouseCode ? `Sede ${inv.warehouseCode}` : "",
+        warehouseCode: inv.warehouseCode,
+        chargeAmount: inv.totalAmount,
+        paymentAmount: 0,
+        sortOrder: inv.key === "prior-balance-inv" ? 0 : 1,
+      });
+    }
+
+    for (const p of paymentsList) {
+      rawTimeline.push({
+        key: p.key,
+        dateYmd: p.dateYmd,
+        dateDisplay: p.dateDisplay,
+        type: p.key === "prior-balance-pay" ? "prior_balance" : "payment",
+        typeLabel: `Abono · ${p.paymentMethod}`,
+        reference: p.receiptNumber,
+        description: p.notes || `Pago registrado por ${p.paymentMethod}`,
+        subDescription:
+          p.invoiceRefs.length > 0 ? `Aplicado a Fac. ${p.invoiceRefs.join(", ")}` : "Abono a cartera",
+        warehouseCode: p.warehouseCode,
+        chargeAmount: 0,
+        paymentAmount: p.amount,
+        sortOrder: p.key === "prior-balance-pay" ? 0 : 2,
+      });
+    }
+
+    rawTimeline.sort((a, b) => {
+      if (a.sortOrder === 0 || b.sortOrder === 0) return a.sortOrder - b.sortOrder;
+      if (a.dateYmd !== b.dateYmd) return a.dateYmd.localeCompare(b.dateYmd);
+      return a.sortOrder - b.sortOrder;
+    });
+
+    let running = 0;
+    const timeline: StatementTimelineItem[] = rawTimeline.map((item) => {
+      running = Math.round((running + item.chargeAmount - item.paymentAmount) * 100) / 100;
+      return {
+        key: item.key,
+        dateYmd: item.dateYmd,
+        dateDisplay: item.dateDisplay,
+        type: item.type,
+        typeLabel: item.typeLabel,
+        reference: item.reference,
+        description: item.description,
+        subDescription: item.subDescription,
+        warehouseCode: item.warehouseCode,
+        chargeAmount: item.chargeAmount,
+        paymentAmount: item.paymentAmount,
+        runningBalance: running,
+      };
+    });
+
+    const totalCharges = invoicesList.reduce(
+      (sum, i) => Math.round((sum + i.totalAmount) * 100) / 100,
+      0
+    );
+    const totalAbonos = paymentsList.reduce(
+      (sum, p) => Math.round((sum + p.amount) * 100) / 100,
+      0
+    );
     const netBalance = Math.round((totalCharges - totalAbonos) * 100) / 100;
 
+    // Agrupar abonos por medio de pago para mostrar resumen ejecutivo
+    const methodTotalsMap = new Map<string, { method: string; count: number; total: number }>();
+    for (const p of paymentsList) {
+      const m = p.paymentMethod || "Efectivo";
+      const cur = methodTotalsMap.get(m) ?? { method: m, count: 0, total: 0 };
+      cur.count += 1;
+      cur.total = Math.round((cur.total + p.amount) * 100) / 100;
+      methodTotalsMap.set(m, cur);
+    }
+    const methodBreakdown = Array.from(methodTotalsMap.values()).sort((a, b) => b.total - a.total);
+
     return {
-      rows,
+      invoicesList,
+      paymentsList,
+      timeline,
+      methodBreakdown,
       totalCharges,
       totalAbonos,
       netBalance,
     };
-  }, [profile, warehouseFilter, dateFrom, dateTo, groupSameDay, includeCashSales]);
+  }, [profile, warehouseFilter, dateFrom, dateTo, showProductDetails, includeCashSales]);
 
   const activeWarehouseObj = warehouses.find((w) => w.id === warehouseFilter);
   const scopeLabel = activeWarehouseObj
@@ -532,21 +604,24 @@ export function CustomerAccountStatementModal({
   const currentYear = new Date().getFullYear();
   const statementPeriodLabel =
     dateFrom || dateTo
-      ? `${dateFrom ? formatShortDateDmy(dateFrom) : "Inicio"} al ${dateTo ? formatShortDateDmy(dateTo) : "Hoy"}`
+      ? `${dateFrom ? formatShortDateDmy(dateFrom) : "Inicio"} al ${
+          dateTo ? formatShortDateDmy(dateTo) : "Hoy"
+        }`
       : `Año ${currentYear} · Historial Completo`;
 
-  const currentDebtDisplay = Math.max(0, ledgerData.netBalance);
+  const currentDebtDisplay = Math.max(0, statementData.netBalance);
   const currentFavourDisplay =
-    ledgerData.netBalance < 0
-      ? Math.abs(ledgerData.netBalance)
+    statementData.netBalance < 0
+      ? Math.abs(statementData.netBalance)
       : warehouseFilter
-      ? profile.warehouseBreakdown?.find((w) => w.warehouseId === warehouseFilter)?.creditBalance ?? 0
+      ? profile.warehouseBreakdown?.find((w) => w.warehouseId === warehouseFilter)?.creditBalance ??
+        0
       : profile.customer.creditBalance ?? 0;
 
-  // ─── RENDER 1: FORMATO HOJA CARTA / PDF EJECUTIVO (ESTILO EXCEL MEJORADO) ───
+  // ─── RENDER 1: FORMATO HOJA CARTA / PDF EJECUTIVO (ORGANIZADO POR TIPO, SIN CORTES) ───
   const renderLetterStatement = () => (
     <div className="cust-stmt-sheet">
-      {/* Banda Superior Corporativa */}
+      {/* 1. Encabezado Corporativo */}
       <div className="cust-stmt-topbar">
         <div className="cust-stmt-brand">
           <img src={LOGO_SRC} alt="Evolution" className="cust-stmt-logo" width={48} height={48} />
@@ -567,253 +642,402 @@ export function CustomerAccountStatementModal({
         </div>
       </div>
 
-      {/* Ficha del Cliente + Resumen Ejecutivo */}
-      <div className="cust-stmt-info-grid">
-        <div className="cust-stmt-client-card">
-          <div className="cust-stmt-card-eyebrow">DATOS DEL CLIENTE</div>
+      {/* 2. Barra Horizontal de Datos del Cliente */}
+      <div className="cust-stmt-client-banner">
+        <div className="cust-stmt-client-banner__main">
+          <span className="cust-stmt-card-eyebrow">CLIENTE TITULAR</span>
           <div className="cust-stmt-client-name">{profile.customer.displayName}</div>
-          <div className="cust-stmt-client-meta">
-            <div>
-              <span>C.C. / NIT:</span>{" "}
-              <strong>{profile.customer.taxId || "No registrado"}</strong>
-            </div>
-            <div>
-              <span>Teléfono:</span>{" "}
-              <strong>{profile.customer.phone || "No registrado"}</strong>
-            </div>
-            {profile.customer.address && (
-              <div style={{ gridColumn: "1 / -1" }}>
-                <span>Dirección:</span> <strong>{profile.customer.address}</strong>
-              </div>
-            )}
-            <div style={{ gridColumn: "1 / -1" }}>
-              <span>Período consultado:</span> <strong>{statementPeriodLabel}</strong>
-            </div>
+        </div>
+        <div className="cust-stmt-client-banner__details">
+          <div className="cust-stmt-meta-pill">
+            <span>C.C. / NIT</span>
+            <strong>{profile.customer.taxId || "—"}</strong>
+          </div>
+          <div className="cust-stmt-meta-pill">
+            <span>Teléfono</span>
+            <strong>{profile.customer.phone || "—"}</strong>
+          </div>
+          <div className="cust-stmt-meta-pill">
+            <span>Dirección / Ciudad</span>
+            <strong>{profile.customer.address || "—"}</strong>
+          </div>
+          <div className="cust-stmt-meta-pill">
+            <span>Período</span>
+            <strong>{statementPeriodLabel}</strong>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Tarjetas KPI de Resumen Financiero (Ancho completo, números nunca se cortan) */}
+      <div className="cust-stmt-kpis-row">
+        <div className="cust-stmt-kpi cust-stmt-kpi--charges">
+          <div className="cust-stmt-kpi__label">1. TOTAL FACTURADO / CARGOS</div>
+          <div className="cust-stmt-kpi__val">{formatMoney(statementData.totalCharges)}</div>
+          <div className="cust-stmt-kpi__sub">
+            {statementData.invoicesList.length} factura(s) / cargo(s) registrados
           </div>
         </div>
 
-        {/* Tarjetas KPI de Totales del Estado de Cuenta */}
-        <div className="cust-stmt-kpis">
-          <div className="cust-stmt-kpi cust-stmt-kpi--charges">
-            <span className="cust-stmt-kpi__label">TOTAL FACTURADO / CARGOS</span>
-            <strong className="cust-stmt-kpi__val">{formatMoney(ledgerData.totalCharges)}</strong>
-            <span className="cust-stmt-kpi__sub">Suma de facturas y saldos</span>
+        <div className="cust-stmt-kpi cust-stmt-kpi--abonos">
+          <div className="cust-stmt-kpi__label">2. TOTAL ABONOS RECIBIDOS</div>
+          <div className="cust-stmt-kpi__val">{formatMoney(statementData.totalAbonos)}</div>
+          <div className="cust-stmt-kpi__sub">
+            {statementData.paymentsList.length} pago(s) / comprobante(s) aplicados
+          </div>
+        </div>
+
+        <div
+          className={`cust-stmt-kpi ${
+            currentDebtDisplay > 0 ? "cust-stmt-kpi--balance-debt" : "cust-stmt-kpi--balance-ok"
+          }`}
+        >
+          <div className="cust-stmt-kpi__label">
+            {currentDebtDisplay > 0
+              ? "3. SALDO PENDIENTE POR PAGAR"
+              : currentFavourDisplay > 0
+              ? "3. SALDO A FAVOR DEL CLIENTE"
+              : "3. ESTADO DE CARTERA"}
+          </div>
+          <div className="cust-stmt-kpi__val">
+            {currentDebtDisplay > 0
+              ? formatMoney(currentDebtDisplay)
+              : currentFavourDisplay > 0
+              ? formatMoney(currentFavourDisplay)
+              : "$ 0 (AL DÍA)"}
+          </div>
+          <div className="cust-stmt-kpi__sub">
+            {currentDebtDisplay > 0
+              ? "Total cartera pendiente a la fecha"
+              : currentFavourDisplay > 0
+              ? "Disponible a favor para próximas compras"
+              : "Cliente a paz y salvo con la empresa"}
+          </div>
+        </div>
+      </div>
+
+      {viewMode === "by_type" ? (
+        <>
+          {/* 4A. SECCIÓN 1: FACTURAS Y SALDOS INICIALES (CARGOS) */}
+          <div className="cust-stmt-section">
+            <div className="cust-stmt-section-header cust-stmt-section-header--charges">
+              <div className="cust-stmt-section-header__left">
+                <span className="cust-stmt-section-badge cust-stmt-section-badge--charges">
+                  CARGOS Y FACTURAS
+                </span>
+                <span className="cust-stmt-section-title">
+                  1. Detalle de Facturas Emitidas y Saldos Iniciales
+                </span>
+              </div>
+              <span className="cust-stmt-section-count">
+                Subtotal Cargos: <strong>{formatMoney(statementData.totalCharges)}</strong>
+              </span>
+            </div>
+
+            <table className="cust-stmt-clean-table">
+              <thead>
+                <tr>
+                  <th style={{ width: "88px" }}>Fecha</th>
+                  <th style={{ width: "110px" }}>N° Factura</th>
+                  <th>Concepto / Productos Facturados</th>
+                  <th style={{ width: "95px", textAlign: "center" }}>Estado</th>
+                  <th style={{ width: "135px", textAlign: "right" }}>Valor Factura</th>
+                </tr>
+              </thead>
+              <tbody>
+                {statementData.invoicesList.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} style={{ textAlign: "center", padding: "16px", color: "#64748b" }}>
+                      No hay facturas ni saldos iniciales en este período.
+                    </td>
+                  </tr>
+                ) : (
+                  statementData.invoicesList.map((inv, idx) => (
+                    <tr
+                      key={inv.key}
+                      className={
+                        inv.isInitial
+                          ? "cust-stmt-clean-row--initial"
+                          : idx % 2 === 1
+                          ? "cust-stmt-clean-row--alt"
+                          : ""
+                      }
+                    >
+                      <td className="cust-stmt-num">{inv.dateDisplay}</td>
+                      <td>
+                        <strong style={{ color: "#0f172a" }}>{inv.invoiceNumber}</strong>
+                        {!warehouseFilter && inv.warehouseCode && (
+                          <div style={{ fontSize: "9.5px", color: "#64748b" }}>
+                            Sede {inv.warehouseCode}
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600, color: "#1e293b", lineHeight: 1.3 }}>
+                          {inv.description}
+                        </div>
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        <span
+                          className={`cust-stmt-status-pill ${
+                            inv.statusLabel === "Pagada"
+                              ? "is-paid"
+                              : inv.statusLabel === "Abono parcial"
+                              ? "is-partial"
+                              : "is-pending"
+                          }`}
+                        >
+                          {inv.statusLabel}
+                        </span>
+                      </td>
+                      <td className="cust-stmt-num" style={{ textAlign: "right", fontWeight: 800, color: "#0f172a" }}>
+                        {formatMoney(inv.totalAmount)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              <tfoot>
+                <tr className="cust-stmt-clean-tfoot cust-stmt-clean-tfoot--charges">
+                  <td colSpan={4} style={{ textAlign: "right" }}>
+                    TOTAL FACTURADO / CARGOS ({statementData.invoicesList.length})
+                  </td>
+                  <td className="cust-stmt-num" style={{ textAlign: "right" }}>
+                    {formatMoney(statementData.totalCharges)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
 
-          <div className="cust-stmt-kpi cust-stmt-kpi--abonos">
-            <span className="cust-stmt-kpi__label">TOTAL ABONOS RECIBIDOS</span>
-            <strong className="cust-stmt-kpi__val">{formatMoney(ledgerData.totalAbonos)}</strong>
-            <span className="cust-stmt-kpi__sub">Pagos y transferencias</span>
+          {/* 4B. SECCIÓN 2: ABONOS, PAGOS Y TRANSFERENCIAS RECIBIDAS */}
+          <div className="cust-stmt-section">
+            <div className="cust-stmt-section-header cust-stmt-section-header--abonos">
+              <div className="cust-stmt-section-header__left">
+                <span className="cust-stmt-section-badge cust-stmt-section-badge--abonos">
+                  ABONOS Y PAGOS
+                </span>
+                <span className="cust-stmt-section-title">
+                  2. Detalle de Abonos, Transferencias y Comprobantes Recibidos
+                </span>
+              </div>
+              <span className="cust-stmt-section-count">
+                Subtotal Abonos: <strong>{formatMoney(statementData.totalAbonos)}</strong>
+              </span>
+            </div>
+
+            <table className="cust-stmt-clean-table">
+              <thead>
+                <tr>
+                  <th style={{ width: "88px" }}>Fecha</th>
+                  <th style={{ width: "115px" }}>Comprobante</th>
+                  <th style={{ width: "130px" }}>Medio de Pago / Banco</th>
+                  <th>Detalle / Factura Aplicada</th>
+                  <th style={{ width: "135px", textAlign: "right" }}>Valor Abonado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {statementData.paymentsList.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} style={{ textAlign: "center", padding: "16px", color: "#64748b" }}>
+                      No se registran abonos ni pagos en este período.
+                    </td>
+                  </tr>
+                ) : (
+                  statementData.paymentsList.map((p, idx) => (
+                    <tr
+                      key={p.key}
+                      className={idx % 2 === 1 ? "cust-stmt-clean-row--alt" : ""}
+                    >
+                      <td className="cust-stmt-num">{p.dateDisplay}</td>
+                      <td>
+                        <strong style={{ color: "#0f172a" }}>{p.receiptNumber}</strong>
+                        {!warehouseFilter && p.warehouseCode && (
+                          <div style={{ fontSize: "9.5px", color: "#64748b" }}>
+                            Sede {p.warehouseCode}
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        <span className="cust-stmt-method-tag">{p.paymentMethod}</span>
+                      </td>
+                      <td>
+                        <div style={{ color: "#1e293b", fontWeight: 500 }}>
+                          {p.notes || `Abono recibido vía ${p.paymentMethod}`}
+                        </div>
+                        {p.invoiceRefs.length > 0 && (
+                          <div style={{ fontSize: "10px", color: "#64748b", marginTop: "1px" }}>
+                            Aplicado a factura(s): <strong>{p.invoiceRefs.join(", ")}</strong>
+                          </div>
+                        )}
+                      </td>
+                      <td className="cust-stmt-num" style={{ textAlign: "right", fontWeight: 800, color: "#15803d" }}>
+                        {formatMoney(p.amount)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              <tfoot>
+                <tr className="cust-stmt-clean-tfoot cust-stmt-clean-tfoot--abonos">
+                  <td colSpan={4} style={{ textAlign: "right" }}>
+                    TOTAL ABONOS RECIBIDOS ({statementData.paymentsList.length})
+                  </td>
+                  <td className="cust-stmt-num" style={{ textAlign: "right" }}>
+                    {formatMoney(statementData.totalAbonos)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+
+            {/* Resumen compacto por Banco / Medio de Pago */}
+            {statementData.methodBreakdown.length > 0 && (
+              <div className="cust-stmt-methods-bar">
+                <span className="cust-stmt-methods-bar__title">Abonos por medio de pago:</span>
+                <div className="cust-stmt-methods-bar__list">
+                  {statementData.methodBreakdown.map((m) => (
+                    <span key={m.method} className="cust-stmt-methods-bar__item">
+                      <strong>{m.method}</strong> ({m.count}): {formatMoney(m.total)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        /* 4C. VISTA ALTERNATIVA: HISTORIAL CRONOLÓGICO UNIFICADO (SIN CORTES) */
+        <div className="cust-stmt-section">
+          <div className="cust-stmt-section-header cust-stmt-section-header--timeline">
+            <div className="cust-stmt-section-header__left">
+              <span className="cust-stmt-section-badge cust-stmt-section-badge--timeline">
+                CRONOLÓGICO
+              </span>
+              <span className="cust-stmt-section-title">
+                Historial Cronológico de Movimientos (Facturas y Abonos)
+              </span>
+            </div>
+            <span className="cust-stmt-section-count">
+              {statementData.timeline.length} movimiento(s)
+            </span>
           </div>
 
+          <table className="cust-stmt-clean-table">
+            <thead>
+              <tr>
+                <th style={{ width: "86px" }}>Fecha</th>
+                <th style={{ width: "135px" }}>Tipo de Movimiento</th>
+                <th style={{ width: "100px" }}>Documento</th>
+                <th>Detalle / Productos / Medio de Pago</th>
+                <th style={{ width: "115px", textAlign: "right" }}>Cargo (+)</th>
+                <th style={{ width: "115px", textAlign: "right" }}>Abono (-)</th>
+                <th style={{ width: "125px", textAlign: "right" }}>Saldo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {statementData.timeline.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: "center", padding: "18px", color: "#64748b" }}>
+                    No hay movimientos registrados en este período.
+                  </td>
+                </tr>
+              ) : (
+                statementData.timeline.map((item, idx) => (
+                  <tr
+                    key={item.key}
+                    className={idx % 2 === 1 ? "cust-stmt-clean-row--alt" : ""}
+                  >
+                    <td className="cust-stmt-num">{item.dateDisplay}</td>
+                    <td>
+                      <span
+                        className={`cust-stmt-status-pill ${
+                          item.type === "payment" ? "is-paid" : "is-pending"
+                        }`}
+                      >
+                        {item.typeLabel}
+                      </span>
+                    </td>
+                    <td>
+                      <strong>{item.reference}</strong>
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: 600, color: "#1e293b" }}>{item.description}</div>
+                      {item.subDescription && (
+                        <div style={{ fontSize: "10px", color: "#64748b" }}>
+                          {item.subDescription}
+                        </div>
+                      )}
+                    </td>
+                    <td className="cust-stmt-num" style={{ textAlign: "right", fontWeight: 700 }}>
+                      {item.chargeAmount > 0 ? formatMoney(item.chargeAmount) : "—"}
+                    </td>
+                    <td
+                      className="cust-stmt-num"
+                      style={{ textAlign: "right", fontWeight: 700, color: "#15803d" }}
+                    >
+                      {item.paymentAmount > 0 ? formatMoney(item.paymentAmount) : "—"}
+                    </td>
+                    <td
+                      className="cust-stmt-num"
+                      style={{
+                        textAlign: "right",
+                        fontWeight: 800,
+                        color: item.runningBalance < 0 ? "#059669" : "#0f172a",
+                      }}
+                    >
+                      {item.runningBalance < 0
+                        ? `${formatMoney(Math.abs(item.runningBalance))} (A favor)`
+                        : formatMoney(item.runningBalance)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 5. LIQUIDACIÓN FINAL DEL ESTADO DE CUENTA */}
+      <div className="cust-stmt-final-box">
+        <div className="cust-stmt-final-box__formula">
+          <div className="cust-stmt-final-item">
+            <span>Total Facturas y Saldos (+)</span>
+            <strong style={{ color: "#9f1239" }}>{formatMoney(statementData.totalCharges)}</strong>
+          </div>
+          <div className="cust-stmt-final-operator">−</div>
+          <div className="cust-stmt-final-item">
+            <span>Total Abonos Recibidos (−)</span>
+            <strong style={{ color: "#166534" }}>{formatMoney(statementData.totalAbonos)}</strong>
+          </div>
+          <div className="cust-stmt-final-operator">=</div>
           <div
-            className={`cust-stmt-kpi ${
-              currentDebtDisplay > 0
-                ? "cust-stmt-kpi--balance-debt"
-                : "cust-stmt-kpi--balance-ok"
+            className={`cust-stmt-final-result ${
+              currentDebtDisplay > 0 ? "is-debt" : "is-clear"
             }`}
           >
-            <span className="cust-stmt-kpi__label">
+            <span>
               {currentDebtDisplay > 0
-                ? "SALDO PENDIENTE POR PAGAR"
+                ? "SALDO TOTAL PENDIENTE POR PAGAR"
                 : currentFavourDisplay > 0
                 ? "SALDO A FAVOR DEL CLIENTE"
-                : "ESTADO DE CARTERA"}
+                : "SALDO FINAL A PAGAR"}
             </span>
-            <strong className="cust-stmt-kpi__val">
+            <strong>
               {currentDebtDisplay > 0
                 ? formatMoney(currentDebtDisplay)
                 : currentFavourDisplay > 0
                 ? formatMoney(currentFavourDisplay)
                 : "$ 0 (AL DÍA)"}
             </strong>
-            <span className="cust-stmt-kpi__sub">
-              {currentDebtDisplay > 0
-                ? "Total cartera pendiente a la fecha"
-                : currentFavourDisplay > 0
-                ? "Disponible para próximas compras"
-                : "Cliente a paz y salvo"}
-            </span>
           </div>
         </div>
       </div>
 
-      {/* Tabla Principal Estilo Estado de Cuenta (Inspirada en el Excel del usuario pero moderna) */}
-      <div className="cust-stmt-table-section">
-        <div className="cust-stmt-period-banner">
-          <span className="cust-stmt-period-year">{currentYear}</span>
-          <span className="cust-stmt-period-title">
-            RELACIÓN CRONOLÓGICA DE FACTURAS, ABONOS Y COMPROBANTES
-          </span>
-          <span className="cust-stmt-period-count">
-            {ledgerData.rows.length} movimiento(s)
-          </span>
-        </div>
-
-        <table className="cust-stmt-table">
-          <thead>
-            <tr>
-              <th style={{ width: "92px" }}>FECHA</th>
-              <th style={{ width: "125px" }}># FACTURA</th>
-              <th style={{ width: "125px", textAlign: "right" }}>VALOR</th>
-              <th style={{ width: "125px", textAlign: "right" }}>ABONOS</th>
-              <th>DETALLES / MEDIO DE PAGO</th>
-              <th style={{ width: "115px", textAlign: "center" }}>COMPROBANTE</th>
-              <th style={{ width: "125px", textAlign: "right" }}>SALDO</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ledgerData.rows.length === 0 ? (
-              <tr>
-                <td colSpan={7} style={{ textAlign: "center", padding: "24px", color: "#64748b" }}>
-                  No se registran facturas a crédito ni abonos en el período seleccionado.
-                </td>
-              </tr>
-            ) : (
-              ledgerData.rows.map((row, idx) => {
-                const invText =
-                  row.invoiceNumbers.length > 0
-                    ? row.invoiceNumbers.join(", ")
-                    : row.isInitialRow
-                    ? "Saldo anterior"
-                    : "";
-
-                return (
-                  <tr
-                    key={row.key}
-                    className={
-                      row.isInitialRow
-                        ? "cust-stmt-row--initial"
-                        : idx % 2 === 1
-                        ? "cust-stmt-row--alt"
-                        : ""
-                    }
-                  >
-                    <td className="cust-stmt-cell-date">{row.dateDisplay}</td>
-                    <td className="cust-stmt-cell-invoice">
-                      {invText ? (
-                        <strong>{invText}</strong>
-                      ) : (
-                        <span style={{ color: "#94a3b8" }}>—</span>
-                      )}
-                      {!warehouseFilter && row.warehouseCodes.length > 0 && (
-                        <div style={{ fontSize: "9.5px", color: "#64748b", fontWeight: 600 }}>
-                          Sede: {row.warehouseCodes.join(", ")}
-                        </div>
-                      )}
-                    </td>
-                    <td className="cust-stmt-cell-charge">
-                      {row.chargeAmount > 0 ? (
-                        <strong>{formatMoney(row.chargeAmount)}</strong>
-                      ) : (
-                        ""
-                      )}
-                    </td>
-                    <td className="cust-stmt-cell-abono">
-                      {row.abonoAmount > 0 ? (
-                        <strong>{formatMoney(row.abonoAmount)}</strong>
-                      ) : (
-                        ""
-                      )}
-                    </td>
-                    <td className="cust-stmt-cell-details">
-                      {row.detailsText ? (
-                        <div className="cust-stmt-detail-main">{row.detailsText}</div>
-                      ) : null}
-                      {showProductDetails && row.itemsSummary.length > 0 && (
-                        <div className="cust-stmt-detail-items">
-                          {row.itemsSummary.join(" | ")}
-                        </div>
-                      )}
-                      {!row.detailsText && (!showProductDetails || row.itemsSummary.length === 0) && (
-                        <span style={{ color: "#94a3b8" }}>—</span>
-                      )}
-                    </td>
-                    <td className="cust-stmt-cell-voucher">
-                      {row.vouchers.length > 0 ? (
-                        <strong>{row.vouchers.join(", ")}</strong>
-                      ) : (
-                        ""
-                      )}
-                    </td>
-                    <td
-                      className="cust-stmt-cell-balance"
-                      style={{
-                        color:
-                          row.runningBalance > 0
-                            ? "#0f172a"
-                            : row.runningBalance < 0
-                            ? "#059669"
-                            : "#64748b",
-                      }}
-                    >
-                      <strong>
-                        {row.runningBalance < 0
-                          ? `${formatMoney(Math.abs(row.runningBalance))} (A favor)`
-                          : formatMoney(row.runningBalance)}
-                      </strong>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-          <tfoot>
-            <tr className="cust-stmt-tfoot-row">
-              <td colSpan={2} className="cust-stmt-tfoot-label">
-                TOTALES DEL PERÍODO
-              </td>
-              <td className="cust-stmt-tfoot-charges">
-                {formatMoney(ledgerData.totalCharges)}
-              </td>
-              <td className="cust-stmt-tfoot-abonos">
-                {formatMoney(ledgerData.totalAbonos)}
-              </td>
-              <td colSpan={2} className="cust-stmt-tfoot-saldo-label">
-                {currentDebtDisplay > 0
-                  ? "SALDO TOTAL PENDIENTE"
-                  : currentFavourDisplay > 0
-                  ? "SALDO A FAVOR DISPONIBLE"
-                  : "SALDO FINAL"}
-              </td>
-              <td
-                className={`cust-stmt-tfoot-saldo-val ${
-                  currentDebtDisplay > 0 ? "is-debt" : "is-clear"
-                }`}
-              >
-                {currentDebtDisplay > 0
-                  ? formatMoney(currentDebtDisplay)
-                  : currentFavourDisplay > 0
-                  ? formatMoney(currentFavourDisplay)
-                  : "$ 0"}
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-
-      {/* Pie de Página y Firmas */}
+      {/* 6. Nota Informativa */}
       <div className="cust-stmt-footer">
         <div className="cust-stmt-footer-note">
-          <strong>Información importante:</strong> Este estado de cuenta refleja las facturas emitidas y los
+          <strong>Información importante:</strong> Este estado de cuenta detalla las facturas emitidas y los
           abonos registrados en nuestro sistema hasta la fecha y hora de expedición. Si realizó algún pago
           reciente pendiente de soporte, por favor envíe el comprobante para su respectiva aplicación.
-        </div>
-
-        <div className="cust-stmt-signatures">
-          <div className="cust-stmt-sign-box">
-            <div className="cust-stmt-sign-line" />
-            <div className="cust-stmt-sign-title">EXPEDIDO POR · EVOLUTION COLCHONES S.A.S</div>
-            <div className="cust-stmt-sign-sub">Departamento de Cartera y Facturación</div>
-          </div>
-          <div className="cust-stmt-sign-box">
-            <div className="cust-stmt-sign-line" />
-            <div className="cust-stmt-sign-title">RECIBÍ CONFORME · CLIENTE</div>
-            <div className="cust-stmt-sign-sub">
-              {profile.customer.displayName}{" "}
-              {profile.customer.taxId ? `· C.C./NIT ${profile.customer.taxId}` : ""}
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -821,7 +1045,10 @@ export function CustomerAccountStatementModal({
 
   // ─── RENDER 2: FORMATO TIRILLA TÉRMICA POS (80 MM) ─────────────────────────
   const renderVoucherStatement = () => (
-    <div className="sale-voucher-body" style={{ width: "72mm", maxWidth: "72mm", margin: "0 auto", padding: "3mm 2.5mm" }}>
+    <div
+      className="sale-voucher-body"
+      style={{ width: "72mm", maxWidth: "72mm", margin: "0 auto", padding: "3mm 2.5mm" }}
+    >
       <div className="sale-voucher-header">
         <div className="sale-voucher-logo-row">
           <img src={LOGO_SRC} alt="Evolution" className="sale-voucher-logo" width={34} height={34} />
@@ -844,7 +1071,9 @@ export function CustomerAccountStatementModal({
       <div className="sale-voucher-section">
         <div className="sale-voucher-row">
           <span className="sale-voucher-label">Cliente:</span>
-          <span className="sale-voucher-val sale-voucher-val--bold">{profile.customer.displayName}</span>
+          <span className="sale-voucher-val sale-voucher-val--bold">
+            {profile.customer.displayName}
+          </span>
         </div>
         {profile.customer.taxId && (
           <div className="sale-voucher-row">
@@ -862,73 +1091,89 @@ export function CustomerAccountStatementModal({
 
       <div className="sale-voucher-divider" />
 
-      {/* Movimientos en tirilla */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      {/* 1. Facturas en Tirilla */}
+      <div style={{ marginBottom: 4 }}>
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
             fontWeight: 900,
             fontSize: "8.5px",
             borderBottom: "1px solid #000",
             paddingBottom: "2px",
+            marginBottom: "3px",
           }}
         >
-          <span>FECHA / DOC / DETALLE</span>
-          <span>VALOR / ABONO</span>
+          1. FACTURAS Y CARGOS ({statementData.invoicesList.length})
         </div>
-
-        {ledgerData.rows.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "6px 0", fontSize: "9px" }}>
-            Sin movimientos registrados
-          </div>
-        ) : (
-          ledgerData.rows.map((r) => (
-            <div
-              key={r.key}
-              style={{
-                borderBottom: "0.5px dotted #64748b",
-                paddingBottom: "3px",
-                fontSize: "8.5px",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700 }}>
-                <span>
-                  {r.dateDisplay}
-                  {r.invoiceNumbers.length > 0 ? ` · Fac: ${r.invoiceNumbers.join(",")}` : ""}
-                </span>
-                <span>Saldo: {formatMoney(r.runningBalance)}</span>
-              </div>
-              {r.chargeAmount > 0 && (
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span>+ Cargo / Factura:</span>
-                  <strong>{formatMoney(r.chargeAmount)}</strong>
-                </div>
-              )}
-              {r.abonoAmount > 0 && (
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span>
-                    - Abono ({r.paymentMethods.join("/") || "Pago"}
-                    {r.vouchers.length > 0 ? ` #${r.vouchers.join(",")}` : ""}):
-                  </span>
-                  <strong>- {formatMoney(r.abonoAmount)}</strong>
-                </div>
-              )}
+        {statementData.invoicesList.map((inv) => (
+          <div
+            key={inv.key}
+            style={{
+              borderBottom: "0.5px dotted #64748b",
+              paddingBottom: "2px",
+              marginBottom: "2px",
+              fontSize: "8.5px",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700 }}>
+              <span>
+                {inv.dateDisplay} · Fac: {inv.invoiceNumber}
+              </span>
+              <strong>{formatMoney(inv.totalAmount)}</strong>
             </div>
-          ))
-        )}
+            <div style={{ fontSize: "8px", color: "#334155" }}>{inv.description}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="sale-voucher-divider" />
+
+      {/* 2. Abonos en Tirilla */}
+      <div style={{ marginBottom: 4 }}>
+        <div
+          style={{
+            fontWeight: 900,
+            fontSize: "8.5px",
+            borderBottom: "1px solid #000",
+            paddingBottom: "2px",
+            marginBottom: "3px",
+          }}
+        >
+          2. ABONOS RECIBIDOS ({statementData.paymentsList.length})
+        </div>
+        {statementData.paymentsList.map((p) => (
+          <div
+            key={p.key}
+            style={{
+              borderBottom: "0.5px dotted #64748b",
+              paddingBottom: "2px",
+              marginBottom: "2px",
+              fontSize: "8.5px",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700 }}>
+              <span>
+                {p.dateDisplay} · {p.paymentMethod}
+              </span>
+              <strong>- {formatMoney(p.amount)}</strong>
+            </div>
+            <div style={{ fontSize: "8px", color: "#334155" }}>
+              Comp: {p.receiptNumber}
+              {p.invoiceRefs.length > 0 ? ` · Fac: ${p.invoiceRefs.join(",")}` : ""}
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="sale-voucher-divider" />
 
       <div className="sale-voucher-totals">
         <div className="sale-voucher-row">
-          <span>Total Cargos / Facturas:</span>
-          <strong>{formatMoney(ledgerData.totalCharges)}</strong>
+          <span>Total Facturado / Cargos:</span>
+          <strong>{formatMoney(statementData.totalCharges)}</strong>
         </div>
         <div className="sale-voucher-row">
           <span>Total Abonos Recibidos:</span>
-          <strong>{formatMoney(ledgerData.totalAbonos)}</strong>
+          <strong>- {formatMoney(statementData.totalAbonos)}</strong>
         </div>
         <div className="sale-voucher-total-box" style={{ marginTop: 4 }}>
           <span className="sale-voucher-total-label">
@@ -944,11 +1189,6 @@ export function CustomerAccountStatementModal({
             <strong>{formatMoney(currentFavourDisplay)}</strong>
           </div>
         )}
-      </div>
-
-      <div className="sale-voucher-signature" style={{ marginTop: 10 }}>
-        <div className="sale-voucher-signature-line" />
-        <div className="sale-voucher-signature-name">FIRMA CLIENTE / CONFORME</div>
       </div>
     </div>
   );
@@ -978,7 +1218,7 @@ export function CustomerAccountStatementModal({
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
-          maxWidth: format === "voucher" ? 540 : 1120,
+          maxWidth: format === "voucher" ? 540 : 1040,
           maxHeight: "94vh",
           display: "flex",
           flexDirection: "column",
@@ -1022,12 +1262,58 @@ export function CustomerAccountStatementModal({
                 Estado de Cuenta · {profile.customer.displayName}
               </h2>
               <span style={{ fontSize: "0.78rem", color: "#94a3b8" }}>
-                Listo para guardar en PDF (enviar por WhatsApp) o imprimir en papel
+                Organizado y optimizado para guardar en PDF (enviar por WhatsApp) o imprimir
               </span>
             </div>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            {/* Selector de Organización: Por Tipo vs Cronológico */}
+            {format === "letter" && (
+              <div
+                style={{
+                  display: "inline-flex",
+                  background: "#1e293b",
+                  padding: "3px",
+                  borderRadius: 10,
+                  border: "1px solid #334155",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setViewMode("by_type")}
+                  style={{
+                    padding: "6px 11px",
+                    borderRadius: 7,
+                    border: "none",
+                    fontSize: "0.79rem",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    background: viewMode === "by_type" ? "#3b82f6" : "transparent",
+                    color: viewMode === "by_type" ? "#ffffff" : "#cbd5e1",
+                  }}
+                >
+                  Organizado por Tipo (Facturas / Abonos)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("timeline")}
+                  style={{
+                    padding: "6px 11px",
+                    borderRadius: 7,
+                    border: "none",
+                    fontSize: "0.79rem",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    background: viewMode === "timeline" ? "#3b82f6" : "transparent",
+                    color: viewMode === "timeline" ? "#ffffff" : "#cbd5e1",
+                  }}
+                >
+                  Cronológico
+                </button>
+              </div>
+            )}
+
             {/* Selector de Formato */}
             <div
               style={{
@@ -1097,7 +1383,6 @@ export function CustomerAccountStatementModal({
                 cursor: "pointer",
                 boxShadow: "0 4px 14px rgba(16, 185, 129, 0.35)",
               }}
-              title="En la ventana de impresión elige 'Guardar como PDF' para descargarlo y enviarlo por WhatsApp, o elige tu impresora."
             >
               <Download size={16} />
               <span>Descargar PDF / Imprimir</span>
@@ -1126,7 +1411,7 @@ export function CustomerAccountStatementModal({
           </div>
         </div>
 
-        {/* Barra de Filtros y Personalización del Estado de Cuenta */}
+        {/* Barra de Filtros */}
         <div
           style={{
             background: "#ffffff",
@@ -1141,9 +1426,16 @@ export function CustomerAccountStatementModal({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-            {/* Filtro por sede si hay más de una */}
             {warehouses.length > 1 && (
-              <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: 600, color: "#334155" }}>
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontWeight: 600,
+                  color: "#334155",
+                }}
+              >
                 <Building2 size={15} color="#0d9488" />
                 <span>Sede:</span>
                 <select
@@ -1167,8 +1459,15 @@ export function CustomerAccountStatementModal({
               </label>
             )}
 
-            {/* Rango de fechas opcional (calcula Saldo Anterior automáticamente) */}
-            <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "#334155", fontWeight: 600 }}>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                color: "#334155",
+                fontWeight: 600,
+              }}
+            >
               <Calendar size={15} color="#0d9488" />
               <span>Desde:</span>
               <input
@@ -1227,25 +1526,6 @@ export function CustomerAccountStatementModal({
                 color: "#334155",
                 fontWeight: 600,
               }}
-              title="Une en la misma fila la factura y el abono cuando ocurrieron el mismo día (como en tu formato de Excel)"
-            >
-              <input
-                type="checkbox"
-                checked={groupSameDay}
-                onChange={(e) => setGroupSameDay(e.target.checked)}
-              />
-              <span>Unir factura y abono del mismo día</span>
-            </label>
-
-            <label
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "5px",
-                cursor: "pointer",
-                color: "#334155",
-                fontWeight: 600,
-              }}
             >
               <input
                 type="checkbox"
@@ -1275,34 +1555,12 @@ export function CustomerAccountStatementModal({
           </div>
         </div>
 
-        {/* Tip rápido para guardar PDF y enviar por WhatsApp */}
-        <div
-          style={{
-            background: "#ecfdf5",
-            borderBottom: "1px solid #a7f3d0",
-            padding: "7px 20px",
-            fontSize: "0.79rem",
-            color: "#065f46",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: "8px",
-          }}
-        >
-          <span>
-            💡 <strong>Tip para enviar por WhatsApp o imprimir:</strong> Haz clic en{" "}
-            <strong>"Descargar PDF / Imprimir"</strong>. En Destino puedes elegir{" "}
-            <strong>"Guardar como PDF"</strong> para descargarlo al computador/celular y enviarlo por WhatsApp, o seleccionar tu impresora.
-          </span>
-        </div>
-
-        {/* Área de Vista Previa del Documento */}
+        {/* Vista Previa */}
         <div
           style={{
             flex: 1,
             overflowY: "auto",
-            padding: "24px 16px",
+            padding: "20px 16px",
             display: "flex",
             justifyContent: "center",
             alignItems: "flex-start",
@@ -1349,16 +1607,18 @@ export function CustomerAccountStatementModal({
           display: none;
         }
 
-        /* Estilos del Estado de Cuenta Ejecutivo (Pantalla + Impresión PDF) */
+        /* ─────────────────────────────────────────────────────────────────
+           DISEÑO EJECUTIVO ORGANIZADO POR TIPO (100% AJUSTADO A HOJA CARTA)
+           ───────────────────────────────────────────────────────────────── */
         .cust-stmt-sheet {
           width: 100%;
-          max-width: 960px;
+          max-width: 780px;
           background: #ffffff;
           color: #0f172a;
           border-radius: 12px;
           border: 1px solid #cbd5e1;
           box-shadow: 0 12px 32px rgba(15, 23, 42, 0.1);
-          padding: 28px 32px;
+          padding: 24px 28px;
           box-sizing: border-box;
           font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
           -webkit-print-color-adjust: exact;
@@ -1369,28 +1629,28 @@ export function CustomerAccountStatementModal({
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          gap: 16px;
-          padding-bottom: 16px;
-          border-bottom: 3px solid #0d9488;
-          margin-bottom: 18px;
+          gap: 12px;
+          padding-bottom: 14px;
+          border-bottom: 2.5px solid #0d9488;
+          margin-bottom: 14px;
           flex-wrap: wrap;
         }
 
         .cust-stmt-brand {
           display: flex;
           align-items: center;
-          gap: 14px;
+          gap: 12px;
         }
 
         .cust-stmt-logo {
-          width: 52px;
-          height: 52px;
+          width: 46px;
+          height: 46px;
           object-fit: contain;
-          border-radius: 10px;
+          border-radius: 8px;
         }
 
         .cust-stmt-company {
-          font-size: 1.35rem;
+          font-size: 1.2rem;
           font-weight: 900;
           letter-spacing: 0.02em;
           color: #0f172a;
@@ -1398,10 +1658,10 @@ export function CustomerAccountStatementModal({
         }
 
         .cust-stmt-company-sub {
-          font-size: 0.8rem;
+          font-size: 0.76rem;
           font-weight: 600;
           color: #0f766e;
-          margin-top: 3px;
+          margin-top: 2px;
         }
 
         .cust-stmt-doc-box {
@@ -1413,97 +1673,92 @@ export function CustomerAccountStatementModal({
           background: #0f172a;
           color: #ffffff;
           font-weight: 800;
-          font-size: 0.82rem;
+          font-size: 0.76rem;
           letter-spacing: 0.05em;
-          padding: 5px 12px;
+          padding: 4px 10px;
           border-radius: 6px;
-          margin-bottom: 5px;
+          margin-bottom: 4px;
         }
 
         .cust-stmt-doc-date {
-          font-size: 0.78rem;
+          font-size: 0.74rem;
           color: #475569;
         }
 
         .cust-stmt-doc-scope {
-          font-size: 0.78rem;
+          font-size: 0.74rem;
           font-weight: 700;
           color: #0f766e;
-          margin-top: 2px;
+          margin-top: 1px;
         }
 
-        .cust-stmt-info-grid {
-          display: grid;
-          grid-template-columns: 1.15fr 1.85fr;
-          gap: 16px;
-          margin-bottom: 20px;
-          align-items: stretch;
-        }
-
-        @media (max-width: 780px) {
-          .cust-stmt-info-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-
-        .cust-stmt-client-card {
+        /* Banner horizontal de datos del cliente */
+        .cust-stmt-client-banner {
           background: #f8fafc;
           border: 1px solid #cbd5e1;
           border-left: 4px solid #0d9488;
           border-radius: 10px;
-          padding: 12px 16px;
+          padding: 10px 14px;
+          margin-bottom: 14px;
           display: flex;
-          flex-direction: column;
-          justify-content: center;
+          justify-content: space-between;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 10px;
         }
 
         .cust-stmt-card-eyebrow {
-          font-size: 0.68rem;
+          font-size: 0.65rem;
           font-weight: 800;
           letter-spacing: 0.08em;
           color: #0f766e;
           text-transform: uppercase;
-          margin-bottom: 3px;
+          display: block;
         }
 
         .cust-stmt-client-name {
-          font-size: 1.2rem;
+          font-size: 1.15rem;
           font-weight: 900;
           color: #0f172a;
-          margin-bottom: 6px;
         }
 
-        .cust-stmt-client-meta {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 4px 12px;
-          font-size: 0.8rem;
-          color: #334155;
+        .cust-stmt-client-banner__details {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px 16px;
         }
 
-        .cust-stmt-client-meta span {
+        .cust-stmt-meta-pill {
+          display: flex;
+          flex-direction: column;
+          font-size: 0.75rem;
+        }
+
+        .cust-stmt-meta-pill span {
+          font-size: 0.66rem;
           color: #64748b;
+          text-transform: uppercase;
+          font-weight: 700;
         }
 
-        .cust-stmt-kpis {
+        .cust-stmt-meta-pill strong {
+          color: #0f172a;
+          font-weight: 700;
+        }
+
+        /* Fila de 3 Tarjetas KPI amplias */
+        .cust-stmt-kpis-row {
           display: grid;
           grid-template-columns: repeat(3, 1fr);
           gap: 10px;
-        }
-
-        @media (max-width: 600px) {
-          .cust-stmt-kpis {
-            grid-template-columns: 1fr;
-          }
+          margin-bottom: 16px;
         }
 
         .cust-stmt-kpi {
           border-radius: 10px;
-          padding: 12px 14px;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
+          padding: 10px 14px;
           border: 1px solid #cbd5e1;
+          box-sizing: border-box;
         }
 
         .cust-stmt-kpi--charges {
@@ -1529,16 +1784,18 @@ export function CustomerAccountStatementModal({
         .cust-stmt-kpi__label {
           font-size: 0.68rem;
           font-weight: 800;
-          letter-spacing: 0.04em;
+          letter-spacing: 0.03em;
           text-transform: uppercase;
           color: #475569;
         }
 
         .cust-stmt-kpi__val {
-          font-size: 1.25rem;
+          font-size: 1.2rem;
           font-weight: 900;
-          margin: 4px 0 2px;
+          margin: 3px 0 2px;
           color: #0f172a;
+          font-variant-numeric: tabular-nums;
+          white-space: nowrap;
         }
 
         .cust-stmt-kpi--charges .cust-stmt-kpi__val {
@@ -1551,251 +1808,296 @@ export function CustomerAccountStatementModal({
 
         .cust-stmt-kpi--balance-debt .cust-stmt-kpi__val {
           color: #be123c;
-          font-size: 1.35rem;
         }
 
         .cust-stmt-kpi--balance-ok .cust-stmt-kpi__val {
           color: #047857;
-          font-size: 1.35rem;
         }
 
         .cust-stmt-kpi__sub {
-          font-size: 0.72rem;
+          font-size: 0.7rem;
           color: #64748b;
         }
 
-        /* Tabla estilo Excel mejorado */
-        .cust-stmt-table-section {
-          border: 1.5px solid #1e293b;
-          border-radius: 8px;
+        /* Bloques por Tipo (1. Facturas / 2. Abonos) */
+        .cust-stmt-section {
+          border: 1px solid #cbd5e1;
+          border-radius: 10px;
           overflow: hidden;
-          margin-bottom: 18px;
+          margin-bottom: 14px;
+          background: #ffffff;
         }
 
-        .cust-stmt-period-banner {
-          background: #0f172a;
-          color: #ffffff;
+        .cust-stmt-section-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 7px 14px;
-          font-size: 0.8rem;
-          font-weight: 800;
+          padding: 8px 14px;
+          border-bottom: 1px solid #cbd5e1;
+          flex-wrap: wrap;
+          gap: 8px;
         }
 
-        .cust-stmt-period-year {
-          background: #06b6d4;
-          color: #083344;
+        .cust-stmt-section-header--charges {
+          background: #fff1f2;
+        }
+
+        .cust-stmt-section-header--abonos {
+          background: #f0fdf4;
+        }
+
+        .cust-stmt-section-header--timeline {
+          background: #f1f5f9;
+        }
+
+        .cust-stmt-section-header__left {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .cust-stmt-section-badge {
+          font-size: 0.65rem;
           font-weight: 900;
-          padding: 2px 10px;
-          border-radius: 4px;
-          font-size: 0.85rem;
-        }
-
-        .cust-stmt-period-title {
+          padding: 2px 8px;
+          border-radius: 999px;
           letter-spacing: 0.04em;
+        }
+
+        .cust-stmt-section-badge--charges {
+          background: #be123c;
+          color: #ffffff;
+        }
+
+        .cust-stmt-section-badge--abonos {
+          background: #15803d;
+          color: #ffffff;
+        }
+
+        .cust-stmt-section-badge--timeline {
+          background: #0f172a;
+          color: #ffffff;
+        }
+
+        .cust-stmt-section-title {
+          font-size: 0.82rem;
+          font-weight: 800;
+          color: #0f172a;
+        }
+
+        .cust-stmt-section-count {
           font-size: 0.78rem;
+          color: #334155;
         }
 
-        .cust-stmt-period-count {
-          color: #94a3b8;
-          font-size: 0.75rem;
-          font-weight: 600;
-        }
-
-        .cust-stmt-table {
+        .cust-stmt-clean-table {
           width: 100%;
           border-collapse: collapse;
-          font-size: 0.82rem;
+          font-size: 0.78rem;
+          table-layout: fixed;
         }
 
-        .cust-stmt-table thead tr {
-          background: #fef3c7;
-          color: #1e293b;
-          border-bottom: 1.5px solid #1e293b;
-        }
-
-        .cust-stmt-table th {
-          padding: 8px 10px;
-          font-size: 0.74rem;
-          font-weight: 900;
+        .cust-stmt-clean-table th {
+          background: #f8fafc;
+          color: #475569;
+          font-size: 0.68rem;
+          font-weight: 800;
           text-transform: uppercase;
-          letter-spacing: 0.04em;
-          border-right: 1px solid #cbd5e1;
+          letter-spacing: 0.03em;
+          padding: 7px 10px;
+          border-bottom: 1px solid #cbd5e1;
           text-align: left;
         }
 
-        .cust-stmt-table th:last-child {
-          border-right: none;
-        }
-
-        .cust-stmt-table td {
+        .cust-stmt-clean-table td {
           padding: 7px 10px;
-          border-bottom: 1px solid #cbd5e1;
-          border-right: 1px solid #e2e8f0;
+          border-bottom: 1px solid #e2e8f0;
           vertical-align: middle;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
         }
 
-        .cust-stmt-table td:last-child {
-          border-right: none;
-        }
-
-        .cust-stmt-row--alt {
+        .cust-stmt-clean-row--alt {
           background: #f8fafc;
         }
 
-        .cust-stmt-row--initial {
+        .cust-stmt-clean-row--initial {
           background: #fffbeb;
         }
 
-        .cust-stmt-cell-date {
+        .cust-stmt-num {
           font-variant-numeric: tabular-nums;
-          font-weight: 600;
-          color: #334155;
           white-space: nowrap;
         }
 
-        .cust-stmt-cell-invoice {
-          text-align: center;
-          color: #0f172a;
+        .cust-stmt-status-pill {
+          display: inline-block;
+          font-size: 0.68rem;
+          font-weight: 700;
+          padding: 2px 7px;
+          border-radius: 999px;
+          white-space: nowrap;
         }
 
-        .cust-stmt-cell-charge {
-          text-align: right;
-          font-variant-numeric: tabular-nums;
-          color: #0f172a;
+        .cust-stmt-status-pill.is-paid {
+          background: #dcfce7;
+          color: #166534;
         }
 
-        .cust-stmt-cell-abono {
-          text-align: right;
-          font-variant-numeric: tabular-nums;
-          color: #15803d;
+        .cust-stmt-status-pill.is-partial {
+          background: #fef3c7;
+          color: #92400e;
         }
 
-        .cust-stmt-cell-details {
+        .cust-stmt-status-pill.is-pending {
+          background: #ffe4e6;
+          color: #9f1239;
+        }
+
+        .cust-stmt-method-tag {
+          display: inline-block;
+          background: #e0f2fe;
+          color: #0369a1;
+          font-weight: 800;
+          font-size: 0.72rem;
+          padding: 2px 8px;
+          border-radius: 6px;
+        }
+
+        .cust-stmt-clean-tfoot td {
+          padding: 8px 10px;
+          font-weight: 900;
+          font-size: 0.82rem;
+          border-top: 1.5px solid #94a3b8;
+          border-bottom: none;
+        }
+
+        .cust-stmt-clean-tfoot--charges td {
+          background: #fff1f2;
+          color: #9f1239;
+        }
+
+        .cust-stmt-clean-tfoot--abonos td {
+          background: #f0fdf4;
+          color: #166534;
+        }
+
+        .cust-stmt-methods-bar {
+          background: #f8fafc;
+          border-top: 1px dashed #cbd5e1;
+          padding: 6px 12px;
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 8px 14px;
+          font-size: 0.73rem;
+        }
+
+        .cust-stmt-methods-bar__title {
+          font-weight: 700;
+          color: #64748b;
+          text-transform: uppercase;
+          font-size: 0.66rem;
+        }
+
+        .cust-stmt-methods-bar__list {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px 14px;
+        }
+
+        .cust-stmt-methods-bar__item {
           color: #1e293b;
         }
 
-        .cust-stmt-detail-main {
+        /* Caja Final de Liquidación */
+        .cust-stmt-final-box {
+          background: #0f172a;
+          color: #ffffff;
+          border-radius: 10px;
+          padding: 12px 16px;
+          margin-top: 4px;
+          margin-bottom: 12px;
+        }
+
+        .cust-stmt-final-box__formula {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+
+        .cust-stmt-final-item {
+          display: flex;
+          flex-direction: column;
+          background: #ffffff;
+          color: #0f172a;
+          padding: 7px 12px;
+          border-radius: 8px;
+          flex: 1 1 140px;
+        }
+
+        .cust-stmt-final-item span {
+          font-size: 0.66rem;
           font-weight: 700;
-          color: #0f172a;
+          color: #64748b;
+          text-transform: uppercase;
         }
 
-        .cust-stmt-detail-items {
-          font-size: 0.74rem;
-          color: #475569;
-          margin-top: 2px;
-        }
-
-        .cust-stmt-cell-voucher {
-          text-align: center;
-          font-variant-numeric: tabular-nums;
-          color: #0f172a;
-        }
-
-        .cust-stmt-cell-balance {
-          text-align: right;
-          font-variant-numeric: tabular-nums;
-          background: rgba(241, 245, 249, 0.5);
-        }
-
-        /* Fila de Totales (Inspirada en la fila inferior del Excel con colores claros y saldo resaltado) */
-        .cust-stmt-tfoot-row td {
-          padding: 10px 10px;
-          border-top: 2px solid #1e293b;
-          border-bottom: none;
+        .cust-stmt-final-item strong {
+          font-size: 1rem;
           font-weight: 900;
-          font-size: 0.9rem;
-        }
-
-        .cust-stmt-tfoot-label {
-          background: #f1f5f9;
-          text-align: right;
-          color: #0f172a;
-          letter-spacing: 0.03em;
-          font-size: 0.78rem !important;
-        }
-
-        .cust-stmt-tfoot-charges {
-          background: #ffe4e6;
-          color: #9f1239;
-          text-align: right;
           font-variant-numeric: tabular-nums;
         }
 
-        .cust-stmt-tfoot-abonos {
-          background: #dcfce7;
-          color: #166534;
-          text-align: right;
-          font-variant-numeric: tabular-nums;
+        .cust-stmt-final-operator {
+          font-size: 1.2rem;
+          font-weight: 900;
+          color: #94a3b8;
+          padding: 0 2px;
         }
 
-        .cust-stmt-tfoot-saldo-label {
-          background: #22c55e;
-          color: #052e16;
+        .cust-stmt-final-result {
+          display: flex;
+          flex-direction: column;
+          padding: 8px 14px;
+          border-radius: 8px;
+          flex: 1.3 1 180px;
           text-align: right;
-          letter-spacing: 0.04em;
-          font-size: 0.8rem !important;
         }
 
-        .cust-stmt-tfoot-saldo-val {
-          text-align: right;
-          font-variant-numeric: tabular-nums;
-          font-size: 1rem !important;
-        }
-
-        .cust-stmt-tfoot-saldo-val.is-debt {
+        .cust-stmt-final-result.is-debt {
           background: #4ade80;
           color: #052e16;
         }
 
-        .cust-stmt-tfoot-saldo-val.is-clear {
+        .cust-stmt-final-result.is-clear {
           background: #bbf7d0;
           color: #065f46;
         }
 
-        .cust-stmt-footer {
-          margin-top: 14px;
+        .cust-stmt-final-result span {
+          font-size: 0.68rem;
+          font-weight: 900;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+
+        .cust-stmt-final-result strong {
+          font-size: 1.25rem;
+          font-weight: 900;
+          font-variant-numeric: tabular-nums;
         }
 
         .cust-stmt-footer-note {
-          font-size: 0.75rem;
+          font-size: 0.72rem;
           color: #475569;
           background: #f8fafc;
           border: 1px solid #e2e8f0;
           border-radius: 6px;
-          padding: 8px 12px;
-          line-height: 1.4;
-        }
-
-        .cust-stmt-signatures {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 36px;
-          margin-top: 28px;
-          padding-top: 10px;
-        }
-
-        .cust-stmt-sign-box {
-          text-align: center;
-        }
-
-        .cust-stmt-sign-line {
-          border-bottom: 1.5px solid #334155;
-          height: 22px;
-          margin-bottom: 5px;
-        }
-
-        .cust-stmt-sign-title {
-          font-size: 0.74rem;
-          font-weight: 800;
-          color: #0f172a;
-        }
-
-        .cust-stmt-sign-sub {
-          font-size: 0.7rem;
-          color: #64748b;
-          margin-top: 1px;
+          padding: 7px 11px;
+          line-height: 1.35;
         }
 
         /* Reglas de Impresión / Exportación PDF */
@@ -1825,19 +2127,16 @@ export function CustomerAccountStatementModal({
             width: 100% !important;
             border: none !important;
             box-shadow: none !important;
-            padding: 4mm 4mm !important;
+            padding: 0 !important;
             border-radius: 0 !important;
           }
 
-          body.inv-print-customer-statement-letter .cust-stmt-info-grid {
-            grid-template-columns: 1.15fr 1.85fr !important;
-          }
-
-          body.inv-print-customer-statement-letter .cust-stmt-kpis {
+          body.inv-print-customer-statement-letter .cust-stmt-kpis-row {
             grid-template-columns: repeat(3, 1fr) !important;
           }
 
-          body.inv-print-customer-statement-letter .cust-stmt-table tr {
+          body.inv-print-customer-statement-letter .cust-stmt-clean-table tr,
+          body.inv-print-customer-statement-letter .cust-stmt-final-box {
             page-break-inside: avoid;
             break-inside: avoid;
           }
