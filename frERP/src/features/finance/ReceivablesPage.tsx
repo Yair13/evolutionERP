@@ -21,9 +21,11 @@ import { AddCustomerPaymentModal } from "../../components/finance/AddCustomerPay
 import { EditPaymentModal } from "../../components/finance/EditPaymentModal.js";
 import { ReceivableDetailModal } from "../../components/finance/ReceivableDetailModal.js";
 import { CreateReceivableModal } from "../../components/finance/CreateReceivableModal.js";
+import { CustomerAccountStatementModal } from "../../components/finance/CustomerAccountStatementModal.js";
 import {
   Building2,
   Clock,
+  FileText,
   Receipt,
   RefreshCw,
   Search,
@@ -118,6 +120,27 @@ export function ReceivablesPage() {
   const [editingPayment, setEditingPayment] = useState<ReceivablePaymentItem | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [reconciling, setReconciling] = useState(false);
+  const [openAccountStatement, setOpenAccountStatement] = useState(false);
+  const [statementProfile, setStatementProfile] = useState<CustomerCreditProfile | null>(null);
+  const [loadingStatementCustId, setLoadingStatementCustId] = useState<string | null>(null);
+
+  async function handleOpenCustomerStatement(customerId: string) {
+    if (!token) return;
+    setLoadingStatementCustId(customerId);
+    try {
+      const prof = await fetchCustomerCreditProfile(
+        token,
+        customerId,
+        effectiveWarehouseId || undefined
+      );
+      setStatementProfile(prof);
+      setOpenAccountStatement(true);
+    } catch (err: any) {
+      alert(err?.message || "Error al generar el estado de cuenta del cliente");
+    } finally {
+      setLoadingStatementCustId(null);
+    }
+  }
 
   const handleDeleteInitial = async (c: ReceivableSummaryItem) => {
     const confirmed = window.confirm(
@@ -698,6 +721,17 @@ export function ReceivablesPage() {
                                 Abonar
                               </button>
                             )}
+                              <button
+                                type="button"
+                                className="fin-btn fin-btn--emerald fin-btn--sm"
+                                onClick={() => void handleOpenCustomerStatement(c.customerId)}
+                                disabled={loadingStatementCustId === c.customerId}
+                                title="Descargar o imprimir Estado de Cuenta del cliente en PDF"
+                                style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}
+                              >
+                                <FileText size={13} />
+                                <span>{loadingStatementCustId === c.customerId ? "..." : "Estado Cta"}</span>
+                              </button>
                             <button
                               type="button"
                               className="fin-btn fin-btn--ghost fin-btn--sm"
@@ -897,21 +931,36 @@ export function ReceivablesPage() {
 
               {/* Facturas a crédito del cliente */}
               <div className="fin-table-card">
-                <div className="fin-table-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div className="fin-table-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
                   <h3 className="fin-table-title">
                     <Receipt size={18} color="var(--accent)" />
                     <span>Créditos del Cliente ({custProfile.receivables.length})</span>
                   </h3>
-                  {custProfile.stats.totalCurrentDebt > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
                     <button
                       type="button"
-                      className="fin-btn fin-btn--primary fin-btn--sm"
-                      onClick={() => setOpenCustomerPayment(true)}
+                      className="fin-btn fin-btn--emerald fin-btn--sm"
+                      onClick={() => {
+                        setStatementProfile(custProfile);
+                        setOpenAccountStatement(true);
+                      }}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
+                      title="Descargar PDF o Imprimir Estado de Cuenta completo del cliente"
                     >
-                      <PlusCircle size={15} style={{ marginRight: 5 }} />
-                      Abonar a Cartera del Cliente
+                      <FileText size={15} />
+                      <span>📄 Descargar Estado de Cuenta (PDF)</span>
                     </button>
-                  )}
+                    {custProfile.stats.totalCurrentDebt > 0 && (
+                      <button
+                        type="button"
+                        className="fin-btn fin-btn--primary fin-btn--sm"
+                        onClick={() => setOpenCustomerPayment(true)}
+                      >
+                        <PlusCircle size={15} style={{ marginRight: 5 }} />
+                        Abonar a Cartera del Cliente
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="fin-table-wrap">
@@ -1240,6 +1289,20 @@ export function ReceivablesPage() {
             void loadCredits();
             if (selectedCustId) void loadCustomerProfile(selectedCustId);
             if (activeTab === "report") void loadReport();
+          }}
+        />
+      )}
+
+      {/* Modal para Estado de Cuenta del Cliente (PDF / Impresión) */}
+      {openAccountStatement && (statementProfile || custProfile) && (
+        <CustomerAccountStatementModal
+          open={openAccountStatement}
+          profile={(statementProfile || custProfile)!}
+          selectedWarehouseId={effectiveWarehouseId || ""}
+          warehouses={warehouses}
+          onClose={() => {
+            setOpenAccountStatement(false);
+            setStatementProfile(null);
           }}
         />
       )}

@@ -4,6 +4,7 @@ import {
   Clock,
   Edit2,
   Eye,
+  FileText,
   PlusCircle,
   Printer,
   Receipt,
@@ -35,6 +36,7 @@ import { formatBogotaDateTime } from "../../lib/dateUtils.js";
 import { DocumentInvoicePrint } from "../../components/inventory/DocumentInvoicePrint.js";
 import { AddPaymentModal } from "../../components/finance/AddPaymentModal.js";
 import { AddDirectPaymentModal } from "../../components/finance/AddDirectPaymentModal.js";
+import { CustomerAccountStatementModal } from "../../components/finance/CustomerAccountStatementModal.js";
 
 function formatMoney(n: number | null | undefined): string {
   const val = Math.round((Number(n) || 0) * 100) / 100;
@@ -130,6 +132,29 @@ export function CustomersPage() {
 
   // Modal para abono directo sin factura / saldo a favor
   const [openDirectPayment, setOpenDirectPayment] = useState(false);
+
+  // Modal para Estado de Cuenta (PDF / Impresión)
+  const [openAccountStatement, setOpenAccountStatement] = useState(false);
+  const [statementProfile, setStatementProfile] = useState<CustomerCreditProfile | null>(null);
+  const [loadingStatementCustomerId, setLoadingStatementCustomerId] = useState<string | null>(null);
+
+  async function handleOpenStatementFromDirectory(customerId: string) {
+    if (!token) return;
+    setLoadingStatementCustomerId(customerId);
+    try {
+      const prof = await fetchCustomerCreditProfile(
+        token,
+        customerId,
+        effectiveWarehouseId || undefined
+      );
+      setStatementProfile(prof);
+      setOpenAccountStatement(true);
+    } catch (err: any) {
+      alert(err?.message || "Error al cargar el estado de cuenta del cliente");
+    } finally {
+      setLoadingStatementCustomerId(null);
+    }
+  }
 
   // Carga del directorio
     const handleDeleteCustomer = async (cust: { id: string; displayName: string }) => {
@@ -752,6 +777,17 @@ export function CustomersPage() {
                           <div style={{ display: "inline-flex", gap: "0.35rem" }}>
                             <button
                               type="button"
+                              className="fin-btn fin-btn--emerald fin-btn--sm"
+                              onClick={() => void handleOpenStatementFromDirectory(c.id)}
+                              disabled={loadingStatementCustomerId === c.id}
+                              title="Descargar o imprimir Estado de Cuenta en PDF para enviar por WhatsApp"
+                              style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}
+                            >
+                              <FileText size={13} />
+                              <span>{loadingStatementCustomerId === c.id ? "Cargando…" : "Estado de Cuenta"}</span>
+                            </button>
+                            <button
+                              type="button"
                               className="fin-btn fin-btn--ghost fin-btn--sm"
                               onClick={() => startEditingCustomerFromItem(c)}
                               title="Editar datos personales del cliente"
@@ -865,6 +901,27 @@ export function CustomersPage() {
                 </div>
 
                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="fin-btn fin-btn--primary fin-btn--sm"
+                    onClick={() => {
+                      setStatementProfile(customerProfile);
+                      setOpenAccountStatement(true);
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.4rem",
+                      background: "linear-gradient(135deg, #0d9488, #0f766e)",
+                      color: "#ffffff",
+                      border: "none",
+                      fontWeight: 700,
+                    }}
+                    title="Ver, imprimir o descargar Estado de Cuenta en PDF para enviar por WhatsApp"
+                  >
+                    <FileText size={15} />
+                    <span>📄 Estado de Cuenta (PDF / Imprimir)</span>
+                  </button>
                   <button
                     type="button"
                     className="fin-btn fin-btn--emerald fin-btn--sm"
@@ -1837,6 +1894,20 @@ export function CustomersPage() {
           onSuccess={() => {
             if (selectedCustomerId) void loadProfile(selectedCustomerId);
             void loadDirectory();
+          }}
+        />
+      )}
+
+      {/* Modal para Estado de Cuenta del Cliente (PDF / Impresión) */}
+      {openAccountStatement && (statementProfile || customerProfile) && (
+        <CustomerAccountStatementModal
+          open={openAccountStatement}
+          profile={(statementProfile || customerProfile)!}
+          selectedWarehouseId={detailSedeFilter || effectiveWarehouseId || ""}
+          warehouses={warehouses}
+          onClose={() => {
+            setOpenAccountStatement(false);
+            setStatementProfile(null);
           }}
         />
       )}
