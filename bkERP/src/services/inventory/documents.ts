@@ -2342,59 +2342,15 @@ export async function cancelDocument(
       }
     }
 
-    // 3. Si esta factura había redimido un apartado (layaway), reactivarlo y revertir cualquier sobrante enviado a saldo a favor
-    const { rows: layRows } = await client.query<{
-      id: string;
-      customer_id: string;
-      warehouse_id: string;
-      paid_amount: string;
-    }>(
-      `SELECT id::text, customer_id::text, warehouse_id::text, paid_amount::text
-       FROM layaways
-       WHERE resulting_document_id = $1::uuid AND status = 'completed'
-       FOR UPDATE`,
+    // 3. Si esta factura había redimido un apartado (layaway), reactivarlo (el eventual sobrante a favor ya fue revertido en el paso 1 o 2 vía metadata.excessToFavour / receivable_payments)
+    await client.query(
+      `UPDATE layaways
+       SET status = 'active',
+           completed_at = NULL,
+           resulting_document_id = NULL
+       WHERE resulting_document_id = $1::uuid AND status = 'completed'`,
       [documentId]
     );
-
-    for (const lay of layRows) {
-      const meta = doc.metadata && typeof doc.metadata === "object" ? doc.metadata : {};
-      const docSaleTotal = Number(meta.totalAmount ?? 0);
-      const layPaid = Number(lay.paid_amount ?? 0);
-      const layExcess = Math.max(0, Math.round((layPaid - docSaleTotal) * 100) / 100);
-
-      if (layExcess > 0) {
-        await client.query(
-          `
-          UPDATE customer_warehouse_credit_balances
-          SET credit_balance = GREATEST(0, ROUND((credit_balance - $3)::numeric, 2)),
-              updated_at = now()
-          WHERE customer_id = $1::uuid AND warehouse_id = $2::uuid
-          `,
-          [lay.customer_id, lay.warehouse_id, layExcess]
-        );
-        await client.query(
-          `
-          UPDATE customers
-          SET credit_balance = COALESCE((
-            SELECT SUM(credit_balance)
-            FROM customer_warehouse_credit_balances
-            WHERE customer_id = $1::uuid
-          ), 0)
-          WHERE id = $1::uuid
-          `,
-          [lay.customer_id]
-        );
-      }
-
-      await client.query(
-        `UPDATE layaways
-         SET status = 'active',
-             completed_at = NULL,
-             resulting_document_id = NULL
-         WHERE id = $1::uuid`,
-        [lay.id]
-      );
-    }
 
     await client.query(
       `INSERT INTO document_status_events (document_id, status, comment, actor_id)

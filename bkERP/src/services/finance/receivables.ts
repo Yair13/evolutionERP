@@ -701,37 +701,7 @@ export async function syncCustomerCreditBalancesFromMovements(
 
       UNION ALL
 
-      -- E. Sobrante a favor generado al redimir un apartado en una venta completada
-      SELECT
-        l.customer_id,
-        l.warehouse_id,
-        GREATEST(
-          0,
-          l.paid_amount - COALESCE(
-            CASE
-              WHEN (d.metadata->>'totalAmount') ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (d.metadata->>'totalAmount')::numeric
-              ELSE l.paid_amount
-            END,
-            l.paid_amount
-          )
-        ) AS amount
-      FROM layaways l
-      JOIN inventory_documents d ON d.id = l.resulting_document_id
-      WHERE l.status = 'completed'
-        AND d.status = 'completed'
-        AND l.paid_amount > COALESCE(
-          CASE
-            WHEN (d.metadata->>'totalAmount') ~ '^[0-9]+(\\.[0-9]+)?$'
-            THEN (d.metadata->>'totalAmount')::numeric
-            ELSE l.paid_amount
-          END,
-          l.paid_amount
-        )
-
-      UNION ALL
-
-      -- F. Saldo a favor consumido en abonos activos de apartados activos o completados
+      -- E. Saldo a favor consumido en abonos activos de apartados activos o completados
       SELECT
         lp.customer_id,
         lp.warehouse_id,
@@ -2925,6 +2895,56 @@ export async function getCustomerCreditProfile(
   }
   filteredMovements.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+  // Movimientos de saldo a favor consumido en apartados (layaway_payments) o generado al redimir apartado
+  const { rows: layMovRows } = await pool.query<{
+    id: string;
+    receipt_number: string;
+    amount: string;
+    warehouse_id: string;
+    warehouse_code: string;
+    warehouse_name: string;
+    layaway_code: string;
+    created_at: string;
+  }>(
+    `
+    SELECT
+      lp.id::text,
+      lp.receipt_number,
+      lp.amount::text,
+      lp.warehouse_id::text,
+      w.code AS warehouse_code,
+      w.name AS warehouse_name,
+      l.code AS layaway_code,
+      lp.created_at::text
+    FROM layaway_payments lp
+    JOIN layaways l ON l.id = lp.layaway_id
+    JOIN warehouses w ON w.id = lp.warehouse_id
+    WHERE lp.customer_id = $1::uuid
+      AND LOWER(TRIM(lp.payment_method)) = 'saldo_a_favor'
+      AND COALESCE(lp.status, 'active') = 'active'
+      AND l.status IN ('active', 'completed')
+    ORDER BY lp.created_at DESC
+    `,
+    [customerId]
+  );
+
+  for (const lm of layMovRows) {
+    if (opts?.warehouseId && lm.warehouse_id !== opts.warehouseId) continue;
+    filteredMovements.push({
+      id: `lay-used-${lm.id}`,
+      type: "used_in_payment",
+      amount: -Number(lm.amount || 0),
+      warehouseId: lm.warehouse_id,
+      warehouseCode: lm.warehouse_code,
+      warehouseName: lm.warehouse_name,
+      referenceNumber: lm.receipt_number,
+      invoiceNumber: lm.layaway_code,
+      description: `Saldo a favor usado en abono a apartado ${lm.layaway_code} (Recibo ${lm.receipt_number})`,
+      createdAt: lm.created_at,
+    });
+  }
+  filteredMovements.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
   // Resumen por cada sede
   const whMap = new Map<string, CustomerWarehouseSummary>();
   const ensureWh = (id: string, code: string, name: string): CustomerWarehouseSummary => {
@@ -3070,6 +3090,8 @@ export async function listCustomersWithSummary(
     totalAbonosAmount: number;
   };
 }> {
+  await syncCustomerCreditBalancesFromMovements(pool);
+
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 300);
   const offset = Math.max(opts.offset ?? 0, 0);
 
