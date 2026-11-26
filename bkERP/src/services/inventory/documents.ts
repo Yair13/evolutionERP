@@ -6,7 +6,7 @@ import {
   canManageMovementEditing,
   MOVEMENT_EDIT_TZ,
 } from "./movement-edit-settings.js";
-import { recordCreditFromExitDocument, debitCustomerWarehouseBalance, creditCustomerWarehouseBalance } from "../finance/receivables.js";
+import { recordCreditFromExitDocument, debitCustomerWarehouseBalance, creditCustomerWarehouseBalance, ensureMissingCreditReceivables } from "../finance/receivables.js";
 import { nextOutflowVoucherNumber } from "../finance/transfers-egress.js";
 import { getTodayBogotaYmd } from "../../lib/date-utils.js";
 import { redeemLayawayInSale } from "../finance/layaways.js";
@@ -1456,7 +1456,7 @@ export async function editCompletedDocument(
   const { movementKind, notes, customerName, relatedInvoiceNumber } = input;
   const parsed = parseMovementKind(movementKind);
 
-  if (parsed.exitKind === "sale" && !customerName?.trim()) {
+  if ((parsed.exitKind === "sale" || parsed.exitKind === "credit") && !customerName?.trim()) {
     throw Object.assign(new Error("customer_name_required"), { code: "customer_name_required" });
   }
   if (parsed.exitKind === "warranty" && !relatedInvoiceNumber?.trim()) {
@@ -1484,25 +1484,32 @@ export async function editCompletedDocument(
       is_today: boolean;
       editing_unlocked: boolean;
       invoice_number: string | null;
+      customer_id: string | null;
+      existing_customer_name: string | null;
+      discount_amount: string;
       metadata: any;
     }>(
       `
       SELECT
-        warehouse_id::text,
-        doc_type,
-        exit_kind,
-        status,
-        completed_at::text,
-        created_at::text,
+        d.warehouse_id::text,
+        d.doc_type,
+        d.exit_kind,
+        d.status,
+        d.completed_at::text,
+        d.created_at::text,
         (
-          (COALESCE(completed_at, created_at) AT TIME ZONE $2)::date
+          (COALESCE(d.completed_at, d.created_at) AT TIME ZONE $2)::date
           = (now() AT TIME ZONE $2)::date
         ) AS is_today,
-        (editing_unlocked_at IS NOT NULL) AS editing_unlocked,
-        invoice_number,
-        metadata
-      FROM inventory_documents
-      WHERE id = $1::uuid
+        (d.editing_unlocked_at IS NOT NULL) AS editing_unlocked,
+        d.invoice_number,
+        d.customer_id::text AS customer_id,
+        c.display_name AS existing_customer_name,
+        COALESCE(d.discount_amount, 0)::text AS discount_amount,
+        d.metadata
+      FROM inventory_documents d
+      LEFT JOIN customers c ON c.id = d.customer_id
+      WHERE d.id = $1::uuid
       `,
       [documentId, MOVEMENT_EDIT_TZ]
     );
@@ -1547,13 +1554,30 @@ export async function editCompletedDocument(
           productionOrderId: isProductionOrder ? productionOrderId : (prevMetadata.productionOrderId ?? null),
         }
       : {
+          ...prevMetadata,
           exitKind: exitKind!,
+          isCredit: exitKind === "credit",
           customerName: customerName?.trim() || null,
           relatedInvoiceNumber: relatedInvoiceNumber?.trim() || null,
           exitKindLabel: exitKindLabel(exitKind!),
+          ...(exitKind === "credit" && doc.exit_kind !== "credit"
+            ? {
+                paymentBreakdown: [],
+                paymentMethod: null,
+                paidAmount: 0,
+                creditInitialPayment: 0,
+              }
+            : {}),
         };
 
-    const customerId = isEntry ? null : await resolveCustomerId(client, customerName);
+    const customerId = isEntry
+      ? null
+      : (doc.customer_id &&
+          doc.existing_customer_name &&
+          customerName?.trim() &&
+          doc.existing_customer_name.trim().toLowerCase() === customerName.trim().toLowerCase())
+        ? doc.customer_id
+        : await resolveCustomerId(client, customerName);
 
     // Revertir el inventario previo del comprobante antes de aplicar las nuevas cantidades
     await client.query(
@@ -1683,20 +1707,82 @@ export async function editCompletedDocument(
         [documentId]
       );
       const subtotal = Number(sumRows[0]?.subtotal ?? 0);
-      const discount = Number((doc as { discount_amount?: string | number }).discount_amount ?? 0);
+      const discount = Number(doc.discount_amount ?? 0);
       const newTotal = Math.max(0, subtotal - discount);
+
+      const { rows: existingAr } = await client.query<{ id: string }>(
+        `SELECT id::text FROM accounts_receivable WHERE document_id = $1::uuid LIMIT 1`,
+        [documentId]
+      );
+
+      if (existingAr.length > 0) {
+        await client.query(
+          `UPDATE accounts_receivable
+           SET customer_id = COALESCE($3::uuid, customer_id),
+               total_amount = $2,
+               balance_amount = GREATEST(0, $2 - COALESCE(initial_payment, 0) - COALESCE(paid_amount, 0)),
+               status = CASE
+                 WHEN GREATEST(0, $2 - COALESCE(initial_payment, 0) - COALESCE(paid_amount, 0)) <= 0 THEN 'paid'
+                 WHEN COALESCE(paid_amount, 0) > 0 OR COALESCE(initial_payment, 0) > 0 THEN 'partial'
+                 ELSE 'open'
+               END,
+               updated_at = now()
+           WHERE document_id = $1::uuid`,
+          [documentId, newTotal, customerId]
+        );
+      } else if (customerId) {
+        await client.query(
+          `INSERT INTO accounts_receivable (
+             document_id, invoice_number, warehouse_id, customer_id,
+             total_amount, initial_payment, paid_amount, balance_amount,
+             status, notes, created_by, created_at
+           )
+           VALUES (
+             $1::uuid, $2, $3::uuid, $4::uuid,
+             $5, 0, 0, $5,
+             CASE WHEN $5 <= 0 THEN 'paid' ELSE 'open' END,
+             $6, $7::uuid, COALESCE($8::timestamptz, now())
+           )`,
+          [
+            documentId,
+            doc.invoice_number || `DOC-${documentId.slice(0, 6)}`,
+            warehouseId,
+            customerId,
+            newTotal,
+            notes?.trim() || null,
+            auth.userId,
+            doc.completed_at || doc.created_at,
+          ]
+        );
+      }
+
+      // Actualizar metadata del documento con los valores del crédito
+      await client.query(
+        `UPDATE inventory_documents
+         SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+           'subtotalAmount', $2::numeric,
+           'totalAmount', $3::numeric,
+           'creditTotal', $3::numeric,
+           'creditBalance', (
+             SELECT COALESCE(ar.balance_amount, $3::numeric)
+             FROM accounts_receivable ar
+             WHERE ar.document_id = $1::uuid
+             LIMIT 1
+           )
+         )
+         WHERE id = $1::uuid`,
+        [documentId, subtotal, newTotal]
+      );
+    } else {
+      // Si antes era un crédito y se cambió a venta de contado u otro tipo, cancelar la cuenta por cobrar abierta
       await client.query(
         `UPDATE accounts_receivable
-         SET total_amount = $2,
-             balance_amount = GREATEST(0, $2 - COALESCE(initial_payment, 0) - COALESCE(paid_amount, 0)),
-             status = CASE
-               WHEN GREATEST(0, $2 - COALESCE(initial_payment, 0) - COALESCE(paid_amount, 0)) <= 0 THEN 'paid'
-               WHEN COALESCE(paid_amount, 0) > 0 OR COALESCE(initial_payment, 0) > 0 THEN 'partial'
-               ELSE 'open'
-             END,
+         SET status = 'cancelled',
+             balance_amount = 0,
              updated_at = now()
-         WHERE document_id = $1::uuid`,
-        [documentId, newTotal]
+         WHERE document_id = $1::uuid
+           AND status <> 'cancelled'`,
+        [documentId]
       );
     }
 
@@ -1963,6 +2049,9 @@ export async function getDocument(
     events: await listDocumentEvents(pool, documentId),
     customerTotalWarehouseDebt: await (async () => {
       if (!head.customer_id || !head.warehouse_id) return 0;
+      if (head.exit_kind === "credit" && head.status === "completed") {
+        await ensureMissingCreditReceivables(pool, head.customer_id);
+      }
       const { rows } = await pool.query<{ total: string }>(
         `SELECT COALESCE(SUM(balance_amount), 0)::text AS total
          FROM accounts_receivable
