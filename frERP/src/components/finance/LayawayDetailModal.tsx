@@ -1,7 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
-import { fetchLayawayDetail, cancelLayaway, type LayawayDetail, type LayawaySummaryItem, type ReceiptAuditItem } from "../../api/finance.js";
+import {
+  fetchLayawayDetail,
+  cancelLayaway,
+  deleteLayaway,
+  type LayawayDetail,
+  type LayawaySummaryItem,
+  type ReceiptAuditItem,
+} from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
-import { Bookmark, X, Calendar, Wallet, AlertCircle, Ban, Camera, Upload, Printer } from "lucide-react";
+import { Bookmark, X, Calendar, Wallet, AlertCircle, Ban, Trash2, Camera, Upload, Printer } from "lucide-react";
 import { formatBogotaDateTime } from "../../lib/dateUtils.js";
 import { ViewReceiptPhotosModal } from "../common/ViewReceiptPhotosModal.js";
 import { UploadReceiptModal } from "./UploadReceiptModal.js";
@@ -40,15 +47,17 @@ export function LayawayDetailModal({
   onAbonar,
   onRefresh,
 }: Props) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const isSuperAdmin = Boolean(user?.roles?.includes("super_admin"));
   const [detail, setDetail] = useState<LayawayDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Modal confirmación de cancelación
+  // Modal confirmación de cancelación / eliminación
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
   const [cancelNotes, setCancelNotes] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [viewingUrls, setViewingUrls] = useState<string[] | null>(null);
   const [viewingRef, setViewingRef] = useState<string>("");
   const [uploadItem, setUploadItem] = useState<ReceiptAuditItem | null>(null);
@@ -95,6 +104,31 @@ export function LayawayDetailModal({
       setError(err instanceof Error ? err.message : "Error al anular apartado.");
     } finally {
       setCancelling(false);
+    }
+  }
+
+  async function handleDeleteLayaway() {
+    if (!token || !layawayId || !detail || !isSuperAdmin) return;
+    const confirmed = window.confirm(
+      `¿Deseas eliminar definitivamente el apartado "${detail.code}"?\n\n` +
+        `• Cliente: ${detail.customerName}\n` +
+        `• Sede: ${detail.warehouseName}\n` +
+        `• Meta Total: ${formatMoney(detail.targetAmount)}\n` +
+        `• Total Abonado: ${formatMoney(detail.paidAmount)}\n\n` +
+        `Esta acción eliminará el apartado y todos sus recibos de abono asociados de la base de datos.`
+    );
+    if (!confirmed) return;
+
+    setDeleting(true);
+    setError(null);
+    try {
+      await deleteLayaway(token, layawayId);
+      onRefresh();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al eliminar el apartado.");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -510,17 +544,31 @@ export function LayawayDetailModal({
               ) : null}
 
               {/* Acciones */}
-              <div className="inv-modal__actions" style={{ marginTop: "0.5rem", display: "flex", justifyContent: "space-between" }}>
-                <div>
+              <div className="inv-modal__actions" style={{ marginTop: "0.5rem", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                   {detail.status === "active" && !showCancelPrompt && (
                     <button
                       type="button"
                       className="inv-btn inv-btn--ghost"
                       style={{ color: "#ef4444" }}
                       onClick={() => setShowCancelPrompt(true)}
+                      disabled={deleting}
                     >
                       <Ban size={15} style={{ marginRight: 4 }} />
                       Anular / Cancelar Apartado
+                    </button>
+                  )}
+                  {isSuperAdmin && detail.status !== "completed" && (
+                    <button
+                      type="button"
+                      className="inv-btn inv-btn--ghost"
+                      style={{ color: "#dc2626" }}
+                      onClick={() => void handleDeleteLayaway()}
+                      disabled={deleting || cancelling}
+                      title="Eliminar definitivamente de la base de datos (Exclusivo Super Administrador)"
+                    >
+                      <Trash2 size={15} style={{ marginRight: 4 }} />
+                      {deleting ? "Eliminando..." : "Eliminar Apartado"}
                     </button>
                   )}
                 </div>

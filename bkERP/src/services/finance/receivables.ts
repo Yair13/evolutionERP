@@ -2600,7 +2600,7 @@ export async function getCustomerCreditProfile(
 
     const metaExcess = Number(meta.excessToFavour ?? 0);
     const arExcess = Number(row.ar_excess_paid ?? 0);
-    const excessToFavour = Math.max(metaExcess, arExcess);
+    const excessToFavour = row.status === "cancelled" ? 0 : Math.max(metaExcess, arExcess);
 
     const paidAmount = row.ar_paid_amount != null
       ? Number(row.ar_paid_amount)

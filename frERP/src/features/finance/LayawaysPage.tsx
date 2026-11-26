@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   fetchLayaways,
+  deleteLayaway,
   type LayawaySummaryItem,
   type LayawayStatus,
 } from "../../api/finance.js";
@@ -16,6 +17,7 @@ import {
   Search,
   Wallet,
   Eye,
+  Trash2,
   CheckCircle2,
   Clock,
   Filter,
@@ -38,8 +40,9 @@ function formatDate(iso: string | null): string {
 }
 
 export function LayawaysPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { warehouses, warehouseId, isAllWarehouses, loading: whLoading } = useWarehouse();
+  const isSuperAdmin = Boolean(user?.roles?.includes("super_admin"));
 
   // Filtros
   const [selectedWarehouse, setSelectedWarehouse] = useState<string>(
@@ -74,6 +77,8 @@ export function LayawaysPage() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Modales
   const [openCreate, setOpenCreate] = useState(false);
@@ -111,6 +116,33 @@ export function LayawaysPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  async function handleDeleteLayaway(item: LayawaySummaryItem) {
+    if (!token || !isSuperAdmin) return;
+
+    const confirmed = window.confirm(
+      `¿Deseas eliminar definitivamente el apartado "${item.code}"?\n\n` +
+        `• Cliente: ${item.customerName}\n` +
+        `• Sede: ${item.warehouseName}\n` +
+        `• Meta Total: ${formatMoney(item.targetAmount)}\n` +
+        `• Total Abonado: ${formatMoney(item.paidAmount)}\n\n` +
+        `Esta acción eliminará el apartado y sus recibos de abono asociados, revertirá sus valores de caja/cierres y restituirá cualquier saldo a favor utilizado.`
+    );
+    if (!confirmed) return;
+
+    setDeletingId(item.id);
+    setError(null);
+    try {
+      await deleteLayaway(token, item.id);
+      setActionSuccess(`Apartado ${item.code} eliminado definitivamente.`);
+      await loadData();
+      window.setTimeout(() => setActionSuccess(null), 5000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al eliminar el apartado.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   const totalPages = Math.ceil(total / limit) || 1;
 
@@ -382,6 +414,13 @@ export function LayawaysPage() {
         </div>
       </div>
 
+      {actionSuccess && (
+        <div className="fin-alert fin-alert--success">
+          <CheckCircle2 size={18} />
+          <div>{actionSuccess}</div>
+        </div>
+      )}
+
       {error && <div className="fin-alert fin-alert--danger">{error}</div>}
 
       {/* Tabla de Resultados */}
@@ -522,6 +561,19 @@ export function LayawaysPage() {
                             <Eye size={14} />
                             <span>Detalle</span>
                           </button>
+                          {isSuperAdmin && item.status !== "completed" && (
+                            <button
+                              type="button"
+                              className="fin-btn fin-btn--ghost fin-btn--sm"
+                              style={{ color: "#dc2626" }}
+                              disabled={deletingId === item.id}
+                              onClick={() => void handleDeleteLayaway(item)}
+                              title="Eliminar apartado definitivamente (Exclusivo Super Administrador)"
+                            >
+                              <Trash2 size={14} />
+                              <span>{deletingId === item.id ? "Eliminando…" : "Eliminar"}</span>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

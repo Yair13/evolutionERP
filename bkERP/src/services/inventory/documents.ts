@@ -2021,10 +2021,23 @@ export async function cancelDocument(
       status: string;
       invoice_number: string | null;
       doc_type: string;
+      customer_id: string | null;
+      metadata: any;
+      created_at: string;
+      completed_at: string | null;
     }>(
-      `SELECT warehouse_id::text, status, invoice_number, doc_type
+      `SELECT
+         warehouse_id::text,
+         status,
+         invoice_number,
+         doc_type,
+         customer_id::text,
+         metadata,
+         created_at::text,
+         completed_at::text
        FROM inventory_documents
-       WHERE id = $1::uuid`,
+       WHERE id = $1::uuid
+       FOR UPDATE`,
       [documentId]
     );
 
@@ -2047,6 +2060,341 @@ export async function cancelDocument(
        WHERE id = $1::uuid`,
       [documentId]
     );
+
+    // 1. Si tenía una cuenta por cobrar (venta a crédito) vinculada, anularla y revertir saldos a favor generados o consumidos
+    const { rows: arRows } = await client.query<{
+      id: string;
+      customer_id: string;
+      warehouse_id: string;
+      status: string;
+    }>(
+      `SELECT id::text, customer_id::text, warehouse_id::text, status
+       FROM accounts_receivable
+       WHERE document_id = $1::uuid
+       FOR UPDATE`,
+      [documentId]
+    );
+
+    let handledViaReceivable = false;
+    for (const ar of arRows) {
+      handledViaReceivable = true;
+      const { rows: rpRows } = await client.query<{
+        id: string;
+        warehouse_id: string;
+        payment_method: string;
+        amount: string;
+        excess_to_favour: string;
+        created_at: string;
+      }>(
+        `SELECT id::text, warehouse_id::text, payment_method, amount::text, excess_to_favour::text, created_at::text
+         FROM receivable_payments
+         WHERE receivable_id = $1::uuid
+         FOR UPDATE`,
+        [ar.id]
+      );
+
+      for (const rp of rpRows) {
+        const whId = rp.warehouse_id || ar.warehouse_id;
+        const amt = Math.round((Number(rp.amount) || 0) * 100) / 100;
+        const excess = Math.round((Number(rp.excess_to_favour) || 0) * 100) / 100;
+        const rpMethod = (rp.payment_method || "").trim().toLowerCase();
+
+        // Si el pago usó saldo a favor previo, restituirlo al cliente
+        if (rpMethod === "saldo_a_favor" && amt > 0) {
+          await creditCustomerWarehouseBalance(client, ar.customer_id, whId, amt);
+        } else if (amt > 0) {
+          // Si este abono de la factura anulada cayó dentro de un cierre diario o general ya emitido, descontarlo de sus totales guardados
+          const isCash = rpMethod === "efectivo";
+          if (isCash) {
+            await client.query(
+              `
+              UPDATE daily_closures
+              SET cash_credit_payments = GREATEST(0, ROUND((cash_credit_payments - $1)::numeric, 2)),
+                  expected_cash = ROUND((expected_cash - $1)::numeric, 2),
+                  cash_difference = ROUND((counted_cash - (expected_cash - $1))::numeric, 2)
+              WHERE warehouse_id = $2::uuid
+                AND status <> 'voided'
+                AND (started_at IS NULL OR started_at < $3::timestamptz)
+                AND COALESCE(closed_at, created_at) >= $3::timestamptz
+              `,
+              [amt, whId, rp.created_at]
+            );
+          } else {
+            const { rows: dcBankRows } = await client.query<{ id: string }>(
+              `
+              SELECT id::text
+              FROM daily_closures
+              WHERE warehouse_id = $1::uuid
+                AND status <> 'voided'
+                AND (started_at IS NULL OR started_at < $2::timestamptz)
+                AND COALESCE(closed_at, created_at) >= $2::timestamptz
+              FOR UPDATE
+              `,
+              [whId, rp.created_at]
+            );
+            for (const dc of dcBankRows) {
+              await client.query(
+                `
+                UPDATE daily_closures
+                SET bank_payments_total = GREATEST(0, ROUND((bank_payments_total - $1)::numeric, 2))
+                WHERE id = $2::uuid
+                `,
+                [amt, dc.id]
+              );
+              await client.query(
+                `
+                UPDATE closure_payment_breakdown
+                SET amount = GREATEST(0, ROUND((amount - $1)::numeric, 2))
+                WHERE daily_closure_id = $2::uuid AND method_code = $3
+                `,
+                [amt, dc.id, rpMethod]
+              );
+            }
+          }
+
+          await client.query(
+            `
+            UPDATE global_closures
+            SET total_credit_payments = GREATEST(0, ROUND((total_credit_payments - $1)::numeric, 2)),
+                total_net_cash = CASE
+                  WHEN $4::boolean THEN ROUND((total_net_cash - $1)::numeric, 2)
+                  ELSE total_net_cash
+                END,
+                cash_to_withdraw = CASE
+                  WHEN $4::boolean THEN GREATEST(0, ROUND(((COALESCE(opening_cash, 0) + total_net_cash - $1) - cash_to_keep)::numeric, 2))
+                  ELSE cash_to_withdraw
+                END
+            WHERE (warehouse_id = $2::uuid OR warehouse_id IS NULL)
+              AND ($3::timestamptz AT TIME ZONE 'America/Bogota')::date BETWEEN date_from AND date_to
+              AND COALESCE(closed_at, created_at) >= $3::timestamptz
+            `,
+            [amt, whId, rp.created_at, isCash]
+          );
+        }
+
+        // Si el pago había generado excedente a favor, descontarlo del saldo a favor de la sede
+        if (excess > 0) {
+          await client.query(
+            `
+            UPDATE customer_warehouse_credit_balances
+            SET credit_balance = GREATEST(0, ROUND((credit_balance - $3)::numeric, 2)),
+                updated_at = now()
+            WHERE customer_id = $1::uuid AND warehouse_id = $2::uuid
+            `,
+            [ar.customer_id, whId, excess]
+          );
+        }
+      }
+
+      if (rpRows.length > 0) {
+        await client.query(`DELETE FROM receivable_payments WHERE receivable_id = $1::uuid`, [ar.id]);
+      }
+
+      await client.query(
+        `UPDATE accounts_receivable
+         SET status = 'cancelled',
+             balance_amount = 0,
+             paid_amount = 0
+         WHERE id = $1::uuid`,
+        [ar.id]
+      );
+
+      await client.query(
+        `
+        UPDATE customers
+        SET credit_balance = COALESCE((
+          SELECT SUM(credit_balance)
+          FROM customer_warehouse_credit_balances
+          WHERE customer_id = $1::uuid
+        ), 0)
+        WHERE id = $1::uuid
+        `,
+        [ar.customer_id]
+      );
+    }
+
+    // 2. Si fue una venta de contado/cambio/garantía (sin fila en accounts_receivable),
+    // revertir saldos a favor del cliente (si lo tenía) y actualizar cierres diarios/generales si ya habían sido emitidos
+    const docMeta = doc.metadata && typeof doc.metadata === "object" ? doc.metadata : {};
+    const rawDocBreakdown = Array.isArray(docMeta.paymentBreakdown) ? docMeta.paymentBreakdown : [];
+    const docEffectiveAt = doc.completed_at || doc.created_at;
+
+    if (!handledViaReceivable && doc.customer_id) {
+      const creditUsedInDoc = rawDocBreakdown
+        .filter((b: any) => b && String(b.method || "").trim().toLowerCase() === "saldo_a_favor")
+        .reduce((sum: number, b: any) => sum + (Number(b.amount) || 0), 0);
+      const roundedCreditUsed = Math.round(creditUsedInDoc * 100) / 100;
+
+      if (roundedCreditUsed > 0) {
+        await creditCustomerWarehouseBalance(client, doc.customer_id, doc.warehouse_id, roundedCreditUsed);
+      }
+
+      const metaExcess = Math.round((Number(docMeta.excessToFavour) || 0) * 100) / 100;
+      if (metaExcess > 0) {
+        await client.query(
+          `
+          UPDATE customer_warehouse_credit_balances
+          SET credit_balance = GREATEST(0, ROUND((credit_balance - $3)::numeric, 2)),
+              updated_at = now()
+          WHERE customer_id = $1::uuid AND warehouse_id = $2::uuid
+          `,
+          [doc.customer_id, doc.warehouse_id, metaExcess]
+        );
+        await client.query(
+          `
+          UPDATE customers
+          SET credit_balance = COALESCE((
+            SELECT SUM(credit_balance)
+            FROM customer_warehouse_credit_balances
+            WHERE customer_id = $1::uuid
+          ), 0)
+          WHERE id = $1::uuid
+          `,
+          [doc.customer_id]
+        );
+      }
+    }
+
+    // 2b. Si la venta de salida/garantía tenía pagos registrados en metadata->paymentBreakdown
+    // y cayó dentro de un cierre diario o cierre contable general ya guardado, ajustar esos cierres
+    if (["exit", "sale", "warranty"].includes(doc.doc_type) && rawDocBreakdown.length > 0) {
+      for (const b of rawDocBreakdown) {
+        const method = String(b?.method || "").trim().toLowerCase();
+        const amt = Math.round((Number(b?.amount) || 0) * 100) / 100;
+        if (!method || amt <= 0) continue;
+
+        const isCash = method === "efectivo";
+        const isCreditBal = method === "saldo_a_favor";
+
+        if (isCash) {
+          await client.query(
+            `
+            UPDATE daily_closures
+            SET cash_sales = GREATEST(0, ROUND((cash_sales - $1)::numeric, 2)),
+                expected_cash = ROUND((expected_cash - $1)::numeric, 2),
+                cash_difference = ROUND((counted_cash - (expected_cash - $1))::numeric, 2)
+            WHERE warehouse_id = $2::uuid
+              AND status <> 'voided'
+              AND (started_at IS NULL OR started_at < $3::timestamptz)
+              AND COALESCE(closed_at, created_at) >= $3::timestamptz
+            `,
+            [amt, doc.warehouse_id, docEffectiveAt]
+          );
+        } else if (!isCreditBal) {
+          const { rows: dcBankRows } = await client.query<{ id: string }>(
+            `
+            SELECT id::text
+            FROM daily_closures
+            WHERE warehouse_id = $1::uuid
+              AND status <> 'voided'
+              AND (started_at IS NULL OR started_at < $2::timestamptz)
+              AND COALESCE(closed_at, created_at) >= $2::timestamptz
+            FOR UPDATE
+            `,
+            [doc.warehouse_id, docEffectiveAt]
+          );
+          for (const dc of dcBankRows) {
+            await client.query(
+              `
+              UPDATE daily_closures
+              SET bank_payments_total = GREATEST(0, ROUND((bank_payments_total - $1)::numeric, 2))
+              WHERE id = $2::uuid
+              `,
+              [amt, dc.id]
+            );
+            await client.query(
+              `
+              UPDATE closure_payment_breakdown
+              SET amount = GREATEST(0, ROUND((amount - $1)::numeric, 2))
+              WHERE daily_closure_id = $2::uuid AND method_code = $3
+              `,
+              [amt, dc.id, method]
+            );
+          }
+        }
+
+        await client.query(
+          `
+          UPDATE global_closures
+          SET total_sales = GREATEST(0, ROUND((total_sales - $1)::numeric, 2)),
+              total_cash_sales = CASE
+                WHEN $4::boolean THEN GREATEST(0, ROUND((total_cash_sales - $1)::numeric, 2))
+                ELSE total_cash_sales
+              END,
+              total_bank_sales = CASE
+                WHEN NOT $4::boolean THEN GREATEST(0, ROUND((total_bank_sales - $1)::numeric, 2))
+                ELSE total_bank_sales
+              END,
+              total_net_cash = CASE
+                WHEN $4::boolean THEN ROUND((total_net_cash - $1)::numeric, 2)
+                ELSE total_net_cash
+              END,
+              cash_to_withdraw = CASE
+                WHEN $4::boolean THEN GREATEST(0, ROUND(((COALESCE(opening_cash, 0) + total_net_cash - $1) - cash_to_keep)::numeric, 2))
+                ELSE cash_to_withdraw
+              END
+          WHERE (warehouse_id = $2::uuid OR warehouse_id IS NULL)
+            AND ($3::timestamptz AT TIME ZONE 'America/Bogota')::date BETWEEN date_from AND date_to
+            AND COALESCE(closed_at, created_at) >= $3::timestamptz
+          `,
+          [amt, doc.warehouse_id, docEffectiveAt, isCash]
+        );
+      }
+    }
+
+    // 3. Si esta factura había redimido un apartado (layaway), reactivarlo y revertir cualquier sobrante enviado a saldo a favor
+    const { rows: layRows } = await client.query<{
+      id: string;
+      customer_id: string;
+      warehouse_id: string;
+      paid_amount: string;
+    }>(
+      `SELECT id::text, customer_id::text, warehouse_id::text, paid_amount::text
+       FROM layaways
+       WHERE resulting_document_id = $1::uuid AND status = 'completed'
+       FOR UPDATE`,
+      [documentId]
+    );
+
+    for (const lay of layRows) {
+      const meta = doc.metadata && typeof doc.metadata === "object" ? doc.metadata : {};
+      const docSaleTotal = Number(meta.totalAmount ?? 0);
+      const layPaid = Number(lay.paid_amount ?? 0);
+      const layExcess = Math.max(0, Math.round((layPaid - docSaleTotal) * 100) / 100);
+
+      if (layExcess > 0) {
+        await client.query(
+          `
+          UPDATE customer_warehouse_credit_balances
+          SET credit_balance = GREATEST(0, ROUND((credit_balance - $3)::numeric, 2)),
+              updated_at = now()
+          WHERE customer_id = $1::uuid AND warehouse_id = $2::uuid
+          `,
+          [lay.customer_id, lay.warehouse_id, layExcess]
+        );
+        await client.query(
+          `
+          UPDATE customers
+          SET credit_balance = COALESCE((
+            SELECT SUM(credit_balance)
+            FROM customer_warehouse_credit_balances
+            WHERE customer_id = $1::uuid
+          ), 0)
+          WHERE id = $1::uuid
+          `,
+          [lay.customer_id]
+        );
+      }
+
+      await client.query(
+        `UPDATE layaways
+         SET status = 'active',
+             completed_at = NULL,
+             resulting_document_id = NULL
+         WHERE id = $1::uuid`,
+        [lay.id]
+      );
+    }
 
     await client.query(
       `INSERT INTO document_status_events (document_id, status, comment, actor_id)

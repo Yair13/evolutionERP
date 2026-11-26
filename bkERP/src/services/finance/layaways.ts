@@ -79,7 +79,10 @@ export async function nextLayawayCode(
   const prefix = (wh[0]?.code ?? "S").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6) || "S";
   const { rows: seq } = await client.query<{ n: string }>(
     `
-    SELECT COUNT(*)::text AS n
+    SELECT GREATEST(
+      COUNT(*),
+      COALESCE(MAX(SUBSTRING(code FROM '-([0-9]+)$')::int), 0)
+    )::text AS n
     FROM layaways
     WHERE warehouse_id = $1::uuid
     `,
@@ -103,7 +106,10 @@ export async function nextLayawayReceiptNumber(
   const prefix = (wh[0]?.code ?? "S").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6) || "S";
   const { rows: seq } = await client.query<{ n: string }>(
     `
-    SELECT COUNT(*)::text AS n
+    SELECT GREATEST(
+      COUNT(*),
+      COALESCE(MAX(SUBSTRING(receipt_number FROM '-([0-9]+)$')::int), 0)
+    )::text AS n
     FROM layaway_payments
     WHERE warehouse_id = $1::uuid
     `,
@@ -848,6 +854,150 @@ export async function cancelLayaway(
       success: true,
       refundedAmount: restoredCreditBalance,
       voidedAmount: totalVoided,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Eliminar definitivamente un apartado (Exclusivo Super Administrador):
+ * - No permite eliminar apartados ya redimidos en una factura de venta ('completed').
+ * - Si algún abono activo había usado 'saldo_a_favor', restituye ese saldo a favor al cliente en su sede.
+ * - Ajusta cierres diarios o cierres contables generales en caso de que algún abono activo hubiese quedado incluido en ellos.
+ * - Elimina el apartado y sus abonos asociados (por ON DELETE CASCADE).
+ */
+export async function deleteLayaway(
+  pool: pg.Pool,
+  id: string
+): Promise<{
+  deletedId: string;
+  code: string;
+  restoredCreditBalance: number;
+  removedPaymentsAmount: number;
+}> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows } = await client.query<{
+      id: string;
+      code: string;
+      customer_id: string;
+      warehouse_id: string;
+      paid_amount: string;
+      status: string;
+    }>(
+      `SELECT id::text, code, customer_id::text, warehouse_id::text, paid_amount::text, status
+       FROM layaways WHERE id = $1::uuid FOR UPDATE`,
+      [id]
+    );
+
+    if (rows.length === 0) {
+      throw Object.assign(new Error("layaway_not_found"), {
+        code: "layaway_not_found",
+        statusCode: 404,
+      });
+    }
+
+    const l = rows[0]!;
+    if (l.status === "completed") {
+      throw Object.assign(
+        new Error("No se puede eliminar un apartado que ya fue redimido en una venta."),
+        {
+          code: "cannot_delete_completed_layaway",
+          statusCode: 400,
+        }
+      );
+    }
+
+    const { rows: payRows } = await client.query<{
+      id: string;
+      warehouse_id: string;
+      payment_method: string;
+      amount: string;
+      status: string;
+      created_at: string;
+    }>(
+      `SELECT
+         id::text,
+         warehouse_id::text,
+         payment_method,
+         amount::text,
+         COALESCE(status, 'active') AS status,
+         created_at::text
+       FROM layaway_payments
+       WHERE layaway_id = $1::uuid
+       FOR UPDATE`,
+      [id]
+    );
+
+    let restoredCreditBalance = 0;
+    let removedPaymentsAmount = 0;
+
+    for (const p of payRows) {
+      const amt = Math.round((Number(p.amount) || 0) * 100) / 100;
+      const isPayActive = p.status === "active" && l.status !== "cancelled";
+      if (!isPayActive || amt <= 0) continue;
+
+      removedPaymentsAmount = Math.round((removedPaymentsAmount + amt) * 100) / 100;
+      const method = p.payment_method.trim().toLowerCase();
+      const whId = p.warehouse_id || l.warehouse_id;
+
+      if (method === "saldo_a_favor") {
+        await creditCustomerWarehouseBalance(client, l.customer_id, whId, amt);
+        restoredCreditBalance = Math.round((restoredCreditBalance + amt) * 100) / 100;
+      } else {
+        const isCash = method === "efectivo";
+        if (isCash) {
+          await client.query(
+            `
+            UPDATE daily_closures
+            SET cash_layaway_payments = GREATEST(0, ROUND((cash_layaway_payments - $1)::numeric, 2)),
+                expected_cash = ROUND((expected_cash - $1)::numeric, 2),
+                cash_difference = ROUND((counted_cash - (expected_cash - $1))::numeric, 2)
+            WHERE warehouse_id = $2::uuid
+              AND status <> 'voided'
+              AND (started_at IS NULL OR started_at < $3::timestamptz)
+              AND COALESCE(closed_at, created_at) >= $3::timestamptz
+            `,
+            [amt, whId, p.created_at]
+          );
+        }
+
+        await client.query(
+          `
+          UPDATE global_closures
+          SET total_layaway_payments = GREATEST(0, ROUND((total_layaway_payments - $1)::numeric, 2)),
+              total_net_cash = CASE
+                WHEN $4::boolean THEN ROUND((total_net_cash - $1)::numeric, 2)
+                ELSE total_net_cash
+              END,
+              cash_to_withdraw = CASE
+                WHEN $4::boolean THEN GREATEST(0, ROUND(((COALESCE(opening_cash, 0) + total_net_cash - $1) - cash_to_keep)::numeric, 2))
+                ELSE cash_to_withdraw
+              END
+          WHERE (warehouse_id = $2::uuid OR warehouse_id IS NULL)
+            AND ($3::timestamptz AT TIME ZONE 'America/Bogota')::date BETWEEN date_from AND date_to
+            AND COALESCE(closed_at, created_at) >= $3::timestamptz
+          `,
+          [amt, whId, p.created_at, isCash]
+        );
+      }
+    }
+
+    await client.query(`DELETE FROM layaways WHERE id = $1::uuid`, [id]);
+
+    await client.query("COMMIT");
+
+    return {
+      deletedId: id,
+      code: l.code,
+      restoredCreditBalance,
+      removedPaymentsAmount,
     };
   } catch (err) {
     await client.query("ROLLBACK");

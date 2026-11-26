@@ -1070,7 +1070,7 @@ export function CustomersPage() {
                     {formatMoney(currentDisplayBilled)}
                   </div>
                   <div className="fin-kpi-sub">
-                    {filteredInvoices.length} facturas generadas
+                    {filteredInvoices.filter((inv) => inv.status !== "cancelled").length} facturas vigentes
                   </div>
                 </div>
 

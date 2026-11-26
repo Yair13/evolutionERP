@@ -26,6 +26,7 @@ import {
   addLayawayPayment,
   cancelLayaway,
   createLayaway,
+  deleteLayaway,
   getActiveLayawayForCustomer,
   getLayawayDetail,
   listLayaways,
@@ -1240,6 +1241,55 @@ export function createFinanceRouter(): Router {
       }
       if (err?.statusCode || err?.code === "PENDING_RECEIPTS" || err?.code === "CLOSURE_ALREADY_EXISTS") {
         res.status(err.statusCode || 400).json({ error: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  /**
+   * Eliminar definitivamente un apartado (Exclusivo Super Administrador).
+   */
+  r.delete("/layaways/:id", requireAuth, async (req, res, next) => {
+    const pool = getPool();
+    if (!pool) {
+      res.status(503).json({ error: "database_not_configured" });
+      return;
+    }
+
+    const auth = req.auth!;
+    const isSuperAdmin = auth.roles.includes("super_admin") || auth.warehouseIds === null;
+
+    if (!isSuperAdmin) {
+      res.status(403).json({
+        error: "super_admin_required",
+        message: "Solo el Super Administrador tiene autorización para eliminar apartados.",
+      });
+      return;
+    }
+
+    const id = String(req.params.id);
+    if (!isUuid(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+
+    try {
+      const result = await deleteLayaway(pool, id);
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      if (err?.code === "layaway_not_found") {
+        res.status(404).json({
+          error: "layaway_not_found",
+          message: "El apartado no existe o ya fue eliminado.",
+        });
+        return;
+      }
+      if (err?.code === "cannot_delete_completed_layaway") {
+        res.status(400).json({
+          error: "cannot_delete_completed_layaway",
+          message: err.message || "No se puede eliminar un apartado que ya fue redimido en una venta.",
+        });
         return;
       }
       next(err);

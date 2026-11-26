@@ -665,6 +665,16 @@ export async function cancelLayaway(
   }>(`/finance/layaways/${id}/cancel`, data || {}, token);
 }
 
+export async function deleteLayaway(token: string, id: string) {
+  return apiDelete<{
+    ok: boolean;
+    deletedId: string;
+    code: string;
+    restoredCreditBalance: number;
+    removedPaymentsAmount: number;
+  }>(`/finance/layaways/${id}`, token);
+}
+
 export async function fetchCustomerActiveLayaway(token: string, customerId: string) {
   return apiGet<{ item: LayawaySummaryItem | null }>(
     `/finance/customers/${customerId}/active-layaway`,
