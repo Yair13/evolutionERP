@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   createCashOutflow,
   uploadClosureReceiptFiles,
@@ -46,12 +46,6 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
     isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || "")
   );
-
-  useEffect(() => {
-    if (open) {
-      setSelectedWarehouseId(isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || ""));
-    }
-  }, [open, isAllWarehouses, warehouseId, warehouses]);
   const [concept, setConcept] = useState("");
   const [beneficiaryName, setBeneficiaryName] = useState("");
   const [amountStr, setAmountStr] = useState("");
@@ -76,9 +70,13 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
   const currentWh = warehouses.find((w) => w.id === selectedWarehouseId);
   const isMainWarehouse = isAllWarehouses;
 
+  const prevOpenRef = useRef(false);
+
   useEffect(() => {
-    if (open) {
-      setSelectedWarehouseId(warehouseId || (warehouses[0]?.id ?? ""));
+    if (open && !prevOpenRef.current) {
+      setSelectedWarehouseId(
+        isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || (warehouses[0]?.id ?? ""))
+      );
       setConcept("");
       setBeneficiaryName("");
       setAmountStr("");
@@ -92,8 +90,13 @@ export function CreateEgressVoucherModal({ open, onClose, onSuccess }: Props) {
       setPayablesList([]);
       setSelectedPayableId("");
       setError(null);
+    } else if (open && !selectedWarehouseId) {
+      setSelectedWarehouseId(
+        isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || (warehouses[0]?.id ?? ""))
+      );
     }
-  }, [open, warehouseId, warehouses]);
+    prevOpenRef.current = open;
+  }, [open, isAllWarehouses, warehouseId, warehouses, selectedWarehouseId]);
 
   // Búsqueda de proveedores
   useEffect(() => {

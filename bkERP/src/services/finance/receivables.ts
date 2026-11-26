@@ -3575,6 +3575,7 @@ export async function getPaymentsCashSummary(
          ) AS p
     WHERE d.status = 'completed'
       AND d.doc_type IN ('exit', 'sale', 'warranty')
+      AND LOWER(TRIM(p->>'method')) <> 'apartado'
       ${whDocFilter}
       ${dateDocFilter}
     GROUP BY LOWER(TRIM(p->>'method'))

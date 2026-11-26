@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   addDirectCustomerPayment,
   checkCustomerHasInitial,
@@ -76,9 +76,10 @@ export function AddDirectPaymentModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Inicializar estado al abrir el modal
+  // Inicializar estado únicamente cuando el modal pasa de cerrado a abierto
+  const prevOpenRef = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !prevOpenRef.current) {
       const wh = !isAllWarehouses
         ? (warehouseId || "")
         : (defaultWarehouseId || warehouseId || (warehouses[0]?.id || ""));
@@ -103,8 +104,14 @@ export function AddDirectPaymentModal({
         setCustomerSearch("");
         setCustomerList([]);
       }
+    } else if (open && !selectedWarehouseId) {
+      const wh = !isAllWarehouses
+        ? (warehouseId || "")
+        : (defaultWarehouseId || warehouseId || (warehouses[0]?.id || ""));
+      if (wh) setSelectedWarehouseId(wh);
     }
-  }, [open, isAllWarehouses, warehouseId, defaultWarehouseId, defaultCustomerId, defaultCustomerName, warehouses]);
+    prevOpenRef.current = open;
+  }, [open, isAllWarehouses, warehouseId, defaultWarehouseId, defaultCustomerId, defaultCustomerName, warehouses, selectedWarehouseId]);
 
   // Búsqueda en vivo de clientes
   useEffect(() => {

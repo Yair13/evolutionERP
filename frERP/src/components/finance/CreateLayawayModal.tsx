@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createLayaway, uploadClosureReceiptFiles, type LayawayDetail } from "../../api/finance.js";
 import { fetchCustomers, createCustomer, type Customer } from "../../api/inventory.js";
 import { useAuth } from "../../context/AuthContext.js";
@@ -46,12 +46,6 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
     isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || "")
   );
-
-  useEffect(() => {
-    if (open) {
-      setSelectedWarehouseId(isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || ""));
-    }
-  }, [open, isAllWarehouses, warehouseId, warehouses]);
   const [targetAmountStr, setTargetAmountStr] = useState<string>("");
   const [initialPaymentStr, setInitialPaymentStr] = useState<string>("");
   const [paymentMethod, setPaymentMethod] = useState<string>("efectivo");
@@ -77,9 +71,13 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
   const [createdLayaway, setCreatedLayaway] = useState<LayawayDetail | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);
 
+  const prevOpenRef = useRef(false);
+
   useEffect(() => {
-    if (open) {
-      setSelectedWarehouseId(warehouseId || (warehouses[0]?.id ?? ""));
+    if (open && !prevOpenRef.current) {
+      setSelectedWarehouseId(
+        isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || (warehouses[0]?.id ?? ""))
+      );
       setTargetAmountStr("");
       setInitialPaymentStr("");
       setPaymentMethod("efectivo");
@@ -93,8 +91,13 @@ export function CreateLayawayModal({ open, onClose, onSuccess }: Props) {
       setError(null);
       setCreatedLayaway(null);
       setShowPrintModal(false);
+    } else if (open && !selectedWarehouseId) {
+      setSelectedWarehouseId(
+        isAllWarehouses ? (warehouses[0]?.id || "") : (warehouseId || (warehouses[0]?.id ?? ""))
+      );
     }
-  }, [open, warehouseId, warehouses]);
+    prevOpenRef.current = open;
+  }, [open, isAllWarehouses, warehouseId, warehouses, selectedWarehouseId]);
 
   // Búsqueda de clientes
   useEffect(() => {

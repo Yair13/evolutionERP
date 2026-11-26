@@ -197,7 +197,7 @@ async function getReceiptAuditItemsBetween(
       AND d.warehouse_id = $1::uuid
       ${fromTime ? `AND COALESCE(d.completed_at, d.created_at) > '${fromTime}'::timestamptz` : ""}
       AND COALESCE(d.completed_at, d.created_at) <= '${toTime}'::timestamptz
-      AND LOWER(TRIM(p->>'method')) NOT IN ('efectivo', 'saldo_a_favor')
+      AND LOWER(TRIM(p->>'method')) NOT IN ('efectivo', 'saldo_a_favor', 'apartado')
     `,
     [warehouseId]
   );
@@ -238,7 +238,7 @@ async function getReceiptAuditItemsBetween(
       ${fromTime ? `AND rp.created_at > '${fromTime}'::timestamptz` : ""}
       AND rp.created_at <= '${toTime}'::timestamptz
       AND (rp.is_initial IS NOT TRUE)
-      AND LOWER(TRIM(rp.payment_method)) NOT IN ('efectivo', 'saldo_a_favor')
+      AND LOWER(TRIM(rp.payment_method)) NOT IN ('efectivo', 'saldo_a_favor', 'apartado')
     `,
     [warehouseId]
   );
@@ -833,7 +833,7 @@ async function calculateMovementsBetween(
       AND d.warehouse_id = $1::uuid
       ${fromTime ? `AND COALESCE(d.completed_at, d.created_at) > '${fromTime}'::timestamptz` : ""}
       AND COALESCE(d.completed_at, d.created_at) <= '${toTime}'::timestamptz
-      AND LOWER(TRIM(p->>'method')) NOT IN ('efectivo', 'saldo_a_favor')
+      AND LOWER(TRIM(p->>'method')) NOT IN ('efectivo', 'saldo_a_favor', 'apartado')
     GROUP BY LOWER(TRIM(p->>'method'))
     `,
     [warehouseId]
@@ -850,7 +850,7 @@ async function calculateMovementsBetween(
       ${fromTime ? `AND created_at > '${fromTime}'::timestamptz` : ""}
       AND created_at <= '${toTime}'::timestamptz
       AND (is_initial IS NOT TRUE)
-      AND LOWER(TRIM(payment_method)) NOT IN ('efectivo', 'saldo_a_favor')
+      AND LOWER(TRIM(payment_method)) NOT IN ('efectivo', 'saldo_a_favor', 'apartado')
     GROUP BY LOWER(TRIM(payment_method))
     `,
     [warehouseId]

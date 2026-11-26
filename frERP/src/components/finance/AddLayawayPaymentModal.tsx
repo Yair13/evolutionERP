@@ -130,6 +130,7 @@ export function AddLayawayPaymentModal({
     setReceiptResult(null);
     setAmountStr("");
     setNotes("");
+    setReceiptFiles([]);
     setError(null);
     onClose();
   }

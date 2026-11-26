@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   createCashIncome,
   uploadClosureReceiptFiles,
@@ -86,9 +86,10 @@ export function CreateCashIncomeModal({ open, onClose, onSuccess }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Inicializar sede seleccionada
+  // Inicializar sede seleccionada únicamente cuando el modal pasa de cerrado a abierto
+  const prevOpenRef = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !prevOpenRef.current) {
       if (!isAllWarehouses && warehouseId) {
         setSelectedWarehouseId(warehouseId);
       } else if (warehouses.length > 0 && !selectedWarehouseId) {
@@ -105,8 +106,15 @@ export function CreateCashIncomeModal({ open, onClose, onSuccess }: Props) {
       setNotes("");
       setReceiptFiles([]);
       setError(null);
+    } else if (open && !selectedWarehouseId) {
+      if (!isAllWarehouses && warehouseId) {
+        setSelectedWarehouseId(warehouseId);
+      } else if (warehouses.length > 0) {
+        setSelectedWarehouseId(warehouseId || warehouses[0]?.id || "");
+      }
     }
-  }, [open, isAllWarehouses, warehouseId, warehouses]);
+    prevOpenRef.current = open;
+  }, [open, isAllWarehouses, warehouseId, warehouses, selectedWarehouseId]);
 
   if (!open) return null;
 

@@ -2264,7 +2264,7 @@ export async function cancelDocument(
         if (!method || amt <= 0) continue;
 
         const isCash = method === "efectivo";
-        const isCreditBal = method === "saldo_a_favor";
+        const isInternalCreditOrLayaway = method === "saldo_a_favor" || method === "apartado";
 
         if (isCash) {
           await client.query(
@@ -2280,7 +2280,7 @@ export async function cancelDocument(
             `,
             [amt, doc.warehouse_id, docEffectiveAt]
           );
-        } else if (!isCreditBal) {
+        } else if (!isInternalCreditOrLayaway) {
           const { rows: dcBankRows } = await client.query<{ id: string }>(
             `
             SELECT id::text

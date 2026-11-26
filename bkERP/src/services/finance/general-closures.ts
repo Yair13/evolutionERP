@@ -310,6 +310,7 @@ export async function getGeneralClosureData(
          ) AS p
     WHERE d.status = 'completed'
       AND d.doc_type IN ('exit', 'sale', 'warranty')
+      AND LOWER(TRIM(p->>'method')) NOT IN ('saldo_a_favor', 'apartado')
       ${whFilterDoc}
       ${timeFilterDoc}
     GROUP BY LOWER(TRIM(p->>'method'))
@@ -326,6 +327,7 @@ export async function getGeneralClosureData(
       COUNT(*)::int AS count
     FROM receivable_payments rp
     WHERE (rp.is_initial IS NOT TRUE)
+      AND LOWER(TRIM(rp.payment_method)) NOT IN ('saldo_a_favor', 'apartado')
       ${whFilterRp}
       ${timeFilterRp}
     GROUP BY LOWER(TRIM(rp.payment_method))

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createCashTransfer, uploadClosureReceiptFiles, type CashTransferItem } from "../../api/finance.js";
 import { useAuth } from "../../context/AuthContext.js";
 import { useWarehouse } from "../../context/WarehouseContext.js";
@@ -36,8 +36,10 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
   // REGLA GENERAL: desde sedes físicas solo efectivo; traslado bancario solo desde la Sede Administrativa
   const isMainOrigin = isAllWarehouses;
 
+  const prevOpenRef = useRef(false);
+
   useEffect(() => {
-    if (open) {
+    if (open && !prevOpenRef.current) {
       const orig = warehouseId || (warehouses[0]?.id ?? "");
       setOriginWarehouseId(orig);
       const firstDest = warehouses.find((w) => w.is_active && w.id !== orig)?.id ?? "";
@@ -49,8 +51,16 @@ export function CreateCashTransferModal({ open, onClose, onSuccess }: Props) {
       setPaymentMethod("efectivo");
       setReceiptFiles([]);
       setError(null);
+    } else if (open && !originWarehouseId) {
+      const orig = warehouseId || (warehouses[0]?.id ?? "");
+      if (orig) {
+        setOriginWarehouseId(orig);
+        const firstDest = warehouses.find((w) => w.is_active && w.id !== orig)?.id ?? "";
+        if (!destinationWarehouseId) setDestinationWarehouseId(firstDest);
+      }
     }
-  }, [open, warehouseId, warehouses]);
+    prevOpenRef.current = open;
+  }, [open, warehouseId, warehouses, originWarehouseId, destinationWarehouseId]);
 
   // Close on Escape key
   useEffect(() => {

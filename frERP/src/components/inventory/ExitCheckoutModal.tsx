@@ -1586,7 +1586,11 @@ export function ExitCheckoutModal({
             ) : null}
 
             {payments.some(
-              (p) => Number(p.amount) > 0 && p.method !== "efectivo" && p.method !== "saldo_a_favor"
+              (p) =>
+                Number(p.amount) > 0 &&
+                p.method !== "efectivo" &&
+                p.method !== "saldo_a_favor" &&
+                p.method !== "apartado"
             ) && (
               <ReceiptPhotosUploader
                 files={receiptFiles}
