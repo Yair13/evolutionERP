@@ -178,18 +178,33 @@ function parseMovementKind(kind: MovementKind): {
   if (kind === "entry") {
     return { docType: "entry", exitKind: null, isEntry: true };
   }
+  if (kind === "production_order") {
+    return { docType: "entry", exitKind: null, isEntry: true, isProductionOrder: true };
+  }
   const effectiveExitKind: ExitKind = kind === "exit" ? "sale" : (kind as ExitKind);
   return { docType: docTypeForExitKind(effectiveExitKind), exitKind: effectiveExitKind, isEntry: false };
 }
 
 function mergeEditLines(lines: ConfirmLineInput[]): ConfirmLineInput[] {
-  const map = new Map<string, number>();
+  const map = new Map<string, { quantity: number; unitSalePrice?: number }>();
   for (const line of lines) {
     const qty = Number(line.quantity);
     if (!line.productId || !Number.isFinite(qty) || qty <= 0) continue;
-    map.set(line.productId, (map.get(line.productId) ?? 0) + qty);
+    const prev = map.get(line.productId);
+    const unitSalePrice =
+      line.unitSalePrice != null && Number.isFinite(Number(line.unitSalePrice))
+        ? Number(line.unitSalePrice)
+        : prev?.unitSalePrice;
+    map.set(line.productId, {
+      quantity: (prev?.quantity ?? 0) + qty,
+      ...(unitSalePrice !== undefined ? { unitSalePrice } : {}),
+    });
   }
-  return [...map.entries()].map(([productId, quantity]) => ({ productId, quantity }));
+  return [...map.entries()].map(([productId, data]) => ({
+    productId,
+    quantity: data.quantity,
+    ...(data.unitSalePrice !== undefined ? { unitSalePrice: data.unitSalePrice } : {}),
+  }));
 }
 
 function warehouseScopeSql(
@@ -1700,16 +1715,16 @@ export async function editCompletedDocument(
       ]
     );
 
-    if (exitKind === "credit") {
-      const { rows: sumRows } = await client.query<{ subtotal: string }>(
-        `SELECT COALESCE(SUM(quantity * COALESCE(unit_sale_price, 0)), 0)::text AS subtotal
-         FROM inventory_document_lines WHERE document_id = $1::uuid`,
-        [documentId]
-      );
-      const subtotal = Number(sumRows[0]?.subtotal ?? 0);
-      const discount = Number(doc.discount_amount ?? 0);
-      const newTotal = Math.max(0, subtotal - discount);
+    const { rows: sumRows } = await client.query<{ subtotal: string }>(
+      `SELECT COALESCE(SUM(quantity * COALESCE(unit_sale_price, 0)), 0)::text AS subtotal
+       FROM inventory_document_lines WHERE document_id = $1::uuid`,
+      [documentId]
+    );
+    const subtotal = Number(sumRows[0]?.subtotal ?? 0);
+    const discount = Number(doc.discount_amount ?? 0);
+    const newTotal = Math.max(0, subtotal - discount);
 
+    if (exitKind === "credit") {
       const { rows: existingAr } = await client.query<{ id: string }>(
         `SELECT id::text FROM accounts_receivable WHERE document_id = $1::uuid LIMIT 1`,
         [documentId]
@@ -1720,13 +1735,16 @@ export async function editCompletedDocument(
           `UPDATE accounts_receivable
            SET customer_id = COALESCE($3::uuid, customer_id),
                total_amount = $2,
-               balance_amount = GREATEST(0, $2 - COALESCE(initial_payment, 0) - COALESCE(paid_amount, 0)),
+               balance_amount = GREATEST(0, $2 - GREATEST(COALESCE(initial_payment, 0), COALESCE(paid_amount, 0))),
                status = CASE
-                 WHEN GREATEST(0, $2 - COALESCE(initial_payment, 0) - COALESCE(paid_amount, 0)) <= 0 THEN 'paid'
+                 WHEN GREATEST(0, $2 - GREATEST(COALESCE(initial_payment, 0), COALESCE(paid_amount, 0))) <= 0 THEN 'paid'
                  WHEN COALESCE(paid_amount, 0) > 0 OR COALESCE(initial_payment, 0) > 0 THEN 'partial'
                  ELSE 'open'
                END,
-               updated_at = now()
+               paid_at = CASE
+                 WHEN GREATEST(0, $2 - GREATEST(COALESCE(initial_payment, 0), COALESCE(paid_amount, 0))) <= 0 THEN COALESCE(paid_at, now())
+                 ELSE NULL
+               END
            WHERE document_id = $1::uuid`,
           [documentId, newTotal, customerId]
         );
@@ -1778,12 +1796,23 @@ export async function editCompletedDocument(
       await client.query(
         `UPDATE accounts_receivable
          SET status = 'cancelled',
-             balance_amount = 0,
-             updated_at = now()
+             balance_amount = 0
          WHERE document_id = $1::uuid
            AND status <> 'cancelled'`,
         [documentId]
       );
+
+      if (!isEntry) {
+        await client.query(
+          `UPDATE inventory_documents
+           SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+             'subtotalAmount', $2::numeric,
+             'totalAmount', $3::numeric
+           )
+           WHERE id = $1::uuid`,
+          [documentId, subtotal, newTotal]
+        );
+      }
     }
 
     await client.query(
